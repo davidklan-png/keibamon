@@ -1,0 +1,23 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+
+# Local data lake and model artifacts
+data/raw/**
+data/normalized/**
+data/features/**
+data/marts/**
+data/mlruns/**
+!data/raw/.gitkeep
+!data/normalized/.gitkeep
+!data/features/.gitkeep
+!data/marts/.gitkeep
+!data/mlruns/.gitkeep
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+

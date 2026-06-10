@@ -1,0 +1,6 @@
+race_id,horse_id,horse_number,horse_name,jockey_id,trainer_id,gate,carried_weight_kg,available_at
+r-2026-0503-hanshin-11,h-001,1,Aurora Step,j-10,t-20,3,57.0,2026-05-01T12:00:00+09:00
+r-2026-0503-hanshin-11,h-002,2,Beacon Light,j-11,t-21,7,55.0,2026-05-01T12:00:00+09:00
+r-2026-0607-tokyo-10,h-001,1,Aurora Step,j-10,t-20,1,58.0,2026-06-05T12:00:00+09:00
+r-2026-0607-tokyo-10,h-002,2,Beacon Light,j-11,t-21,4,56.0,2026-06-05T12:00:00+09:00
+r-2026-0607-tokyo-10,h-003,3,Comet Tail,j-12,t-22,5,54.0,2026-06-05T12:00:00+09:00
