@@ -1,0 +1,9 @@
+{
+  // Static-assets Worker that serves the keibamon.com splash page.
+  // Name must match the existing Worker (keibamon.<subdomain>.workers.dev).
+  "name": "keibamon",
+  "compatibility_date": "2025-06-01",
+  "assets": {
+    "directory": "./splash"
+  }
+}
