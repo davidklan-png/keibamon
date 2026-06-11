@@ -9,3 +9,6 @@ api:
 ui:
 	cd frontend && npm run dev
 
+
+jravan-import:
+	python tools/jravan/import_delta.py --from /Volumes/KEIBA/keibamon-xfer
