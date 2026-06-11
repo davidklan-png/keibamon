@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Keibamon 競馬モン — local-first horse-racing data & ML</title>
+<meta name="description" content="Keibamon: a local-first data and ML platform for Japanese horse racing (JRA/NAR) — point-in-time features, walk-forward backtesting, and honest, published validation. Built in public.">
+<meta property="og:title" content="Keibamon 競馬モン">
+<meta property="og:description" content="Local-first horse-racing data & ML platform for JRA/NAR. Built in public.">
+<meta property="og:type" content="website">
+<style>
+  :root{
+    --bg:#0c1411; --panel:#10201a; --line:#1f3a2e; --ink:#e9f1ec;
+    --muted:#9fb3a8; --turf:#39c07a; --gold:#e0b341; --rail:#2a4a3a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:radial-gradient(1200px 600px at 50% -10%,#13261d 0,var(--bg) 60%);
+    color:var(--ink); font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+  }
+  .wrap{max-width:880px; margin:0 auto; padding:clamp(28px,6vw,72px) 22px 56px}
+  .eyebrow{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.18em; text-transform:uppercase; color:var(--turf)}
+  h1{font-size:clamp(40px,9vw,76px); line-height:.98; margin:.35em 0 .1em; letter-spacing:-.02em}
+  h1 .ja{color:var(--gold); font-weight:700}
+  .lede{font-size:clamp(17px,2.6vw,21px); color:var(--muted); max-width:60ch; margin:.4em 0 0}
+  .status{display:inline-flex; align-items:center; gap:.5em; margin-top:22px; padding:.4em .8em;
+    border:1px solid var(--line); border-radius:999px; background:var(--panel); font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; color:var(--muted)}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--turf);box-shadow:0 0 0 4px rgba(57,192,122,.18)}
+  h2{font:600 12px/1 ui-monospace,monospace; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); margin:54px 0 18px}
+  .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px}
+  .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px 18px 20px}
+  .card .k{font:600 11px/1 ui-monospace,monospace; letter-spacing:.12em; color:var(--gold)}
+  .card h3{margin:.6em 0 .3em; font-size:18px}
+  .card p{margin:0; color:var(--muted); font-size:14.5px}
+  .links{display:flex; flex-wrap:wrap; gap:12px; margin-top:22px}
+  .btn{display:inline-flex; align-items:center; gap:.55em; text-decoration:none; font-weight:600;
+    padding:.7em 1.1em; border-radius:12px; border:1px solid var(--line); color:var(--ink); background:var(--panel); transition:transform .15s,border-color .15s}
+  .btn:hover{transform:translateY(-2px); border-color:var(--turf)}
+  .btn--turf{background:var(--turf); color:#062014; border-color:transparent}
+  .note{margin-top:40px; padding:16px 18px; border-left:3px solid var(--rail); color:var(--muted); font-size:14px; background:linear-gradient(90deg,rgba(57,192,122,.05),transparent)}
+  footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; display:flex; flex-wrap:wrap; gap:6px 18px; justify-content:space-between}
+  a{color:var(--turf)}
+  svg.shoe{vertical-align:-2px}
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <p class="eyebrow">build in public · 個人開発</p>
+    <h1>Keibamon <span class="ja">競馬モン</span></h1>
+    <p class="lede">A local-first data &amp; machine-learning platform for Japanese horse racing (JRA / NAR) — built to turn open racing data into honest, testable insight.</p>
+    <span class="status"><span class="dot"></span>ALPHA · ANALYZER UI IN PROGRESS</span>
+
+    <h2>// Objectives</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">DATA PLATFORM</div>
+        <h3>Medallion data lake</h3>
+        <p>JRA-VAN fundamentals + netkeiba odds dynamics, normalized into a replayable bronze→silver→gold lake.</p>
+      </div>
+      <div class="card">
+        <div class="k">INTEGRITY</div>
+        <h3>Point-in-time features</h3>
+        <p>Every feature respects what was knowable at race time — no leakage, validated with walk-forward backtesting.</p>
+      </div>
+      <div class="card">
+        <div class="k">MODELING</div>
+        <h3>AI-assisted analysis</h3>
+        <p>Within-race standardized indices and ML models that surface notable horses, with predictor scoring.</p>
+      </div>
+      <div class="card">
+        <div class="k">HONESTY</div>
+        <h3>Published validation</h3>
+        <p>Accuracy and recovery measured and shown openly. Curated results published here; raw data stays local.</p>
+      </div>
+    </div>
+
+    <h2>// Links</h2>
+    <div class="links">
+      <a class="btn btn--turf" href="https://github.com/davidklan-png/keibamon" target="_blank" rel="noreferrer">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
+        GitHub — keibamon repo
+      </a>
+      <a class="btn" href="https://kinokoholic.com" target="_blank" rel="noreferrer">き kinokoholic.com — portfolio</a>
+    </div>
+
+    <p class="note">Keibamon is one of the build-in-public projects under <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>. The platform runs locally; only curated, derived results are published to this site.</p>
+
+    <footer>
+      <span>© 2026 David Klan · built in public</span>
+      <span>JRA / NAR · データ分析 &amp; ML</span>
+    </footer>
+  </main>
+</body>
+</html>
