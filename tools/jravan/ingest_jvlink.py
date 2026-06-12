@@ -77,18 +77,32 @@ def open_jvlink():
     return jv
 
 
-def pull_spec(jv, spec: str, fromtime: str, option: int):
-    """Pull one dataspec; returns (records, new watermark).
+def _sha256_file(path: Path) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
 
-    Corrupt-cache recovery (JRA-VAN FAQ): -402/-403 -> JVFiledelete the file,
-    then RESTART from JVOpen (a mid-session re-read returns -503 "file not
-    found"). Up to 4 JVOpen attempts per spec.
+
+def pull_spec(jv, spec: str, fromtime: str, option: int,
+              snapshot_id: str, ingested_at: str):
+    """Pull one dataspec, STREAMING records straight to the bronze file.
+    Returns (manifest_info | None, new_watermark).
+
+    Records are written as they are read: a 32-bit process accumulating a
+    full-history spec in RAM exhausts its ~2 GB address space and dies
+    hours into a setup pull. Streaming keeps memory flat.
+
+    Corrupt-cache recovery (JRA-VAN FAQ): -402/-403 -> JVFiledelete the
+    file, then RESTART from JVOpen (mid-session re-read returns -503).
+    Partial .part output is discarded on restart. Up to 4 attempts.
     """
     for attempt in range(1, 5):
         rc, readcount, dlcount, lastfile = jv.JVOpen(spec, fromtime, option, 0, 0, "")
         if rc == -1:                        # no matching data for this spec/window
             print(f"{spec}: no data (JVOpen rc=-1) - skipped")
-            return [], fromtime
+            return None, fromtime
         if rc != 0:
             raise RuntimeError(f"JVOpen({spec}) failed rc={rc}")
         while dlcount > 0:                  # wait for JV-Link's async download
@@ -100,58 +114,57 @@ def pull_spec(jv, spec: str, fromtime: str, option: int):
                 print()
                 break
             time.sleep(2)
-        records = []
+        file_ts = lastfile or fromtime
+        snap_dir = BRONZE / snapshot_id
+        snap_dir.mkdir(parents=True, exist_ok=True)
+        part = snap_dir / f"{spec}.ndjson.gz.part"
+        n = 0
         redo = False
-        while True:
-            ret = jv.JVRead("", 110000, "")   # v4.9: (rc, buff, size, filename)
-            rc, buff, filename = ret[0], ret[1], ret[-1]
-            if rc == 0:
-                break                       # EOF: all files consumed
-            if rc == -1:
-                continue                    # file boundary
-            if rc in (-402, -403, -503):    # corrupt or missing cached file
-                if rc in (-402, -403):
-                    jv.JVFiledelete(filename)
-                print(f"{spec}: rc={rc} on {filename or '?'} - restart from JVOpen "
-                      f"(attempt {attempt}/4)")
-                redo = True
-                break
-            if rc < -1:
-                raise RuntimeError(f"JVRead error {rc}")
-            # Nao's speed trick: jv.JVSkip() here if `filename` is one we already hold.
-            records.append((buff[:2], buff, filename))  # buff already str via BSTR
+        with gzip.open(part, "wt", encoding="utf-8") as fh:
+            while True:
+                ret = jv.JVRead("", 110000, "")   # v4.9: (rc, buff, size, filename)
+                rc, buff, filename = ret[0], ret[1], ret[-1]
+                if rc == 0:
+                    break                   # EOF: all files consumed
+                if rc == -1:
+                    continue                # file boundary
+                if rc in (-402, -403, -503):
+                    if rc in (-402, -403):
+                        jv.JVFiledelete(filename)
+                    print(f"{spec}: rc={rc} on {filename or '?'} - restart from JVOpen "
+                          f"(attempt {attempt}/4)")
+                    redo = True
+                    break
+                if rc < -1:
+                    raise RuntimeError(f"JVRead error {rc}")
+                content_hash = hashlib.sha256(buff.encode("utf-8")).hexdigest()
+                fh.write(json.dumps({
+                    "source_name": SOURCE_NAME,
+                    "source_record_id": f"{buff[:2]}:{content_hash[:16]}",
+                    "raw_uri": filename,
+                    "content_hash": content_hash,
+                    "ingested_at": ingested_at,
+                    "published_time": file_ts,   # JV file make-time; refine in silver
+                    "available_at": file_ts,
+                    "record_id": buff[:2],
+                    "spec": spec,
+                    "raw": buff,                 # already str via BSTR (ACP=932 enforced)
+                }, ensure_ascii=False) + "\n")
+                n += 1
+                if n % 100000 == 0:
+                    print(f"{spec}: {n} records...")
         jv.JVClose()
-        if not redo:
-            return records, (lastfile or fromtime)
+        if redo:
+            part.unlink(missing_ok=True)    # discard partial output, reopen
+            continue
+        if n == 0:
+            part.unlink(missing_ok=True)
+            return None, file_ts
+        out = snap_dir / f"{spec}.ndjson.gz"
+        part.replace(out)
+        return {"file": out.name, "spec": spec, "rows": n,
+                "sha256": _sha256_file(out), "watermark_to": file_ts}, file_ts
     raise RuntimeError(f"{spec}: corrupt cache persists after 4 JVOpen attempts")
-
-
-def write_snapshot(spec: str, records, file_ts: str, snapshot_id: str, ingested_at: str) -> dict:
-    """Write one immutable gzip-NDJSON of raw records + the 7 bronze metadata fields."""
-    snap_dir = BRONZE / snapshot_id
-    snap_dir.mkdir(parents=True, exist_ok=True)
-    out = snap_dir / f"{spec}.ndjson.gz"
-    n = 0
-    with gzip.open(out, "wt", encoding="utf-8") as fh:
-        for record_id, raw_text, src_file in records:
-            content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
-            row = {
-                "source_name": SOURCE_NAME,
-                "source_record_id": f"{record_id}:{content_hash[:16]}",
-                "raw_uri": src_file,
-                "content_hash": content_hash,
-                "ingested_at": ingested_at,
-                "published_time": file_ts,     # JV file make-time; record-level refine in silver
-                "available_at": file_ts,
-                "record_id": record_id,
-                "spec": spec,
-                "raw": raw_text,
-            }
-            fh.write(json.dumps(row, ensure_ascii=False) + "\n")
-            n += 1
-    sha = hashlib.sha256(out.read_bytes()).hexdigest()
-    return {"file": out.name, "spec": spec, "rows": n, "sha256": sha,
-            "watermark_to": file_ts}
 
 
 def run(mode: str) -> None:
@@ -166,9 +179,8 @@ def run(mode: str) -> None:
     for spec in specs:
         wm_from = "00000000000000" if mode == "setup" else \
             state["watermarks"].get(spec, "00000000000000")
-        records, wm_to = pull_spec(jv, spec, wm_from, option)
-        if records:
-            info = write_snapshot(spec, records, wm_to, snapshot_id, ingested_at)
+        info, wm_to = pull_spec(jv, spec, wm_from, option, snapshot_id, ingested_at)
+        if info:
             files.append(info)
             print(f"{spec}: {info['rows']} raw records -> raw/jravan/{snapshot_id}/{info['file']}")
         state["watermarks"][spec] = wm_to
