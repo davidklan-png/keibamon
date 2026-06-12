@@ -53,7 +53,23 @@ def save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def assert_japanese_acp() -> None:
+    """JV-Link converts Shift-JIS to Unicode via the Windows ANSI codepage.
+    If ACP != 932 every Japanese byte is silently destroyed (observed as
+    U+FFFD in bronze). Refuse to ingest rather than corrupt the lake."""
+    import ctypes
+    acp = ctypes.windll.kernel32.GetACP()
+    if acp != 932:
+        sys.exit(
+            f"FATAL: Windows ANSI codepage is {acp}, need 932 (Japanese).\n"
+            "Set: Settings > Time & Language > Language & Region > Administrative\n"
+            "language settings > Change system locale > Japanese (Japan),\n"
+            "uncheck 'Beta: Use Unicode UTF-8', then reboot."
+        )
+
+
 def open_jvlink():
+    assert_japanese_acp()
     jv = win32com.client.Dispatch("JVDTLab.JVLink")
     rc = jv.JVInit(SID)
     if rc != 0:
