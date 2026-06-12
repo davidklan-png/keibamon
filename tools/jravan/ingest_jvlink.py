@@ -25,6 +25,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 from pathlib import Path
 
 import win32com.client  # pywin32 (Windows only)
@@ -61,25 +62,52 @@ def open_jvlink():
 
 
 def pull_spec(jv, spec: str, fromtime: str, option: int):
-    """Yield (record_id, raw_text, src_file) and return new watermark."""
-    rc, readcount, dlcount, lastfile = jv.JVOpen(spec, fromtime, option)
-    if rc != 0:
-        raise RuntimeError(f"JVOpen({spec}) failed rc={rc}")
-    records = []
-    while True:
-        size, buff, filename = jv.JVRead(b"", 110000, "")
-        if size == 0:
-            break                       # EOF: all files consumed
-        if size == -1:
-            continue                    # file boundary
-        if size < 0:
-            raise RuntimeError(f"JVRead error {size}")
-        raw = bytes(buff)[:size]
-        # Nao's speed trick: jv.JVSkip() here if `filename` is one we already hold.
-        text = raw.decode(ENCODING, errors="replace")
-        records.append((text[:2], text, filename))
-    jv.JVClose()
-    return records, (lastfile or fromtime)
+    """Pull one dataspec; returns (records, new watermark).
+
+    Corrupt-cache recovery (JRA-VAN FAQ): -402/-403 -> JVFiledelete the file,
+    then RESTART from JVOpen (a mid-session re-read returns -503 "file not
+    found"). Up to 4 JVOpen attempts per spec.
+    """
+    for attempt in range(1, 5):
+        rc, readcount, dlcount, lastfile = jv.JVOpen(spec, fromtime, option, 0, 0, "")
+        if rc == -1:                        # no matching data for this spec/window
+            print(f"{spec}: no data (JVOpen rc=-1) - skipped")
+            return [], fromtime
+        if rc != 0:
+            raise RuntimeError(f"JVOpen({spec}) failed rc={rc}")
+        while dlcount > 0:                  # wait for JV-Link's async download
+            st = jv.JVStatus()
+            if st < 0:
+                raise RuntimeError(f"JVStatus error {st} during {spec} download")
+            print(f"\r{spec}: downloading {st}/{dlcount}", end="")
+            if st >= dlcount:
+                print()
+                break
+            time.sleep(2)
+        records = []
+        redo = False
+        while True:
+            ret = jv.JVRead("", 110000, "")   # v4.9: (rc, buff, size, filename)
+            rc, buff, filename = ret[0], ret[1], ret[-1]
+            if rc == 0:
+                break                       # EOF: all files consumed
+            if rc == -1:
+                continue                    # file boundary
+            if rc in (-402, -403, -503):    # corrupt or missing cached file
+                if rc in (-402, -403):
+                    jv.JVFiledelete(filename)
+                print(f"{spec}: rc={rc} on {filename or '?'} - restart from JVOpen "
+                      f"(attempt {attempt}/4)")
+                redo = True
+                break
+            if rc < -1:
+                raise RuntimeError(f"JVRead error {rc}")
+            # Nao's speed trick: jv.JVSkip() here if `filename` is one we already hold.
+            records.append((buff[:2], buff, filename))  # buff already str via BSTR
+        jv.JVClose()
+        if not redo:
+            return records, (lastfile or fromtime)
+    raise RuntimeError(f"{spec}: corrupt cache persists after 4 JVOpen attempts")
 
 
 def write_snapshot(spec: str, records, file_ts: str, snapshot_id: str, ingested_at: str) -> dict:
@@ -128,6 +156,7 @@ def run(mode: str) -> None:
             files.append(info)
             print(f"{spec}: {info['rows']} raw records -> raw/jravan/{snapshot_id}/{info['file']}")
         state["watermarks"][spec] = wm_to
+        save_state(state)               # persist per spec: a later crash must not lose this watermark
 
     if files:
         manifest = {"snapshot_id": snapshot_id, "source_name": SOURCE_NAME,
