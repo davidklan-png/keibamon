@@ -276,6 +276,9 @@ def test_build_silver_round_trips(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     assert races[0]["going_wetness"] == 3 and races[0]["going"] == "soft"
     # partition columns are present and correctly typed (venue keeps leading zero)
     assert races[0]["year"] == 1986 and races[0]["venue"] == "06"
+    # available_at is EVENT-time (post/race), not the bulk-download time -> PIT works
+    assert races[0]["available_at"] == races[0]["scheduled_post_time"]
+    assert races[0]["available_at"].year == 1986
 
     entries = read_dataset(lake.silver_dataset("jravan_race_entries"))
     assert all(e["race_id"] == races[0]["race_id"] for e in entries)
@@ -285,3 +288,4 @@ def test_build_silver_round_trips(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     results = read_dataset(lake.silver_dataset("jravan_race_results"))
     winners = [r for r in results if r["finish_position"] == 1]
     assert len(winners) == 1 and winners[0]["finish_time_seconds"] > 0
+    assert all(r["available_at"].year == 1986 for r in results)  # event-time, not 2026

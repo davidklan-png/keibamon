@@ -247,9 +247,18 @@ DATA_TRAPS = {
     "SE.finish_time": "'9999'=DNF/excluded, '0000'=unset -> None",
     "DM_vs_TM": "record IDs are inverted vs intuition: DM=time-type (predicts 走破"
                 "タイム), TM=match-type (predicts 0-100 score). Verified against data.",
+    "available_at_bulk_download": "the bulk historical JV-Link pull stamped bronze "
+        "available_at with the DOWNLOAD time (~2026), not the event time -- so every "
+        "historical row looked unavailable for its own era and PIT feature builds "
+        "yielded ZERO rows. Silver (jravan_silver._event_at) overrides available_at to "
+        "post_time||race_date; ingested_at keeps the download time.",
     "SE.ketto_num=0000000000": "foreign horses w/o JRA pedigree no. get placeholder "
         "'0000000000' -> NOT unique within a race (69 races affected). Join silver on "
         "(race_id, horse_number/umaban), never on horse_id alone.",
+    "going_handling.raw_time": "wet going slows the whole field; going features must use "
+        "field-relative performance, not raw finish_time_seconds, for wet-vs-firm deltas.",
+    "odds_curve.early_price": "pari-mutuel bets settle at the final official payout, not "
+        "the odds visible at decision time; pre-post odds are features/diagnostics only.",
 }
 
 
@@ -291,8 +300,15 @@ class JravanSourceAdapter:
         can stream just the files they need instead of every snapshot.
         """
         for snap in sorted(p for p in self.raw_dir.glob("*") if p.is_dir()):
-            pattern = f"{spec}.*.ndjson.gz" if spec else "*.ndjson.gz"
-            for gz in sorted(snap.glob(pattern)):
+            patterns = (f"{spec}.ndjson.gz", f"{spec}.*.ndjson.gz") if spec else ("*.ndjson.gz",)
+            seen: set[Path] = set()
+            files = []
+            for pattern in patterns:
+                for gz in sorted(snap.glob(pattern)):
+                    if gz not in seen:
+                        seen.add(gz)
+                        files.append(gz)
+            for gz in files:
                 with gzip.open(gz, "rt", encoding="utf-8") as fh:
                     for line in fh:
                         if line.strip():

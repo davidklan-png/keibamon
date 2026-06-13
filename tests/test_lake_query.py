@@ -58,6 +58,17 @@ def test_iter_groups_streams_one_race_at_a_time(lake):
     assert sum(len(v) for _, v in g2) == 5
 
 
+def test_query_passes_through_braces_without_tables(tmp_path):
+    """A SQL string with literal braces (e.g. src()'s hive_types={...}) and NO
+    {table} placeholders must pass through untouched -- not run str.format."""
+    from keibamon_core.lake import write_dataset
+
+    base = tmp_path / "tbl"
+    write_dataset([{"race_id": "r1", "year": 1986, "venue": "06", "v": 1}], base)
+    sql = f"SELECT count(*) AS n FROM {q.src(base)}"   # src() injects hive_types={...}
+    assert q.query(sql).to_pylist()[0]["n"] == 1       # no KeyError on '{year}'
+
+
 def test_src_handles_file_and_glob(tmp_path):
     assert "union_by_name" in q.src(tmp_path / "part-*.parquet")
     assert "union_by_name" not in q.src(tmp_path / "one.parquet")

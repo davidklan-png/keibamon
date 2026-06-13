@@ -72,11 +72,22 @@ def query(sql_template: str, con=None, **tables: Path):
     owned = con is None
     con = con or connect()
     try:
-        sql = sql_template.format(**{k: src(v) for k, v in tables.items()})
+        sql = _expand(sql_template, tables)
         return _to_arrow(con.execute(sql))
     finally:
         if owned:
             con.close()
+
+
+def _expand(sql_template: str, tables: dict) -> str:
+    """Substitute ``{name}`` table placeholders, or pass the SQL through untouched
+    when no tables are given. Skipping ``str.format`` when there is nothing to
+    substitute avoids choking on SQL that legitimately contains braces (e.g. a
+    ``read_parquet(..., hive_types={'year': 'INTEGER'})`` expression or a DuckDB
+    struct/map literal)."""
+    if not tables:
+        return sql_template
+    return sql_template.format(**{k: src(v) for k, v in tables.items()})
 
 
 def _to_arrow(result):
@@ -102,7 +113,7 @@ def iter_groups(
     owned = con is None
     con = con or connect()
     try:
-        sql = sql_template.format(**{k: src(v) for k, v in tables.items()})
+        sql = _expand(sql_template, tables)
         result = con.execute(sql)
 
         current_key = _UNSET = object()

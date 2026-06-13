@@ -24,7 +24,8 @@ from keibamon_core.adapters.jravan import (
     track_code_to_surface,
     weather_label,
 )
-from keibamon_core.lake import write_dataset
+from keibamon_core.ingestion.odds import ODDS_TABLE
+from keibamon_core.lake import read_parquet_if_exists, write_dataset
 from keibamon_core.paths import LakePaths
 
 
@@ -40,6 +41,7 @@ def _write_silver(lake: LakePaths, table: str, rows: list[dict[str, Any]]) -> No
     write_dataset(rows, lake.silver_dataset(table))
 
 SILVER_TABLES = ("jravan_races", "jravan_race_entries", "jravan_race_results")
+JRAVAN_ODDS_TIMESERIES_TABLE = "jravan_odds_timeseries"
 
 # JRA-VAN racecourse (jyo) codes -> name. Subset; extend from the spec code table.
 JYO_CODES: dict[str, str] = {
@@ -72,6 +74,20 @@ def _post_time(p: dict) -> datetime | None:
     # hhmm is JST (UTC+9); store UTC for consistency with the rest of the lake.
     jst = d.replace(hour=int(hhmm[:2]), minute=int(hhmm[2:]))
     return jst - timedelta(hours=9)
+
+
+def _event_at(p: dict) -> datetime:
+    """Event-time availability for point-in-time backtests.
+
+    The bulk historical JV-Link pull stamped bronze ``available_at`` with the
+    DOWNLOAD time (e.g. 2026), so every historical row looks "not yet available"
+    for its own era and the leakage guard skips it -- yielding zero features. But
+    the information existed at race time (JRA-VAN serves it live; we merely
+    downloaded the history in bulk). So availability for PIT = the race's own
+    clock: post time if known, else race date. ``ingested_at`` still records when
+    WE pulled it. See adapters.jravan.DATA_TRAPS['available_at_bulk_download'].
+    """
+    return _post_time(p) or _race_date(p)
 
 
 def _meta_columns(meta: dict) -> dict[str, Any]:
@@ -112,6 +128,7 @@ def _race_record(p: dict) -> dict[str, Any]:
         "going_wetness": going_w,           # surface-relevant ordinal 1(firm)-4(heavy)
         "going": going_label(going_code),   # surface-relevant label
         **_meta_columns(p["_meta"]),
+        "available_at": _event_at(p),        # event-time for PIT (not bulk download)
     }
 
 
@@ -128,6 +145,7 @@ def _entry_record(p: dict) -> dict[str, Any]:
         "carried_weight_kg": p.get("carried_weight_kg"),
         "body_weight_kg": bw if bw and bw not in (0, 999) else None,
         **_meta_columns(p["_meta"]),
+        "available_at": _event_at(p),
     }
 
 
@@ -143,6 +161,7 @@ def _result_record(p: dict) -> dict[str, Any]:
         "popularity": p.get("popularity"),
         "last_3f_seconds": p.get("last_3f"),
         **_meta_columns(p["_meta"]),
+        "available_at": _event_at(p),
     }
 
 
@@ -154,6 +173,22 @@ def _announce_at(year: int, mdhm: str) -> datetime | None:
         return None
     mo, da, hh, mi = int(mdhm[:2]), int(mdhm[2:4]), int(mdhm[4:6]), int(mdhm[6:8])
     return datetime(year, mo, da, hh, mi, tzinfo=timezone.utc) - timedelta(hours=9)
+
+
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _partition_from_race_id(race_id: str) -> tuple[int, str]:
+    """Best-effort partition keys for JRA and fallback poller race ids."""
+    parts = race_id.split("-")
+    if len(parts) >= 4 and parts[0] == "jra":
+        return int(parts[1][:4]), parts[2]
+    if len(parts) >= 3 and parts[0] == "r":
+        return int(parts[1]), parts[3] if len(parts) > 3 else "unknown"
+    return 0, "unknown"
 
 
 def build_jravan_odds(
@@ -194,11 +229,109 @@ def build_jravan_odds(
                     "data_kubun": rec["data_kubun"],     # 1中間..3最終 4確定 5確定(月)
                     "announce_at": announce,
                     **meta,
+                    "available_at": announce or _event_at(rec),
                 })
 
     rows.sort(key=lambda r: (r["race_id"], r["bet_type"], r["data_kubun"], r["combo"]))
     _write_silver(lake, "jravan_win_place_odds", rows)
     return {"jravan_win_place_odds": len(rows)}
+
+
+def build_jravan_odds_timeseries(lake: LakePaths) -> dict[str, int]:
+    """Materialize intraday odds curves from JRA-VAN 0B41/0B42 and netkeiba.
+
+    This table is long and point-in-time: ``available_at`` is the odds event
+    timestamp, not the download time. JRA-VAN time-series records carry that as
+    ``announce_mdhm``; netkeiba rows already store the official source timestamp
+    in ``available_at``.
+    """
+    adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan"))
+    rows: list[dict[str, Any]] = []
+
+    for spec in ("0B41", "0B42"):
+        for row in adapter.iter_raw(spec=spec):
+            if row["record_id"] not in ("O1", "O2"):
+                continue
+            rec = JravanSourceAdapter.parse_odds_record(row)
+            if rec is None:
+                continue
+            announce = _announce_at(rec["year"], rec["announce_mdhm"])
+            if announce is None:
+                continue
+            rid = _race_id(rec)
+            meta = _meta_columns(rec["_meta"])
+            for e in rec["entries"]:
+                pool = e["bet_type"]
+                if pool == "win":
+                    odds, low, high = e.get("odds"), None, None
+                elif pool == "place":
+                    odds, low, high = None, e.get("odds_low"), e.get("odds_high")
+                elif pool in ("bracket_quinella", "quinella"):
+                    odds, low, high = e.get("odds"), None, None
+                else:
+                    continue
+                rows.append(
+                    {
+                        "race_id": rid,
+                        "pool": pool,
+                        "sel": e["combo"],
+                        "announce_at": announce,
+                        "win_odds": odds,
+                        "place_odds_low": low,
+                        "place_odds_high": high,
+                        "popularity": e.get("popularity"),
+                        **meta,
+                        "source_name": "jravan",
+                        "available_at": announce,
+                    }
+                )
+
+    for s in read_parquet_if_exists(lake.silver_table(ODDS_TABLE)):
+        available = _as_utc(s["available_at"])
+        base = {
+            "race_id": s["race_id"],
+            "sel": f"{int(s['horse_number']):02d}",
+            "announce_at": available,
+            "popularity": s.get("popularity"),
+            "available_at": available,
+            "source_name": s.get("source_name", "netkeiba"),
+            "source_record_id": s.get("source_record_id"),
+            "raw_uri": s.get("raw_uri"),
+            "content_hash": s.get("content_hash"),
+            "ingested_at": s.get("ingested_at"),
+            "published_time": s.get("published_time"),
+        }
+        if s.get("win_odds") is not None:
+            rows.append(
+                {
+                    **base,
+                    "pool": "win",
+                    "win_odds": s.get("win_odds"),
+                    "place_odds_low": None,
+                    "place_odds_high": None,
+                }
+            )
+        if s.get("place_odds_low") is not None or s.get("place_odds_high") is not None:
+            rows.append(
+                {
+                    **base,
+                    "pool": "place",
+                    "win_odds": None,
+                    "place_odds_low": s.get("place_odds_low"),
+                    "place_odds_high": s.get("place_odds_high"),
+                }
+            )
+
+    deduped: dict[tuple[str, str, str, datetime], dict[str, Any]] = {}
+    for row in rows:
+        key = (row["race_id"], row["pool"], row["sel"], _as_utc(row["announce_at"]))
+        deduped[key] = row
+    records = sorted(deduped.values(), key=lambda r: (r["race_id"], r["pool"], r["sel"], r["announce_at"]))
+    for r in records:
+        r["year"], r["venue"] = _partition_from_race_id(r["race_id"])
+    lake.ensure()
+    write_dataset(records, lake.silver_dataset(JRAVAN_ODDS_TIMESERIES_TABLE))
+    return {JRAVAN_ODDS_TIMESERIES_TABLE: len(records)}
 
 
 def build_jravan_payouts(lake: LakePaths) -> dict[str, int]:
@@ -224,6 +357,7 @@ def build_jravan_payouts(lake: LakePaths) -> dict[str, int]:
                 "payout_yen": e["payout"],
                 "popularity": e.get("popularity"),
                 **meta,
+                "available_at": _event_at(rec),
             })
     rows.sort(key=lambda r: (r["race_id"], r["pool"], r["combo"]))
     _write_silver(lake, "jravan_payouts", rows)
@@ -262,6 +396,7 @@ def build_jravan_mining(lake: LakePaths) -> dict[str, int]:
                 "data_kubun": rec["data_kubun"],   # 1前日 2当日 3直前 7成績
                 "created_at": created,
                 **meta,
+                "available_at": created or _event_at(rec),
             })
     rows.sort(key=lambda r: (r["race_id"], r["model"], r["horse_number"]))
     _write_silver(lake, "jravan_mining", rows)
@@ -308,6 +443,7 @@ if __name__ == "__main__":  # quick manual run: python -m keibamon_core.ingestio
     lake = LakePaths()
     out = build_jravan_silver(lake)
     out.update(build_jravan_odds(lake))      # O1 win+place by default
+    out.update(build_jravan_odds_timeseries(lake))  # 0B41/0B42 + netkeiba time series
     out.update(build_jravan_payouts(lake))   # HR payouts
     out.update(build_jravan_mining(lake))    # DM time + TM score predictions
     print(json.dumps(out, indent=2))

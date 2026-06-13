@@ -107,12 +107,20 @@ def write_dataset(
         raise RuntimeError("pyarrow is required to write parquet datasets") from exc
 
     base_dir.mkdir(parents=True, exist_ok=True)
+    cols = list(partition_cols)
+    # Sort by partition key so each partition is written contiguously -> only a
+    # handful of files open at once. Without this, hundreds of year/venue
+    # partitions written out of order exhaust the OS file-descriptor limit
+    # ("[Errno 24] Too many open files" on macOS, default ulimit -n 256).
+    # max_open_files is a belt-and-suspenders cap.
+    records = sorted(records, key=lambda r: tuple((r.get(c) is None, r.get(c)) for c in cols))
     table = pa.Table.from_pylist(records)
     pq.write_to_dataset(
         table,
         root_path=str(base_dir),
-        partition_cols=list(partition_cols),
+        partition_cols=cols,
         existing_data_behavior="delete_matching",
+        max_open_files=8,
     )
 
 

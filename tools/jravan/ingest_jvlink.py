@@ -38,8 +38,8 @@ ENCODING = "cp932"                                        # Shift-JIS
 SOURCE_NAME = "jravan"
 
 # CONFIRM exact spec strings against your JV-Data spec PDF.
-SETUP_SPECS = ["RACE", "BLOD", "MING", "SNAP", "SLOP", "WOOD"]
-DELTA_SPECS = ["RACE", "MING", "SNAP"]
+SETUP_SPECS = ["RACE", "BLOD", "MING", "SNAP", "SLOP", "WOOD", "0B41", "0B42"]
+DELTA_SPECS = ["RACE", "MING", "SNAP", "0B41", "0B42"]
 
 
 def load_state() -> dict:
