@@ -46,8 +46,16 @@ class LakePaths:
     def silver_table(self, table_name: str) -> Path:
         return self.normalized / f"{table_name}.parquet"
 
+    def silver_dataset(self, table_name: str) -> Path:
+        """Hive-partitioned silver table root (by year/venue). See lake.write_dataset."""
+        return self.normalized / table_name
+
     def gold_features(self, feature_set: str) -> Path:
         return self.features / f"{feature_set}.parquet"
+
+    def gold_dataset(self, feature_set: str) -> Path:
+        """Hive-partitioned gold feature-set root (by year/venue)."""
+        return self.features / feature_set
 
     def mart(self, mart_name: str) -> Path:
         return self.marts / f"{mart_name}.parquet"

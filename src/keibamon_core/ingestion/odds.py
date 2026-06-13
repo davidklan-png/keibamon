@@ -54,6 +54,40 @@ def append_odds_snapshots(lake: LakePaths, records: list[dict[str, Any]]) -> int
     return added
 
 
+COMBO_ODDS_TABLE = "combo_odds_snapshots"
+
+
+def append_combo_odds_snapshots(lake: LakePaths, records: list[dict[str, Any]]) -> int:
+    """Append exotic (combination) odds snapshots to their silver time series.
+
+    Same accumulate-never-overwrite contract as win/place odds, but the dedupe
+    key is ``(race_id, pool, combo, available_at)`` since exotic rows are keyed
+    by bet combination rather than horse number. Returns newly added row count.
+    """
+    existing = read_parquet_if_exists(lake.silver_table(COMBO_ODDS_TABLE))
+    seen = {_combo_dedupe_key(row) for row in existing}
+
+    added = 0
+    for record in records:
+        key = _combo_dedupe_key(record)
+        if key in seen:
+            continue
+        seen.add(key)
+        existing.append(record)
+        added += 1
+
+    if added:
+        existing.sort(
+            key=lambda r: (r["race_id"], r["pool"], r["combo"], _as_utc(r["available_at"]))
+        )
+        write_parquet(existing, lake.silver_table(COMBO_ODDS_TABLE))
+    return added
+
+
+def _combo_dedupe_key(record: dict[str, Any]) -> tuple[str, str, str, datetime]:
+    return (record["race_id"], record["pool"], record["combo"], _as_utc(record["available_at"]))
+
+
 def load_odds_csv(path: Path) -> list[dict[str, Any]]:
     """Parse an odds.csv file into silver-shaped odds snapshot records.
 

@@ -86,6 +86,58 @@ def read_parquet_if_exists(path: Path) -> list[dict[str, Any]]:
     return read_parquet(path)
 
 
+# --- partitioned datasets -----------------------------------------------------
+# Lake convention: silver/gold tables are Hive-partitioned by (year, venue) where
+# year is the race year (int) and venue is the JV-Data jyo (racecourse) code
+# string -- e.g. <table>/year=1986/venue=06/part-*.parquet. Partition columns are
+# pinned on read (year=int32, venue=string) so codes like "06" keep their leading
+# zero and alphanumeric foreign codes ("A4") stay strings.
+PARTITION_KEYS = ("year", "venue")
+
+
+def write_dataset(
+    records: list[dict[str, Any]], base_dir: Path, partition_cols=PARTITION_KEYS
+) -> None:
+    """Write records as a Hive-partitioned Parquet dataset. Idempotent: re-running
+    replaces the partitions it touches (existing_data_behavior='delete_matching')."""
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("pyarrow is required to write parquet datasets") from exc
+
+    base_dir.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist(records)
+    pq.write_to_dataset(
+        table,
+        root_path=str(base_dir),
+        partition_cols=list(partition_cols),
+        existing_data_behavior="delete_matching",
+    )
+
+
+def _partitioning():
+    import pyarrow as pa
+    import pyarrow.dataset as ds
+    return ds.partitioning(
+        pa.schema([("year", pa.int32()), ("venue", pa.string())]), flavor="hive"
+    )
+
+
+def read_dataset(base_dir: Path) -> list[dict[str, Any]]:
+    """Read a Hive-partitioned dataset back to list[dict], partition columns typed
+    per the lake convention. Empty list if the dataset does not exist. (For large
+    tables prefer keibamon_core.lake_query, which avoids full materialization.)"""
+    try:
+        import pyarrow.dataset as ds
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("pyarrow is required to read parquet datasets") from exc
+    if not Path(base_dir).exists():
+        return []
+    return ds.dataset(str(base_dir), partitioning=_partitioning(),
+                      format="parquet").to_table().to_pylist()
+
+
 def duckdb_relation(path_glob: str):
     """Return a DuckDB relation for a Parquet glob."""
     try:

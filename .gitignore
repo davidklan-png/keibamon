@@ -17,6 +17,11 @@ data/mlruns/**
 !data/marts/.gitkeep
 !data/mlruns/.gitkeep
 
+# JV-Data spec reference (redistribution-restricted — never commit the PDFs).
+# Keep the explanatory README tracked; ignore everything else under reference/.
+reference/**
+!reference/README.md
+
 # Frontend
 frontend/node_modules/
 frontend/dist/

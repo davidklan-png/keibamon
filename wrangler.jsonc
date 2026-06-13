@@ -1,15 +1,25 @@
 {
-  // Static-assets Worker that serves the keibamon.com splash page.
+  // Worker that serves the keibamon.com splash assets PLUS a /api/live route
+  // backed by the keibamon-live D1 database (live race-day dashboard).
   // Name must match the existing Worker (keibamon.<subdomain>.workers.dev).
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "keibamon",
+  "main": "src/worker.js",
   "compatibility_date": "2026-06-11",
   "observability": {
     "enabled": true
   },
   "assets": {
-    "directory": "./splash"
+    "directory": "./splash",
+    "binding": "ASSETS"
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "keibamon-live",
+      "database_id": "7b3cf063-a19a-4a6a-a42a-61d4879b2582"
+    }
+  ],
   "compatibility_flags": [
     "nodejs_compat"
   ]
