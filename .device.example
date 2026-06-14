@@ -1,0 +1,7 @@
+# .device -- machine-local identity (copy to `.device`, which is gitignored).
+# One per checkout. Read by tools/whichdevice.py and by agents before acting.
+# role must be one of: capture-pc | mac-dev | cowork-sandbox
+role = mac-dev
+hostname = my-macbook
+# Optional notes for humans/agents working on this machine:
+# notes = "lake lives here; venv64; runs backup netkeiba feed only"

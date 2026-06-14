@@ -5,6 +5,9 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 
+# Machine-local device identity (one per checkout; see .device.example)
+.device
+
 # Local data lake and model artifacts
 data/raw/**
 data/normalized/**
