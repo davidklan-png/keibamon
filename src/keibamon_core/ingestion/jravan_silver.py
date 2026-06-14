@@ -183,6 +183,11 @@ def _as_utc(value: datetime | str) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _as_utc_opt(value: datetime | str | None) -> datetime | None:
+    """`_as_utc` that passes None through (for nullable provenance fields)."""
+    return None if value is None else _as_utc(value)
+
+
 def _partition_from_race_id(race_id: str) -> tuple[int, str]:
     """Best-effort partition keys for JRA and fallback poller race ids."""
     parts = race_id.split("-")
@@ -303,6 +308,11 @@ def build_jravan_odds_timeseries(lake: LakePaths) -> dict[str, int]:
             available = _as_utc(row["available_at"])
             rid = _race_id(rec)
             meta = _meta_columns(rec["_meta"])
+            # realtime bronze carries ISO-string timestamps; coerce the two that
+            # land in this table so they match the datetime-typed netkeiba rows
+            # (mixed str/datetime in one pyarrow column is a write-time collision).
+            meta["ingested_at"] = _as_utc_opt(meta.get("ingested_at"))
+            meta["published_time"] = _as_utc_opt(meta.get("published_time"))
             for e in rec["entries"]:
                 pool = e["bet_type"]
                 if pool == "win":

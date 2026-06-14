@@ -2,6 +2,7 @@
 import gzip
 import json
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 import duckdb
@@ -11,6 +12,8 @@ sys.path.insert(0, str(ROOT / "tools" / "jravan"))
 from import_realtime import run_import  # noqa: E402
 
 from keibamon_core.ingestion.jravan_silver import build_jravan_odds_timeseries  # noqa: E402
+from keibamon_core.ingestion.odds import ODDS_TABLE  # noqa: E402
+from keibamon_core.lake import write_parquet  # noqa: E402
 from keibamon_core.paths import LakePaths  # noqa: E402
 
 # Real JV-Link realtime 0B30 records (Takarazuka R11, 13:39 JST snapshot).
@@ -68,3 +71,34 @@ def test_realtime_feeds_odds_timeseries_with_correct_odds(tmp_path):
     assert row[0] == "jra-20260614-09-11"
     assert abs(row[1] - 2.4) < 1e-9
     assert str(row[3]).startswith("2026-06-14 04:40:07")  # wrapper PIT time, not announce minute
+
+
+def test_mixed_source_write_no_timestamp_collision(tmp_path):
+    """netkeiba (parquet datetime) + realtime (bronze ISO string) in one table.
+
+    Regression for the ingested_at/published_time type collision: the realtime
+    branch's string timestamps must coerce so pyarrow sees one uniform column.
+    """
+    usb, lake_root = tmp_path / "xfer", tmp_path / "lake"
+    _make_usb(usb)
+    run_import(usb, lake_root)
+    lake = LakePaths(root=lake_root)
+    # a netkeiba odds_snapshots row carrying real datetimes (the other side of the collision)
+    dt = datetime(2026, 6, 14, 4, 40, 0, tzinfo=timezone.utc)
+    write_parquet([{
+        "race_id": "r-2026-0614-hanshin-11", "horse_number": 5, "win_odds": 2.1,
+        "place_odds_low": 1.1, "place_odds_high": 1.3, "popularity": 1, "status": "open",
+        "captured_at": dt, "available_at": dt, "source_name": "netkeiba",
+        "source_record_id": "nk:1", "raw_uri": "netkeiba:x", "content_hash": "nkhash",
+        "ingested_at": dt, "published_time": dt,
+    }], lake.silver_table(ODDS_TABLE))
+
+    res = build_jravan_odds_timeseries(lake)  # must not raise ArrowTypeError
+    assert res["jravan_odds_timeseries"] > 0
+    ds = (lake.silver_dataset("jravan_odds_timeseries") / "**" / "*.parquet").as_posix()
+    srcs = {r[0] for r in duckdb.sql(
+        f"SELECT DISTINCT source_name FROM read_parquet('{ds}', hive_partitioning=true)").fetchall()}
+    assert {"jravan_rt", "netkeiba"} <= srcs
+    types = duckdb.sql(
+        f"SELECT DISTINCT typeof(ingested_at) FROM read_parquet('{ds}', hive_partitioning=true)").fetchall()
+    assert len(types) == 1 and "TIMESTAMP" in types[0][0].upper()  # one uniform type
