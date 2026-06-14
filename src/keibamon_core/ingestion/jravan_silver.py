@@ -175,7 +175,9 @@ def _announce_at(year: int, mdhm: str) -> datetime | None:
     return datetime(year, mo, da, hh, mi, tzinfo=timezone.utc) - timedelta(hours=9)
 
 
-def _as_utc(value: datetime) -> datetime:
+def _as_utc(value: datetime | str) -> datetime:
+    if isinstance(value, str):  # bronze wrappers (e.g. realtime) carry ISO strings
+        value = datetime.fromisoformat(value.replace("Z", "+00:00"))
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -283,6 +285,47 @@ def build_jravan_odds_timeseries(lake: LakePaths) -> dict[str, int]:
                         **meta,
                         "source_name": "jravan",
                         "available_at": announce,
+                    }
+                )
+
+    # JV-Link realtime 0B30 (official live capture). The wrapper carries the true
+    # snapshot time in available_at -- finer and more reliable than the
+    # minute-resolution announce_mdhm -- so it anchors the point-in-time stamp.
+    # Absent on machines with no realtime export (iter_raw yields nothing).
+    rt_adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan_rt"))
+    for spec in ("O1", "O2"):
+        for row in rt_adapter.iter_raw(spec=spec):
+            if row["record_id"] not in ("O1", "O2"):
+                continue
+            rec = JravanSourceAdapter.parse_odds_record(row)
+            if rec is None:
+                continue
+            available = _as_utc(row["available_at"])
+            rid = _race_id(rec)
+            meta = _meta_columns(rec["_meta"])
+            for e in rec["entries"]:
+                pool = e["bet_type"]
+                if pool == "win":
+                    odds, low, high = e.get("odds"), None, None
+                elif pool == "place":
+                    odds, low, high = None, e.get("odds_low"), e.get("odds_high")
+                elif pool in ("bracket_quinella", "quinella"):
+                    odds, low, high = e.get("odds"), None, None
+                else:
+                    continue
+                rows.append(
+                    {
+                        "race_id": rid,
+                        "pool": pool,
+                        "sel": e["combo"],
+                        "announce_at": available,
+                        "win_odds": odds,
+                        "place_odds_low": low,
+                        "place_odds_high": high,
+                        "popularity": e.get("popularity"),
+                        **meta,
+                        "source_name": "jravan_rt",
+                        "available_at": available,
                     }
                 )
 

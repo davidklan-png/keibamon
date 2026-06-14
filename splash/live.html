@@ -76,8 +76,11 @@
   .odds{ font-variant-numeric:tabular-nums; font-weight:700; }
   .drift{ font-variant-numeric:tabular-nums; font-size:12px; }
   .drift.in{ color:#c0392b; } .drift.out{ color:#2563c9; } .drift.flat{ color:#9aa1ad; }
-  .edge{ display:inline-block; font-size:10px; font-weight:800; color:#11783f; background:#e4f7ec; border-radius:5px; padding:1px 5px; }
-  .row-edge{ background:#f5fbf7; }
+  .edge{ display:inline-block; font-size:10px; font-weight:800; border-radius:5px; padding:1px 5px; color:#5b6472; background:#eceef3; }
+  .edge.firming{ color:#b21f1f; background:#fdeaea; }   /* ▼ money in vs field */
+  .edge.draining{ color:#1d4ed8; background:#e8eefc; }  /* ▲ money out vs field */
+  .row-edge{ background:#fafbfc; }
+  .row-edge.firming{ background:#fdf5f5; } .row-edge.draining{ background:#f5f8fe; }
   .cap{ font-size:11.5px; color:#6b7280; padding:9px 14px; border-top:1px solid #f0f1f5; }
   .payt td{ font-size:12.5px; }
   .empty{ color:#8a93a3; font-style:italic; padding:14px; text-align:center; }
@@ -100,7 +103,7 @@
   </header>
   <div id="view"></div>
   <div class="foot">
-    Live odds &amp; drift · model edge vs market · informational only — no betting advice.
+    Live odds · residual drift vs field (▼in / ▲out) · informational only — not betting advice.
   </div>
 </div>
 
@@ -168,13 +171,13 @@ function runnerRows(runners){
     return '<tr><td colspan="6" class="empty">No live odds in this snapshot.</td></tr>';
   const rs=runners.slice().sort((a,b)=>(a.win_odds??1e9)-(b.win_odds??1e9));
   return rs.map(r=>{
-    const edge=r.edge_label?`<span class="edge">${esc(r.edge_label)}</span>`:"";
+    const edge=r.edge_label?`<span class="edge ${esc(r.drift_dir||"")}">${esc(r.edge_label)}</span>`:"";
     const drift=(()=>{ const o=r.win_odds,op=r.win_open;
       if(o==null||op==null||op===0) return '<span class="drift flat">—</span>';
       const p=(o-op)/op*100; if(Math.abs(p)<1) return '<span class="drift flat">±0%</span>';
       return `<span class="drift ${p<0?"in":"out"}">${p<0?"▼":"▲"}${Math.abs(p).toFixed(0)}%</span>`; })();
     const place=(r.place_low!=null)?`${num(r.place_low)}–${num(r.place_high)}`:"—";
-    return `<tr class="${r.edge_label?"row-edge":""}">
+    return `<tr class="${r.edge_label?("row-edge "+esc(r.drift_dir||"")):""}">
       <td class="uma">${esc(r.umaban)}</td><td class="name">${esc(r.name)} ${edge}</td>
       <td class="odds">${num(r.win_odds)}</td><td>${drift}</td>
       <td>${place}</td><td>${r.model_rank!=null?"#"+esc(r.model_rank):"—"}</td></tr>`;

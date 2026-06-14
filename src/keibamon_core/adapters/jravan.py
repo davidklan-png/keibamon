@@ -259,6 +259,10 @@ DATA_TRAPS = {
         "field-relative performance, not raw finish_time_seconds, for wet-vs-firm deltas.",
     "odds_curve.early_price": "pari-mutuel bets settle at the final official payout, not "
         "the odds visible at decision time; pre-post odds are features/diagnostics only.",
+    "settlement.official_payout": "dead-heats, refunds, and special payout cases must be "
+        "settled from HR/jravan_payouts; do not reconstruct payout yen from decimal odds.",
+    "market_baseline.beta": "favorite-longshot beta calibration must be fit walk-forward "
+        "from prior settled races only; global beta fitted with future winners leaks.",
 }
 
 

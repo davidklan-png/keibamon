@@ -58,6 +58,20 @@ class MarketBaselinePredictor:
         return scores
 
 
+class CalibratedMarketBaselinePredictor:
+    """Model 0: de-vigged and favorite-longshot calibrated market probability."""
+
+    name = "calibrated_market_baseline"
+
+    def score_race(
+        self, race: dict[str, Any], feature_rows: list[dict[str, Any]]
+    ) -> dict[str, float]:
+        return {
+            row["horse_id"]: float(row.get("calibrated_market_prob") or 0.0)
+            for row in feature_rows
+        }
+
+
 class UniformPredictor:
     """Null baseline: no signal at all.
 
