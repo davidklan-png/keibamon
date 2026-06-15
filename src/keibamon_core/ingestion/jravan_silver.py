@@ -456,6 +456,108 @@ def build_jravan_mining(lake: LakePaths) -> dict[str, int]:
     return {"jravan_mining": len(rows)}
 
 
+JRAVAN_TRAINING_TABLE = "jravan_training"
+
+# Unified timing columns across HC (slope) and WC (woodchip). HC has sections
+# 4F→1F; WC has 10F→1F. Upper distances (5F+) are NULL for HC and commonly NULL
+# for WC (horses run partial distances). ``last_1f`` is the money field.
+_TRAINING_TIMING_COLS = [
+    "f10_total", "f10_lap", "f9_total", "f9_lap", "f8_total", "f8_lap",
+    "f7_total", "f7_lap", "f6_total", "f6_lap", "f5_total", "f5_lap",
+    "f4_total", "f4_lap", "f3_total", "f3_lap", "f2_total", "f2_lap",
+    "last_1f",
+]
+_HC_LAP_RENAME = {"lap_800_600": "f4_lap", "lap_600_400": "f3_lap", "lap_400_200": "f2_lap"}
+_TRAINING_CENTER_CODES = {"0": "Miho", "1": "Ritto"}
+
+
+def _train_event_at(p: dict) -> datetime | None:
+    """available_at = train_date + train_time (JST) → UTC.
+
+    NEVER make_date — the bulk-delivery make_date is ~2026 even for a 2003 work
+    (same PIT trap as ``available_at_bulk_download``). Training availability for
+    PIT = the work's own clock. See DATA_TRAPS['training.available_at'].
+    """
+    date_str = p.get("train_date") or ""
+    hhmm = (p.get("train_time") or "").strip()
+    if len(date_str) != 10:
+        return None
+    y, mo, da = int(date_str[:4]), int(date_str[5:7]), int(date_str[8:10])
+    hh = mi = 0
+    if len(hhmm) == 4 and hhmm.isdigit() and hhmm != "0000":
+        hh, mi = int(hhmm[:2]), int(hhmm[2:])
+    # Build JST wall-clock, shift to UTC (same idiom as _post_time).
+    jst = datetime(y, mo, da, hh, mi, tzinfo=timezone.utc)
+    return jst - timedelta(hours=9)
+
+
+def _training_row(p: dict, rec_id: str, meta: dict) -> dict[str, Any]:
+    center_code = (p.get("center") or "").strip()
+    row: dict[str, Any] = {
+        "horse_id": p.get("horse_id"),
+        "training_date": p.get("train_date"),
+        "training_time": (p.get("train_time") or "").strip() or None,
+        "center": _TRAINING_CENTER_CODES.get(center_code),
+        "center_code": center_code or None,
+        "course_type": "slope" if rec_id == "HC" else "woodchip",
+        "course_code": None,
+        "around": None,
+        **{c: None for c in _TRAINING_TIMING_COLS},
+        **_meta_columns(meta),
+    }
+    if rec_id == "HC":
+        row["f4_total"] = p.get("f4_total")
+        row["f3_total"] = p.get("f3_total")
+        row["f2_total"] = p.get("f2_total")
+        row["f4_lap"] = p.get("lap_800_600")
+        row["f3_lap"] = p.get("lap_600_400")
+        row["f2_lap"] = p.get("lap_400_200")
+    else:  # WC
+        row["course_code"] = p.get("course_code")
+        row["around"] = p.get("around")
+        for prefix in ("f10", "f9", "f8", "f7", "f6", "f5", "f4", "f3", "f2"):
+            row[f"{prefix}_total"] = p.get(f"{prefix}_total")
+            row[f"{prefix}_lap"] = p.get(f"{prefix}_lap")
+    row["last_1f"] = p.get("last_1f")
+    row["available_at"] = _train_event_at(p)  # PIT: train clock, not download
+    date_str = p.get("train_date") or ""
+    row["year"] = int(date_str[:4]) if len(date_str) >= 4 and date_str[:4].isdigit() else 0
+    row["venue"] = center_code or "unknown"  # partition key (= center code; "0"/"1")
+    return row
+
+
+def build_jravan_training(lake: LakePaths) -> dict[str, int]:
+    """Parse HC (坂路/slope) and WC (ウッドチップ/woodchip) training records into
+    the ``jravan_training`` silver table.
+
+    Point-in-time correct: ``available_at`` = train_date + train_time (JST→UTC),
+    never the bulk-delivery make_date. Partitioned by (year, venue) where venue
+    = training center code ("0"=Miho, "1"=Ritto) — reuses the lake's standard
+    hive layout so read_dataset/lake_query work unchanged.
+    """
+    adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan"))
+    rows: list[dict[str, Any]] = []
+
+    for spec, record_id in (("SLOP", "HC"), ("WOOD", "WC")):
+        for raw_row in adapter.iter_raw(spec=spec):
+            if raw_row["record_id"] != record_id:
+                continue
+            parsed = JravanSourceAdapter.parse_record(raw_row)
+            if parsed is None:
+                continue
+            if (parsed.get("data_kubun") or "").strip() != "1":
+                continue  # skip deletes
+            if (parsed.get("horse_id") or "").strip() in ("", "0000000000"):
+                continue  # DATA_TRAPS: pre-IC-tag placeholder
+            rows.append(_training_row(parsed, record_id, parsed["_meta"]))
+
+    _epoch = datetime.min.replace(tzinfo=timezone.utc)
+    rows.sort(key=lambda r: (r["available_at"] or _epoch, r["horse_id"] or ""))
+    lake.ensure()
+    write_dataset(rows, lake.silver_dataset(JRAVAN_TRAINING_TABLE))
+    return {JRAVAN_TRAINING_TABLE: len(rows)}
+
+
 def build_jravan_silver(lake: LakePaths) -> dict[str, int]:
     """Normalize the JRA-VAN bronze lake into silver Parquet tables."""
     adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan"))
@@ -499,4 +601,5 @@ if __name__ == "__main__":  # quick manual run: python -m keibamon_core.ingestio
     out.update(build_jravan_odds_timeseries(lake))  # 0B41/0B42 + netkeiba time series
     out.update(build_jravan_payouts(lake))   # HR payouts
     out.update(build_jravan_mining(lake))    # DM time + TM score predictions
+    out.update(build_jravan_training(lake))  # HC slope + WC woodchip training times
     print(json.dumps(out, indent=2))

@@ -15,6 +15,7 @@ if TYPE_CHECKING:
         MARKET_BASELINE_FEATURE_SET,
         build_market_probs,
     )
+    from keibamon_core.ingestion.training_features import TRAINING_FEATURE_SET, build_training_features
 
 __all__ = [
     "BronzeSnapshot",
@@ -22,6 +23,7 @@ __all__ = [
     "GOLD_FEATURE_SET",
     "GOING_FEATURE_SET",
     "MARKET_BASELINE_FEATURE_SET",
+    "TRAINING_FEATURE_SET",
     "ImportReport",
     "MART_RACES",
     "MART_RACE_ENTRIES",
@@ -30,6 +32,7 @@ __all__ = [
     "build_curve_features",
     "build_going_features",
     "build_market_probs",
+    "build_training_features",
     "build_silver_tables",
     "import_csv_source",
     "latest_csv_snapshot_dir",
@@ -51,4 +54,8 @@ def __getattr__(name: str):
         from keibamon_core.ingestion import market_baseline
 
         return getattr(market_baseline, name)
+    if name in {"TRAINING_FEATURE_SET", "build_training_features"}:
+        from keibamon_core.ingestion import training_features
+
+        return getattr(training_features, name)
     raise AttributeError(name)

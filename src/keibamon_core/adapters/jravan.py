@@ -87,6 +87,18 @@ def _to_furlong(s: str) -> float | None:
     return int(s) / 10
 
 
+def _to_tenths_sec(s: str) -> float | None:
+    """HC/WC training times in units of 0.1 s -> seconds. '0556' -> 55.6; '160' ->
+    16.0. Length-agnostic (HC has 3- and 4-byte fields, WC likewise). All-zeros
+    '0000'/'000' = not measured -> None; all-nines '9999'/'999' = over cap -> None."""
+    s = s.strip()
+    if not s.isdigit() or int(s) == 0:
+        return None
+    if set(s) == {"9"}:
+        return None
+    return int(s) / 10
+
+
 def _tenths_kg(s: str) -> float | None:
     """Carried weight '負担重量' in units of 0.1 kg -> kg. '550' -> 55.0."""
     v = _to_int(s)
@@ -105,6 +117,7 @@ CONVERTERS: dict[str, Callable[[str], object]] = {
     "date8": _to_date8,
     "time_mmssf": _to_time_mmssf,
     "furlong": _to_furlong,
+    "tenths_sec": _to_tenths_sec,
     "tenths_kg": _tenths_kg,
     "odds_x10": _odds_x10,
 }
@@ -224,6 +237,61 @@ RECORD_LAYOUTS: dict[str, list[Field]] = {
     ],
     # "HR" payout, "O1".."O6" odds pools, "UM" horse master, "TM" TimeMining,
     # "DM" DataMining, "KS" jockey, "CH" trainer -- add from the PDF as needed.
+
+    # HC = 坂路調教 (slope training), 58 data bytes. Horse-keyed (NOT race-keyed)
+    # so does NOT use _RACE_ID_HEADER. Offsets [confirmed] vs real bronze + spec
+    # JV-Data4901 §22. Times are tenths of a second; 0000/000 = not measured.
+    "HC": [
+        Field("record_spec", 0, 2, "str"),       # "HC"
+        Field("data_kubun", 2, 1, "str"),        # 1=data, 0=delete
+        Field("make_date", 3, 8, "date8"),       # delivery date (NOT the event)
+        Field("center", 11, 1, "str"),           # トレセン 0=美浦, 1=栗東
+        Field("train_date", 12, 8, "date8"),     # 調教年月日 -- the event date
+        Field("train_time", 20, 4, "str"),       # 時刻 HHMM JST
+        Field("horse_id", 24, 10, "str"),        # 血統登録番号
+        Field("f4_total", 34, 4, "tenths_sec"),  # 800→0m total
+        Field("lap_800_600", 38, 3, "tenths_sec"),
+        Field("f3_total", 41, 4, "tenths_sec"),  # 600→0m total
+        Field("lap_600_400", 45, 3, "tenths_sec"),
+        Field("f2_total", 48, 4, "tenths_sec"),  # 400→0m total
+        Field("lap_400_200", 52, 3, "tenths_sec"),
+        Field("last_1f", 55, 3, "tenths_sec"),   # 200→0m -- the money field
+    ],
+    # WC = ウッドチップ調教 (woodchip training), 103 data bytes. Same header as HC
+    # (rec/kubun/make_date/center/train_date/train_time/horse_id), then course
+    # metadata + 9 cumulative total/lap pairs (10F→2F) + last-1F. Offsets
+    # [confirmed] vs real bronze + spec JV-Data4901 §32.
+    "WC": [
+        Field("record_spec", 0, 2, "str"),
+        Field("data_kubun", 2, 1, "str"),
+        Field("make_date", 3, 8, "date8"),
+        Field("center", 11, 1, "str"),           # 0=美浦, 1=栗東
+        Field("train_date", 12, 8, "date8"),
+        Field("train_time", 20, 4, "str"),
+        Field("horse_id", 24, 10, "str"),
+        Field("course_code", 34, 1, "int"),      # 0=A…4=E
+        Field("around", 35, 1, "int"),           # 0=right, 1=left
+        Field("reserve", 36, 1, "str"),          # 予備
+        Field("f10_total", 37, 4, "tenths_sec"),  # ÷10s; 0000 = not run (partial)
+        Field("f10_lap", 41, 3, "tenths_sec"),
+        Field("f9_total", 44, 4, "tenths_sec"),
+        Field("f9_lap", 48, 3, "tenths_sec"),
+        Field("f8_total", 51, 4, "tenths_sec"),
+        Field("f8_lap", 55, 3, "tenths_sec"),
+        Field("f7_total", 58, 4, "tenths_sec"),
+        Field("f7_lap", 62, 3, "tenths_sec"),
+        Field("f6_total", 65, 4, "tenths_sec"),
+        Field("f6_lap", 69, 3, "tenths_sec"),
+        Field("f5_total", 72, 4, "tenths_sec"),
+        Field("f5_lap", 76, 3, "tenths_sec"),
+        Field("f4_total", 79, 4, "tenths_sec"),
+        Field("f4_lap", 83, 3, "tenths_sec"),
+        Field("f3_total", 86, 4, "tenths_sec"),
+        Field("f3_lap", 90, 3, "tenths_sec"),
+        Field("f2_total", 93, 4, "tenths_sec"),
+        Field("f2_lap", 97, 3, "tenths_sec"),
+        Field("last_1f", 100, 3, "tenths_sec"),  # 200→0m -- the money field
+    ],
 }
 
 # Canonical record byte-lengths of the DATA portion (CRLF terminator excluded;
@@ -234,6 +302,8 @@ RECORD_LAYOUTS: dict[str, list[Field]] = {
 RECORD_LENGTHS: dict[str, int] = {
     "RA": 1270,  # spec lists 1272 incl. CRLF
     "SE": 553,   # spec lists 555 incl. CRLF
+    "HC": 58,    # spec lists 60 incl. CRLF (坂路調教)
+    "WC": 103,   # spec lists 105 incl. CRLF (ウッドチップ調教)
 }
 
 # Known JV-Data traps -> enforce as Pandera checks downstream (silver -> gold).
@@ -263,6 +333,14 @@ DATA_TRAPS = {
         "settled from HR/jravan_payouts; do not reconstruct payout yen from decimal odds.",
     "market_baseline.beta": "favorite-longshot beta calibration must be fit walk-forward "
         "from prior settled races only; global beta fitted with future winners leaks.",
+    "training.available_at": "HC/WC make_date is the BULK-DELIVERY date (2026 even for a "
+        "2003 work) -- same PIT trap as available_at_bulk_download. Silver must override "
+        "available_at to train_date+train_time (JST→UTC), never make_date.",
+    "training.horse_id=0000000000": "pre-IC-tag-era slope records carry placeholder "
+        "'0000000000' -> drop in silver (no horse to join features to).",
+    "training.times_null": "0000/000 = not measured, 9999/999 = over cap -> NULL (not 0.0). "
+        "Woodchip horses run partial distances so most upper-distance fields are legitimately "
+        "0000 -- that's expected, not a parse error.",
 }
 
 
