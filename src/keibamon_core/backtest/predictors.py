@@ -59,7 +59,15 @@ class MarketBaselinePredictor:
 
 
 class CalibratedMarketBaselinePredictor:
-    """Model 0: de-vigged and favorite-longshot calibrated market probability."""
+    """Model 0 (retained variant): de-vigged + favorite-longshot calibrated.
+
+    The walk-forward beta is inert on the JRA win pool -- both the aggregate
+    ``calibration_quality`` and the longshot-tail slice show no OOS benefit over
+    plain de-vigged (see market_baseline.calibration_by_prob_bin). It is kept
+    because the exotic-pricing frontier (trifecta/trio) compounds probabilities
+    across the field, where a residual bias correction may yet matter; the
+    active win-pool baseline is :class:`DeviggedMarketBaselinePredictor`.
+    """
 
     name = "calibrated_market_baseline"
 
@@ -68,6 +76,27 @@ class CalibratedMarketBaselinePredictor:
     ) -> dict[str, float]:
         return {
             row["horse_id"]: float(row.get("calibrated_market_prob") or 0.0)
+            for row in feature_rows
+        }
+
+
+class DeviggedMarketBaselinePredictor:
+    """Model 0 (active): plain within-race de-vigged win probability.
+
+    Scores by ``devigged_market_prob``. This is the simpler, equally-good
+    baseline now that the favorite-longshot beta has been measured inert on the
+    win pool (aggregate and tail). The calibrated predictor and the beta
+    machinery are retained for the exotic frontier, so this is the default only
+    for win/place ROI.
+    """
+
+    name = "devigged_market_baseline"
+
+    def score_race(
+        self, race: dict[str, Any], feature_rows: list[dict[str, Any]]
+    ) -> dict[str, float]:
+        return {
+            row["horse_id"]: float(row.get("devigged_market_prob") or 0.0)
             for row in feature_rows
         }
 

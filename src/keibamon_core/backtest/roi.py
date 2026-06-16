@@ -9,7 +9,7 @@ from keibamon_core.backtest.engine import rank_horses
 from keibamon_core.backtest.predictors import Predictor
 from keibamon_core.features.point_in_time import LeakageError
 from keibamon_core.ingestion.market_baseline import MARKET_BASELINE_FEATURE_SET
-from keibamon_core.ingestion.settlement import Bet, settle
+from keibamon_core.ingestion.settlement import Bet, settle_many
 from keibamon_core.paths import LakePaths
 
 Staking = Literal["flat", "fractional_kelly"]
@@ -37,14 +37,18 @@ def run_roi_backtest(
     kelly_fraction: float = 0.25,
     capacity_fraction: float = 0.0,
 ) -> RoiBacktestReport:
-    """Backtest top-pick win/place ROI using final official payouts."""
+    """Backtest top-pick win/place ROI using final official payouts.
+
+    Selections are made from the gold feature set; settlement is the one-shot
+    batch path (:func:`settle_many`) so we open a single DuckDB connection for
+    the whole backtest rather than one per race. Settlement is final official
+    payouts only -- never odds seen at decision time (DATA_TRAPS).
+    """
     feature_path = lake.gold_dataset(feature_set)
     if not feature_path.exists():
         return _empty_report()
 
-    returns: list[float] = []
-    stakes: list[float] = []
-    hits = 0
+    picks: list[tuple[float, str, str, float]] = []  # (stake, race_id, selection, win_odds_or_None)
 
     for race_id, rows in lake_query.iter_groups(
         f"SELECT * FROM {lake_query.src(feature_path)} ORDER BY race_id, horse_number",
@@ -63,21 +67,25 @@ def run_roi_backtest(
         stake = _stake_for(top, stake_yen, staking, kelly_fraction)
         if stake <= 0:
             continue
-        result = settle(
-            lake,
-            Bet(
-                race_id=str(race_id),
-                pool=pool,  # type: ignore[arg-type]
-                selection=str(top["horse_number"]),
-                stake_yen=round(stake),
-            ),
-        )
+        picks.append((stake, str(race_id), str(top["horse_number"]), float(top.get("win_odds") or 0.0)))
+
+    if not picks:
+        return _empty_report()
+
+    bets = [
+        Bet(race_id=rid, pool=pool, selection=selection, stake_yen=round(stake))  # type: ignore[arg-type]
+        for stake, rid, selection, _ in picks
+    ]
+    settlements = settle_many(lake, bets)
+
+    stakes: list[float] = []
+    returns: list[float] = []
+    hits = 0
+    for (stake, _rid, _sel, _odds), result in zip(picks, settlements, strict=True):
         stakes.append(stake)
         returns.append(float(result.returned_yen))
         hits += 1 if result.payout_yen > 0 else 0
 
-    if not stakes:
-        return _empty_report()
     total_stake = sum(stakes)
     total_return = sum(returns)
     roi = total_return / total_stake - 1.0

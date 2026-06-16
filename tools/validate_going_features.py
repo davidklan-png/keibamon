@@ -89,6 +89,11 @@ def validate(rows: list[dict]) -> ValidationResult:
     threshold = test["going_market_disagreement"].quantile(0.75)
     bucket = test[test["going_market_disagreement"] >= threshold]
     stakes = len(bucket)
+    # TODO(low priority, dead null result): reconstructing returns from
+    # winner * win_odds uses the pre-post odds snapshot, not the official
+    # payout -- settle_many(lake, bets) against jravan_payouts is the honest
+    # path (see validate_market_baseline._roi_by_slice_report). Going features
+    # already measured inert, so not urgent.
     returns = (
         bucket["winner"].astype(float)
         * bucket["win_odds"].fillna(0.0).astype(float)
@@ -126,6 +131,10 @@ def _race_log_loss(df, prob_col: str) -> float:
 
 
 def _load_rows(lake: LakePaths) -> list[dict]:
+    # Join results on (race_id, horse_id) AND horse_number when both are present.
+    # horse_id alone is non-unique for the '0000000000' placeholder
+    # (DATA_TRAPS['SE.ketty_num=0000000000']); joining only on horse_id can
+    # cross-match two placeholder horses and bleed the wrong finish_position.
     sql = f"""
     SELECT
         gf.race_id,
@@ -146,6 +155,7 @@ def _load_rows(lake: LakePaths) -> list[dict]:
     JOIN {lake_query.src(lake.silver_dataset("jravan_race_results"))} rr
       ON rr.race_id = gf.race_id
      AND rr.horse_id = gf.horse_id
+     AND (rr.horse_number IS NULL OR rr.horse_number = gf.horse_number)
     JOIN {lake_query.src(lake.silver_dataset("jravan_races"))} ra
       ON ra.race_id = gf.race_id
     WHERE gf.going_wetness >= 3

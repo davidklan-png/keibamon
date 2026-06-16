@@ -10,6 +10,7 @@ from keibamon_core.backtest.engine import (
 from keibamon_core.backtest.predictors import (
     CalibratedMarketBaselinePredictor,
     CareerWinRatePredictor,
+    DeviggedMarketBaselinePredictor,
     MarketBaselinePredictor,
     Predictor,
     UniformPredictor,
@@ -20,6 +21,7 @@ __all__ = [
     "BacktestReport",
     "CalibratedMarketBaselinePredictor",
     "CareerWinRatePredictor",
+    "DeviggedMarketBaselinePredictor",
     "MART_BACKTEST_PREDICTIONS",
     "MART_BACKTEST_RUNS",
     "MarketBaselinePredictor",

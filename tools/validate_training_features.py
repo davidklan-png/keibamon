@@ -185,6 +185,11 @@ def _evaluate_subset(test: pd.DataFrame, mask: np.ndarray, threshold: float) -> 
     bucket = sub[sub["disagreement"] >= threshold].copy()
     stakes = len(bucket)
     if stakes > 0:
+        # TODO(low priority, dead null result): reconstructing returns from
+        # winner * win_odds uses the pre-post odds snapshot, not the official
+        # payout -- settle_many(lake, bets) against jravan_payouts is the
+        # honest path (see validate_market_baseline._roi_by_slice_report).
+        # Training features already measured inert, so not urgent.
         returns = (bucket["winner"].astype(float) * bucket["win_odds"].fillna(0.0)).sum()
         roi = (returns - stakes) / stakes
         hit_rate = float(bucket["winner"].mean())
@@ -322,6 +327,7 @@ def _load_rows(lake: LakePaths) -> list[dict]:
     JOIN {lake_query.src(results)} rr
       ON rr.race_id = tf.race_id
      AND rr.horse_id = tf.horse_id
+     AND (rr.horse_number IS NULL OR rr.horse_number = tf.horse_number)
     JOIN {lake_query.src(races)} ra
       ON ra.race_id = tf.race_id
     WHERE rr.finish_position IS NOT NULL
