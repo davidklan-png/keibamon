@@ -151,9 +151,13 @@ def _entry_record(p: dict) -> dict[str, Any]:
 
 def _result_record(p: dict) -> dict[str, Any]:
     pos = p.get("finish_position")
+    # horse_number (umaban) is carried alongside horse_id so downstream joins
+    # can use (race_id, horse_number) -- the only unique key when horse_id is
+    # the '0000000000' placeholder (DATA_TRAPS['SE.ketto_num=0000000000']).
     return {
         "race_id": _race_id(p),
         "horse_id": p.get("ketto_num"),
+        "horse_number": p.get("umaban"),
         "finish_position": pos if pos else None,  # 0 = no official placing
         "finish_time_seconds": p.get("finish_time"),
         "margin": (p.get("margin_code") or "").strip() or None,
@@ -580,7 +584,7 @@ def build_jravan_silver(lake: LakePaths) -> dict[str, int]:
 
     race_rows = sorted(races.values(), key=lambda r: (r["race_date"], r["race_id"]))
     entries.sort(key=lambda r: (r["race_id"], r["horse_number"] or 0))
-    results.sort(key=lambda r: (r["race_id"], r["horse_id"] or ""))
+    results.sort(key=lambda r: (r["race_id"], r["horse_number"] or 0, r["horse_id"] or ""))
 
     _write_silver(lake, "jravan_races", race_rows)
     _write_silver(lake, "jravan_race_entries", entries)

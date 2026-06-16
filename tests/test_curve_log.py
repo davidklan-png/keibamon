@@ -6,6 +6,7 @@ from keibamon_core.ingestion.curve_log import (
     crosswalk_race_id,
     devig,
     settle_curve_records,
+    snapshot_rows_from_timeseries,
     summarize,
 )
 
@@ -20,6 +21,44 @@ def _snap(rid, hn, win, mins):
 def test_crosswalk_feed_id_to_canonical():
     assert crosswalk_race_id("r-2026-0614-hanshin-11") == "jra-20260614-09-11"
     assert crosswalk_race_id("r-2026-0614-tokyo-01") == "jra-20260614-05-01"
+
+
+def test_crosswalk_is_idempotent_on_canonical_ids():
+    # official jravan_rt ids are already canonical and must pass through
+    assert crosswalk_race_id("jra-20260614-09-11") == "jra-20260614-09-11"
+
+
+def test_snapshot_rows_from_timeseries_maps_sel_and_filters():
+    ts = [
+        {"race_id": "jra-20260614-09-11", "sel": "05", "win_odds": 2.1,
+         "available_at": "t1", "source_name": "jravan_rt", "pool": "win"},
+        {"race_id": "jra-20260614-09-11", "sel": "05", "win_odds": None,
+         "available_at": "t1", "source_name": "jravan_rt", "pool": "place"},   # wrong pool
+        {"race_id": "jra-20260614-09-11", "sel": "07", "win_odds": 9.9,
+         "available_at": "t1", "source_name": "netkeiba", "pool": "win"},      # wrong source
+    ]
+    out = snapshot_rows_from_timeseries(ts, source="jravan_rt", pool="win")
+    assert len(out) == 1
+    assert out[0] == {"race_id": "jra-20260614-09-11", "horse_number": 5,
+                      "win_odds": 2.1, "available_at": "t1"}
+
+
+def test_official_curve_settles_without_crosswalk(tmp_path):
+    # canonical-id win curve (as it comes from jravan_rt) freezes + settles cleanly
+    from datetime import datetime, timedelta, timezone
+    t0 = datetime(2026, 6, 14, 6, 0, tzinfo=timezone.utc)
+    ts = []
+    for hn in range(1, 9):
+        for m in (0, 30):
+            ts.append({"race_id": "jra-20260614-09-11", "sel": f"{hn:02d}",
+                       "win_odds": 10.0 - m / 10, "available_at": (t0 + timedelta(minutes=m)).isoformat(),
+                       "source_name": "jravan_rt", "pool": "win"})
+    snaps = snapshot_rows_from_timeseries(ts, source="jravan_rt")
+    recs = build_curve_records(snaps, lead_min=10)
+    assert recs and all(r["race_id"] == "jra-20260614-09-11" for r in recs)
+    settled = settle_curve_records(recs, {("jra-20260614-09-11", 5): (1, 6.0)})
+    w = next(r for r in settled if r["horse_number"] == 5)
+    assert w["won"] is True and w["settle_odds"] == 6.0
 
 
 def test_devig_sums_to_one():
@@ -69,6 +108,32 @@ def test_unsettled_race_passes_through():
     recs = build_curve_records(rows)
     settled = settle_curve_records(recs, results={})  # no results yet
     assert all(r["settled"] is False for r in settled)
+
+
+def test_build_curve_records_stamps_going_context():
+    rid = "r-2026-0614-hanshin-11"
+    rows = [_snap(rid, hn, 5.0, m) for hn in range(1, 9) for m in (0, 30)]
+    ctx = {rid: {"weather": "rain", "going": "soft", "going_wetness": 3,
+                 "going_transition": True}}
+    recs = build_curve_records(rows, lead_min=10, race_context=ctx)
+    assert recs
+    assert all(r["going"] == "soft" and r["going_wetness"] == 3
+               and r["going_transition"] is True and r["weather"] == "rain" for r in recs)
+
+
+def test_summarize_going_split_and_expected_wins():
+    rows = [
+        {"settled": True, "drift_dir": "firming", "going_transition": True,
+         "won": True, "settled_payout": 4.0, "p_decision": 0.3},
+        {"settled": True, "drift_dir": "firming", "going_transition": False,
+         "won": False, "settled_payout": 0.0, "p_decision": 0.2},
+    ]
+    by_drift = summarize(rows)
+    assert by_drift["firming"]["n"] == 2 and by_drift["firming"]["wins"] == 1
+    assert by_drift["firming"]["expected_mkt"] == 0.5    # market expected 0.5 wins
+    split = summarize(rows, by=("drift_dir", "going_transition"))
+    assert split[("firming", True)]["n"] == 1 and split[("firming", True)]["wins"] == 1
+    assert split[("firming", False)]["wins"] == 0
 
 
 def test_summarize_groups_by_drift_and_computes_roi():

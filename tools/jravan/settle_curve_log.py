@@ -2,12 +2,14 @@
 
 The settle logger in two passes (see ingestion/curve_log.py for the why):
 
-  FREEZE (default) -- snapshot each runner's curve at a pre-post decision time
-  from the banked ``odds_snapshots`` and write to silver ``curve_log`` with the
-  result fields NULL. Run it once near post, when the odds are mature:
+  FREEZE (default) -- snapshot each runner's win curve at a pre-post decision
+  time from ``jravan_odds_timeseries`` and write to silver ``curve_log`` with the
+  result fields NULL. ``--source`` picks the curve: ``jravan_rt`` (the official
+  JV-Link realtime, dense to post -- default) or ``netkeiba`` (the backup feed).
+  Run it once near post, when the odds are mature:
 
     PYTHONPATH=src ./venv64/bin/python tools/jravan/settle_curve_log.py \
-        --date 2026-0614 --venue hanshin --lead-min 5
+        --date 2026-0614 --venue hanshin --source jravan_rt --lead-min 5
 
   SETTLE (--settle) -- read the frozen rows, join to the official finish, pay
   each 1-unit win bet at the official FINAL odds, and print the
@@ -37,12 +39,36 @@ from keibamon_core.ingestion.curve_log import (  # noqa: E402
     crosswalk_race_id,
     read_curve_log,
     settle_curve_records,
+    snapshot_rows_from_timeseries,
     summarize,
     upsert_curve_log,
+    VENUE_JYO,
 )
-from keibamon_core.ingestion.odds import ODDS_TABLE  # noqa: E402
-from keibamon_core.lake import read_parquet_if_exists  # noqa: E402
+from keibamon_core.ingestion.jravan_silver import JRAVAN_ODDS_TIMESERIES_TABLE  # noqa: E402
 from keibamon_core.paths import LakePaths  # noqa: E402
+
+
+def _prefix_for(source: str, date: str, venue: str) -> str:
+    """race_id prefix for a (source, date, venue): canonical for official, feed-id
+    for the netkeiba backup."""
+    if source == "netkeiba":
+        return f"r-{date}-{venue}-"
+    jyo = VENUE_JYO.get(venue.lower())
+    if jyo is None:
+        raise SystemExit(f"unknown venue {venue!r}")
+    return f"jra-{date.replace('-', '')}-{jyo}-"
+
+
+def _read_timeseries_win(lake: LakePaths, source: str, prefix: str) -> list[dict]:
+    """Win-pool curve rows for one source/day from jravan_odds_timeseries."""
+    ds = lake.silver_dataset(JRAVAN_ODDS_TIMESERIES_TABLE)
+    if not ds.is_dir():
+        return []
+    sql = (
+        "SELECT race_id, sel, win_odds, available_at FROM {ts} "
+        f"WHERE source_name = '{source}' AND pool = 'win' AND race_id LIKE '{prefix}%'"
+    )
+    return lake_query.query(sql, ts=ds).to_pylist()
 
 
 def _results_from_lake(lake: LakePaths, canon_ids: set[str]) -> dict:
@@ -70,9 +96,7 @@ def _results_from_csv(path: str) -> dict:
     out = {}
     with open(path, newline="") as f:
         for row in csv.DictReader(f):
-            rid = row["race_id"].strip()
-            if rid.startswith("r-"):
-                rid = crosswalk_race_id(rid)
+            rid = crosswalk_race_id(row["race_id"].strip())  # idempotent for jra-/r- ids
             fo = (row.get("final_odds") or "").strip()
             out[(rid, int(row["horse_number"]))] = (
                 int(row["finish_position"]), float(fo) if fo else None,
@@ -80,25 +104,64 @@ def _results_from_csv(path: str) -> dict:
     return out
 
 
+def _race_context(lake: LakePaths, prefix: str) -> dict:
+    """{race_id: {weather, going, going_wetness, going_transition}} for the card.
+
+    going_transition = the going differs from the card's opening (earliest-post)
+    going -- i.e. the track changed during the day (the rain-came-in case). That
+    is the slice that separates a rational reprice-on-going from a pure curve move.
+    """
+    ds = lake.silver_dataset("jravan_races")
+    if not ds.is_dir():
+        return {}
+    sql = ("SELECT race_id, scheduled_post_time, weather, going, going_wetness "
+           f"FROM {{r}} WHERE race_id LIKE '{prefix}%'")
+    rows = lake_query.query(sql, r=ds).to_pylist()
+    if not rows:
+        return {}
+    rows.sort(key=lambda x: x.get("scheduled_post_time") or "")
+    baseline = next((x["going_wetness"] for x in rows if x.get("going_wetness") is not None), None)
+    ctx = {}
+    for x in rows:
+        w = x.get("going_wetness")
+        ctx[x["race_id"]] = {
+            "weather": x.get("weather"), "going": x.get("going"), "going_wetness": w,
+            "going_transition": (baseline is not None and w is not None and w != baseline),
+        }
+    return ctx
+
+
 def _print_summary(settled: list[dict]) -> None:
     s = summarize(settled)
     if not s:
         print("  (no settled rows yet)")
         return
-    print(f"  {'tag':<10}{'n':>6}{'win_rate':>10}{'ROI':>9}")
+    print(f"  {'tag':<10}{'n':>5}{'wins':>6}{'exp(mkt)':>10}{'ROI':>9}")
     for tag in ("firming", "draining", "neutral"):
         if tag in s:
             r = s[tag]
-            print(f"  {tag:<10}{r['n']:>6}{r['win_rate']:>10}{r['roi']:>+9.3f}")
-    print("  NOTE: tiny-sample, provisional. The market floor is ~ -0.20 (takeout).")
-    print("  A firming-bucket ROI above neutral, sustained over many cards, is the")
-    print("  only thing that confirms the curve edge. One day means nothing.")
+            print(f"  {tag:<10}{r['n']:>5}{r['wins']:>6}{r['expected_mkt']:>10}{r['roi']:>+9.3f}")
+    print("  Read 'wins' vs 'exp(mkt)': a bucket only has an edge if actual wins beat")
+    print("  what the market already priced. Raw ROI is fooled by firming = short-priced.")
+    # going split: is the firming effect (if any) confined to going-transition races?
+    split = summarize(settled, by=("drift_dir", "going_transition"))
+    rel = {k: v for k, v in split.items() if k[0] in ("firming", "draining")}
+    if rel:
+        print("\n  by going_transition (did the track change?):")
+        print(f"  {'tag':<10}{'transition':>11}{'n':>5}{'wins':>6}{'exp(mkt)':>10}")
+        for k in sorted(rel):
+            v = rel[k]
+            print(f"  {k[0]:<10}{str(k[1]):>11}{v['n']:>5}{v['wins']:>6}{v['expected_mkt']:>10}")
+    print("\n  NOTE: tiny-sample. The edge question is whether firming-on-a-going-transition")
+    print("  beats market expectation -- needs many rain-disrupted cards. One day means nothing.")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Freeze/settle odds-curve records.")
-    ap.add_argument("--date", required=True, help="feed date token, e.g. 2026-0614")
+    ap.add_argument("--date", required=True, help="date token, e.g. 2026-0614")
     ap.add_argument("--venue", required=True, help="e.g. hanshin")
+    ap.add_argument("--source", default="jravan_rt",
+                    help="odds source: jravan_rt (official, default) or netkeiba (backup)")
     ap.add_argument("--lead-min", type=float, default=5.0,
                     help="decision time = post (or last snap) minus this many minutes")
     ap.add_argument("--settle", action="store_true", help="settle frozen rows vs results")
@@ -107,19 +170,21 @@ def main() -> None:
     args = ap.parse_args()
 
     lake = LakePaths()
-    prefix = f"r-{args.date}-{args.venue}-"
+    prefix = _prefix_for(args.source, args.date, args.venue)
 
     if not args.settle:
-        snaps = [r for r in read_parquet_if_exists(lake.silver_table(ODDS_TABLE))
-                 if str(r.get("race_id", "")).startswith(prefix)]
+        snaps = snapshot_rows_from_timeseries(_read_timeseries_win(lake, args.source, prefix))
         if not snaps:
-            print(f"no odds_snapshots rows for {prefix}* -- is the feed running/banked?")
+            print(f"no {args.source} win rows for {prefix}* in jravan_odds_timeseries "
+                  "-- imported and silver-built?")
             return
-        recs = build_curve_records(snaps, lead_min=args.lead_min)
+        recs = build_curve_records(snaps, lead_min=args.lead_min,
+                                   race_context=_race_context(lake, prefix))
         flags = sum(1 for r in recs if r["drift_dir"])
         races = sorted({r["race_id"] for r in recs})
-        print(f"FREEZE {prefix}*: {len(recs)} runner-curves across {len(races)} races, "
-              f"{flags} residual flag(s), decision = post/last - {args.lead_min:g}min")
+        print(f"FREEZE [{args.source}] {prefix}*: {len(recs)} runner-curves across "
+              f"{len(races)} races, {flags} residual flag(s), "
+              f"decision = post/last - {args.lead_min:g}min")
         for r in recs:
             if r["drift_dir"]:
                 print(f"  {r['race_id']} #{r['horse_number']}: {r['drift_dir']} "

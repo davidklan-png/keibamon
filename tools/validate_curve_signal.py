@@ -2,7 +2,11 @@
 
 Selections are made from PIT curve features at a pre-post decision time. Returns
 are settled against official final payouts, never against the early odds seen at
-decision time.
+decision time (DATA_TRAPS['odds_curve.early_price']).
+
+The bar to clear is the de-vigged market net of JRA takeout (≈-23% for win).
+Anything less is no edge. Reports ROI with plain thin-sample messaging when the
+curve coverage is below the threshold required for a stable read.
 """
 from __future__ import annotations
 
@@ -18,6 +22,11 @@ from keibamon_core import lake_query
 from keibamon_core.ingestion.curve_features import CURVE_FEATURE_SET
 from keibamon_core.paths import LakePaths
 
+# Thresholds for honest reporting. Below these we print the count and skip the
+# metric rather than report a flattering number off a tiny sample.
+MIN_RACES_FOR_ROI = 200
+MIN_RACES_PER_DECISION = 100
+
 
 @dataclass(frozen=True)
 class SettlementReport:
@@ -30,31 +39,88 @@ class SettlementReport:
 def main() -> None:
     lake = LakePaths()
     if not lake.gold_dataset(CURVE_FEATURE_SET).exists():
-        print("No odds_curve gold dataset found. Run build_curve_features(lake) first.")
+        print(
+            f"No {CURVE_FEATURE_SET} gold dataset. "
+            "Run `python -m keibamon_core.ingestion.curve_features` first."
+        )
         return
 
     rows = _load_rows(lake)
     races = {r["race_id"] for r in rows}
-    if len(races) < 20:
+    decisions = {int(r["decision_minutes_to_post"]) for r in rows}
+    print(
+        f"Odds-curve gold: {len(races):,} races, {len(rows):,} runner-decision rows, "
+        f"decision points = {sorted(decisions)}"
+    )
+
+    if len(races) < MIN_RACES_FOR_ROI:
         print(
-            "Insufficient odds-curve validation sample: "
-            f"{len(races)} races / {len(rows)} runner-decision rows. "
-            "Meaningful ROI needs accumulated 0B41/0B42 or live snapshot history."
+            "Insufficient sample for an honest ROI read: "
+            f"{len(races)} races < {MIN_RACES_FOR_ROI} required. "
+            "Coverage is gated on the JRA-VAN live entitlement (ADR-0002): "
+            "0B41/0B42 backfill or sustained live snapshot history is required "
+            "to clear this bar. No metrics reported."
         )
+        _per_decision_thin_report(rows)
+        return
+
+    payouts = _load_win_payouts(lake)
+    if not payouts:
+        print("No win payouts available for settlement.")
         return
 
     selected = _select_top_curve_gap(rows)
-    payouts = _load_win_payouts(lake)
     report = settle_win_bets(selected, payouts, capacity_fraction=0.002)
-    print("Odds-curve validation, selected pre-post and settled at final payouts")
-    print(f"Bets: {report.bets:,}")
-    print(f"Infinitesimal ROI: {report.infinitesimal_roi:.3f}")
-    print(f"Capacity-adjusted ROI: {report.capacity_adjusted_roi:.3f}")
+    print("=" * 72)
+    print(
+        f"Odds-curve validation: top-pick (shortening into decision time), "
+        f"{report.bets:,} bets, settled at FINAL official payouts"
+    )
+    print("=" * 72)
+    print(f"Infinitesimal ROI: {report.infinitesimal_roi:+.3f}")
+    print(f"Capacity-adjusted ROI (0.2% pool share haircut): {report.capacity_adjusted_roi:+.3f}")
     print(f"Hit rate: {report.hit_rate:.3f}")
-    print("Robustness:")
-    for n in (1, 3, 5):
+    print("JRA win takeout is ~23%; ROI > -0.23 is the bar to clear.")
+    print("Robustness (remove top-N payoffs):")
+    for n in (1, 3, 5, 10):
         trimmed = settle_win_bets(_remove_top_payoffs(selected, payouts, n), payouts)
-        print(f"  remove top {n} payoffs: ROI={trimmed.infinitesimal_roi:.3f}")
+        print(f"  remove top {n:>2}: ROI={trimmed.infinitesimal_roi:+.3f}")
+    _per_decision_report(rows, payouts)
+
+
+def _per_decision_thin_report(rows: list[dict]) -> None:
+    """Even when the overall sample is too thin, show how coverage splits across
+    decision points so the operator knows which slice is closest to useful."""
+    by_decision: dict[int, set[str]] = {}
+    for r in rows:
+        by_decision.setdefault(int(r["decision_minutes_to_post"]), set()).add(r["race_id"])
+    if not by_decision:
+        return
+    print("Per-decision coverage (races with at least one odds snapshot):")
+    for dm in sorted(by_decision):
+        n = len(by_decision[dm])
+        flag = "" if n >= MIN_RACES_PER_DECISION else "  (need ≥100)"
+        print(f"  {dm:>3}-min-to-post: {n:>4,} races{flag}")
+
+
+def _per_decision_report(rows: list[dict], payouts: list[dict]) -> None:
+    by_decision: dict[int, list[dict]] = {}
+    for r in rows:
+        by_decision.setdefault(int(r["decision_minutes_to_post"]), []).append(r)
+    print("Per-decision ROI:")
+    for dm in sorted(by_decision):
+        bets = _select_top_curve_gap(by_decision[dm])
+        if len(bets) < MIN_RACES_PER_DECISION:
+            print(
+                f"  {dm:>3}-min-to-post: {len(bets):>4} bets "
+                f"(thin -- need ≥{MIN_RACES_PER_DECISION})"
+            )
+            continue
+        rep = settle_win_bets(bets, payouts)
+        print(
+            f"  {dm:>3}-min-to-post: {rep.bets:>4,} bets, "
+            f"ROI={rep.infinitesimal_roi:+.3f}, hit_rate={rep.hit_rate:.3f}"
+        )
 
 
 def settle_win_bets(

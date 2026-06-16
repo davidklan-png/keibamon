@@ -86,8 +86,15 @@ target AS (
     FROM races ra
     JOIN entries en USING (race_id)
     CROSS JOIN decision_minutes dm
-    WHERE ra.race_available_at <= ra.scheduled_post_time - dm.minutes_to_post * INTERVAL '1 minute'
-      AND en.entry_available_at <= ra.scheduled_post_time - dm.minutes_to_post * INTERVAL '1 minute'
+    -- Race + entry metadata are STABLE CONTEXT: surface, distance, field and
+    -- the entries themselves are all declared days before race day. The only
+    -- PIT-relevant signal is the odds timestamp, gated in the snapshot join
+    -- below (s.available_at <= t.as_of_time). Filtering stable context by the
+    -- pre-post decision time would wrongly exclude races whose silver
+    -- ``available_at`` is the post time (the conservative "race is known by
+    -- post" boundary that jravan_silver._event_at uses). Filter by post_time.
+    WHERE ra.race_available_at <= ra.scheduled_post_time
+      AND en.entry_available_at <= ra.scheduled_post_time
 ),
 win_odds AS (
     SELECT
@@ -201,11 +208,13 @@ SELECT
     horse_number,
     decision_minutes_to_post,
     as_of_time,
-    GREATEST(
-        race_available_at,
-        entry_available_at,
-        COALESCE(latest_available_at, TIMESTAMPTZ '1900-01-01 00:00:00+00')
-    ) AS max_source_available_at,
+    -- ``max_source_available_at`` is the PIT bound for THIS row. Race and entry
+    -- metadata are stable context declared days before race day (filtered by
+    -- scheduled_post_time in the target CTE); the only timestamp that actually
+    -- gates pre-post availability is the latest odds snapshot used. NULL when
+    -- no odds snapshot existed at decision time -- the leakage guard treats
+    -- NULL as "no PIT-relevant input" and skips it.
+    latest_available_at AS max_source_available_at,
     scheduled_post_time,
     open_win_odds,
     win_odds_at_t,

@@ -70,7 +70,11 @@ def test_realtime_feeds_odds_timeseries_with_correct_odds(tmp_path):
     assert row is not None
     assert row[0] == "jra-20260614-09-11"
     assert abs(row[1] - 2.4) < 1e-9
-    assert str(row[3]).startswith("2026-06-14 04:40:07")  # wrapper PIT time, not announce minute
+    # available_at is the wrapper PIT instant (04:40:07Z), NOT the announce minute.
+    # DuckDB returns TIMESTAMPTZ in the *session* tz (JST here -> 13:40:07+09:00),
+    # so compare the normalized instant, not str().
+    available_utc = row[3].astimezone(timezone.utc)
+    assert available_utc.replace(microsecond=0) == datetime(2026, 6, 14, 4, 40, 7, tzinfo=timezone.utc)
 
 
 def test_mixed_source_write_no_timestamp_collision(tmp_path):

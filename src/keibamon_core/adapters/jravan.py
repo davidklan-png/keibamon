@@ -324,7 +324,23 @@ DATA_TRAPS = {
         "post_time||race_date; ingested_at keeps the download time.",
     "SE.ketto_num=0000000000": "foreign horses w/o JRA pedigree no. get placeholder "
         "'0000000000' -> NOT unique within a race (69 races affected). Join silver on "
-        "(race_id, horse_number/umaban), never on horse_id alone.",
+        "(race_id, horse_number/umaban), never on horse_id alone. "
+        "jravan_race_results now carries horse_number (umaban) so the (race_id, "
+        "horse_number) join is exact; downstream validators (going/training) "
+        "use '(rr.horse_number IS NULL OR rr.horse_number = X)' so older "
+        "partitions lacking the column still read back via union_by_name.",
+    "settlement.per_bet_connection": "calling settlement.settle() per bet opens a "
+        "fresh DuckDB connection + Parquet scan (~12 ms/bet). For backtests or "
+        "full payout audits use settlement.settle_many(lake, bets) -- one "
+        "connection, one payouts scan, resolves the whole list in memory "
+        "(~0.08 ms/bet, a 150x speedup on this lake).",
+    "curve_features.stable_context": "race/entry METADATA (surface, distance, field) "
+        "is declared days before race day, so it is STABLE CONTEXT for any pre-post "
+        "decision. jravan_silver._event_at conservatively stamps available_at=post_time "
+        "for these rows; filtering them by a pre-post as_of_time wrongly excludes all "
+        "races. Only the odds snapshot timestamp is the PIT-relevant signal for "
+        "curve_features -- its max_source_available_at is the latest_odds_available_at, "
+        "not GREATEST(race, entry, odds).",
     "going_handling.raw_time": "wet going slows the whole field; going features must use "
         "field-relative performance, not raw finish_time_seconds, for wet-vs-firm deltas.",
     "odds_curve.early_price": "pari-mutuel bets settle at the final official payout, not "

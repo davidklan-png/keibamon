@@ -42,6 +42,7 @@ CURVE_LOG_COLUMNS = (
     "p_open", "p_decision", "p_close",
     "drift_dir", "drift_resid_pct", "drift_z",
     "clv_logdrift",
+    "weather", "going", "going_wetness", "going_transition",
     "finish_position", "won", "top3",
     "settle_odds", "settled_payout", "settled",
     "logged_at",
@@ -56,12 +57,15 @@ VENUE_JYO = {
 
 
 def crosswalk_race_id(synthetic: str) -> str:
-    """Live-feed id -> canonical lake id.
+    """Live-feed id -> canonical lake id (idempotent).
 
-    "r-2026-0614-hanshin-11" -> "jra-20260614-09-11". The live feed coins a
-    human id; the JV-Link silver keys on jra-YYYYMMDD-<jyo>-NN. This is the only
-    bridge between the curve (odds_snapshots) and the result (jravan_*).
+    "r-2026-0614-hanshin-11" -> "jra-20260614-09-11". The netkeiba feed coins a
+    human id; the JV-Link silver keys on jra-YYYYMMDD-<jyo>-NN. The official
+    realtime (jravan_rt) is *already* canonical, so a "jra-" id passes through
+    untouched -- this is the bridge from either curve source to the result.
     """
+    if synthetic.startswith("jra-"):
+        return synthetic
     parts = synthetic.split("-")
     if len(parts) != 5 or parts[0] != "r":
         raise ValueError(f"unrecognized feed race_id: {synthetic!r}")
@@ -70,6 +74,35 @@ def crosswalk_race_id(synthetic: str) -> str:
     if jyo is None:
         raise ValueError(f"unknown venue {venue!r} in {synthetic!r}")
     return f"jra-{yyyy}{mmdd}-{jyo}-{int(rno):02d}"
+
+
+def snapshot_rows_from_timeseries(ts_rows, *, source=None, pool="win"):
+    """Adapt jravan_odds_timeseries rows to build_curve_records' input shape.
+
+    The timeseries keys odds by ``sel`` ('05') and ``pool``; this yields the
+    ``(race_id, horse_number, win_odds, available_at)`` dicts the curve builder
+    wants, for one source's win pool. Use it to score the **official** jravan_rt
+    curve (canonical race_ids, dense to post) exactly like the netkeiba feed.
+    ``source``/``pool`` filters are skipped when those keys are absent (e.g. when
+    the caller already filtered in SQL).
+    """
+    out = []
+    for r in ts_rows:
+        if source is not None and r.get("source_name") != source:
+            continue
+        if "pool" in r and r["pool"] != pool:
+            continue
+        try:
+            hn = int(r.get("sel"))
+        except (TypeError, ValueError):
+            continue
+        if r.get("win_odds") is None:
+            continue
+        out.append({
+            "race_id": r["race_id"], "horse_number": hn,
+            "win_odds": r["win_odds"], "available_at": r["available_at"],
+        })
+    return out
 
 
 def _as_utc(v: Any) -> datetime:
@@ -99,6 +132,7 @@ def build_curve_records(
     *,
     lead_min: float = 5.0,
     post_times: dict[str, datetime] | None = None,
+    race_context: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """FREEZE stage. Turn raw odds_snapshots rows into one curve record per runner.
 
@@ -106,8 +140,14 @@ def build_curve_records(
     (the source timestamp). Decision time ``t`` = post_time - lead_min if a post
     time is known for the race, else (last snapshot - lead_min) so there is always
     a measurable gap between the decision and the close. Result fields are NULL.
+
+    ``race_context``: optional ``{race_id: {weather, going, going_wetness,
+    going_transition}}`` stamped onto each record so accumulated curves can later
+    be split by whether the track was changing -- the only way to tell a pure
+    slow-reaction curve move from a rational reprice on deteriorating going.
     """
     post_times = post_times or {}
+    race_context = race_context or {}
     # group by race -> horse -> sorted (time, odds)
     by_race: dict[str, dict[int, list[tuple[datetime, float]]]] = {}
     for r in snapshot_rows:
@@ -140,6 +180,7 @@ def build_curve_records(
 
         # residual-drift tag at the decision: how each runner moved open->t vs field
         edges = residual_edges([(hn, decision_odds.get(hn), open_odds.get(hn)) for hn in horses])
+        ctx = race_context.get(rid, {})
 
         for hn in horses:
             d_odds, d_at = dec[hn]
@@ -156,6 +197,9 @@ def build_curve_records(
                 "drift_resid_pct": round(flag.resid_pct, 4) if flag else None,
                 "drift_z": round(flag.z, 2) if flag else None,
                 "clv_logdrift": round(clv, 4) if clv is not None else None,
+                "weather": ctx.get("weather"), "going": ctx.get("going"),
+                "going_wetness": ctx.get("going_wetness"),
+                "going_transition": ctx.get("going_transition"),
                 "finish_position": None, "won": None, "top3": None,
                 "settle_odds": None, "settled_payout": None, "settled": False,
                 "logged_at": now.isoformat(),
@@ -198,24 +242,36 @@ def settle_curve_records(
     return settled
 
 
-def summarize(records: Iterable[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    """Group settled rows by drift tag -> n, win_rate, mean settled ROI.
+def summarize(records: Iterable[dict[str, Any]], by=("drift_dir",)) -> dict:
+    """Group settled rows -> n, actual wins, market-EXPECTED wins, ROI.
 
-    The whole point of the experiment, in three numbers per bucket. Unsettled
-    rows are ignored. ROI is mean(settled_payout) - 1 over bets in the bucket.
+    ``by`` is the grouping key(s); a single key returns string-keyed buckets
+    (e.g. "firming"), multiple keys return tuple-keyed buckets (e.g.
+    ("firming", True) for firming-on-a-going-transition). ``expected_mkt`` =
+    sum of de-vigged win prob at the decision: the confound-controlled yardstick.
+    A bucket only matters if actual wins beat ``expected_mkt`` -- raw ROI is
+    fooled by firming horses simply being short-priced. Unsettled rows ignored.
     """
-    buckets: dict[str, list[dict[str, Any]]] = {}
+    by = (by,) if isinstance(by, str) else tuple(by)
+    buckets: dict = {}
     for r in records:
         if not r.get("settled") or r.get("settled_payout") is None:
             continue
-        buckets.setdefault(r.get("drift_dir") or "neutral", []).append(r)
+        key = tuple(
+            (r.get(k) if r.get(k) is not None else ("neutral" if k == "drift_dir" else None))
+            for k in by
+        )
+        buckets.setdefault(key if len(key) > 1 else key[0], []).append(r)
     summary = {}
     for tag, rows in buckets.items():
         n = len(rows)
         wins = sum(1 for r in rows if r.get("won"))
+        expected = sum((r.get("p_decision") or 0.0) for r in rows)
         roi = sum(r["settled_payout"] for r in rows) / n - 1.0
         summary[tag] = {
             "n": n,
+            "wins": wins,
+            "expected_mkt": round(expected, 2),
             "win_rate": round(wins / n, 3),
             "roi": round(roi, 3),
         }
