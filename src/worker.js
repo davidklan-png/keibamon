@@ -12,6 +12,14 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    if (url.pathname === "/helper") {
+      return env.ASSETS.fetch(new Request(new URL("/helper.html", url), request));
+    }
+
+    if (url.pathname === "/live") {
+      return env.ASSETS.fetch(new Request(new URL("/live.html", url), request));
+    }
+
     if (url.pathname === "/api/live") {
       const headers = {
         "content-type": "application/json; charset=utf-8",

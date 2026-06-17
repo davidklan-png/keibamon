@@ -3,6 +3,12 @@
 Keibamon is a local-first data and ML platform for Japanese horse-racing
 research, backtesting, and race analysis.
 
+## Current Development Target
+
+The next app target is the Keibamon race companion and exotic-ticket helper.
+See [`app_plan.md`](app_plan.md) for the product direction, free/paid feature
+split, guardrails, and implementation milestones.
+
 The project is data-first. The app and API read curated analytical assets; data
 ingestion, validation, feature generation, and model training live in the data
 platform.
@@ -158,4 +164,3 @@ npm run dev
   with evidence and confidence. They are never treated as facts without
   provenance.
 - Real-money betting automation is out of scope for v1.
-

@@ -28,6 +28,9 @@ reference/**
 # Frontend
 frontend/node_modules/
 frontend/dist/
+frontend/tsconfig.tsbuildinfo
+# Vite build output (SPA lives at /app/ via the existing ASSETS binding)
+splash/app/
 
 
 # wrangler files

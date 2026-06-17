@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Keibamon - Exotic Ticket Mixer</title>
+<meta name="description" content="A recreational JRA exotic-ticket recommender. Turns win odds into fair exacta, quinella, wide, trio, and trifecta ticket ideas based on your budget and betting preferences. Not betting advice.">
+<style>
+  :root{
+    --bg:#08130f; --panel:#10201a; --panel2:#132820; --line:#234437; --ink:#eff7f2;
+    --muted:#9eb3a8; --soft:#d8e6dd; --turf:#39c07a; --gold:#e0b341; --aqua:#7ad7cf;
+    --warn:#e07a55; --danger:#ef767a; --shadow:0 18px 50px rgba(0,0,0,.38);
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent}
+  html{scroll-behavior:smooth}
+  body{
+    margin:0; min-width:320px; min-height:100vh;
+    background:
+      radial-gradient(900px 420px at 80% -8%,rgba(122,215,207,.18),transparent 60%),
+      radial-gradient(760px 520px at 10% 10%,rgba(57,192,122,.17),transparent 62%),
+      var(--bg);
+    color:var(--ink);
+    font:15px/1.5 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"Noto Sans JP",sans-serif;
+  }
+  button,input,select{font:inherit}
+  button{cursor:pointer}
+  a{color:var(--turf)}
+  .wrap{max-width:1180px; margin:0 auto; padding:18px 16px calc(44px + env(safe-area-inset-bottom))}
+  .top{
+    display:grid; grid-template-columns:auto minmax(0,1fr) auto; align-items:center; gap:16px;
+    padding:10px 0 18px;
+  }
+  .avatar{
+    width:54px; height:54px; border-radius:14px; border:1px solid var(--line); object-fit:cover;
+    background:var(--panel); box-shadow:var(--shadow);
+  }
+  .brand .eyebrow{
+    margin:0 0 4px; color:var(--turf);
+    font:700 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.16em; text-transform:uppercase;
+  }
+  h1{margin:0; font-size:clamp(27px,4vw,48px); line-height:1; letter-spacing:0}
+  h1 .ja{color:var(--gold)}
+  .sub{margin:8px 0 0; max-width:76ch; color:var(--muted); font-size:14px}
+  .home{
+    min-height:40px; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+    color:var(--ink); text-decoration:none; border:1px solid var(--line); border-radius:8px;
+    background:rgba(16,32,26,.76); padding:0 13px; font-weight:700;
+  }
+  .layout{display:grid; grid-template-columns:minmax(0,1.08fr) minmax(340px,.92fr); gap:14px; align-items:start}
+  .band,.tool{
+    background:linear-gradient(180deg,rgba(19,40,32,.94),rgba(12,24,19,.94));
+    border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow);
+  }
+  .band{padding:14px}
+  .tool{padding:14px; position:sticky; top:14px}
+  .section-title{
+    display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 12px;
+  }
+  .section-title h2{
+    margin:0; color:var(--soft);
+    font:700 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.14em; text-transform:uppercase;
+  }
+  .section-title small{color:var(--muted); font-size:12px}
+  .row{display:flex; flex-wrap:wrap; gap:8px; align-items:center}
+  input,select{
+    min-height:40px; color:var(--ink); background:#0d1b15; border:1px solid var(--line); border-radius:8px;
+    padding:8px 10px; outline:none;
+  }
+  select{min-width:150px}
+  input[type="number"]{width:98px}
+  input:focus,select:focus{border-color:var(--turf); box-shadow:0 0 0 3px rgba(57,192,122,.14)}
+  .btn{
+    min-height:40px; border:1px solid var(--line); border-radius:8px; color:var(--ink);
+    background:#0d1b15; padding:0 12px; font-weight:800; transition:border-color .14s,transform .1s,background .14s;
+  }
+  .btn:hover{border-color:var(--turf)}
+  .btn:active{transform:translateY(1px)}
+  .btn.primary{background:var(--turf); color:#062014; border-color:transparent}
+  .btn.gold{background:rgba(224,179,65,.12); color:var(--gold); border-color:rgba(224,179,65,.32)}
+  .seg{
+    display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:6px;
+  }
+  .seg button{
+    min-height:44px; border:1px solid var(--line); border-radius:8px; background:#0d1b15; color:var(--muted);
+    padding:8px 9px; font-size:13px; font-weight:800;
+  }
+  .seg button.on{background:var(--turf); color:#062014; border-color:transparent}
+  .prefs{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-top:12px}
+  .field{display:grid; gap:6px}
+  .field label{
+    color:var(--muted); font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.11em; text-transform:uppercase;
+  }
+  .race-strip{display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px; margin-bottom:12px}
+  .runners{display:grid; grid-template-columns:repeat(auto-fill,minmax(144px,1fr)); gap:8px}
+  .runner{
+    display:grid; grid-template-columns:30px minmax(0,1fr); gap:8px; align-items:center;
+    border:1px solid var(--line); border-radius:8px; padding:8px; cursor:pointer; background:#0d1b15;
+  }
+  .runner.sel{border-color:var(--turf); background:rgba(57,192,122,.12)}
+  .uma{
+    min-height:30px; display:flex; align-items:center; justify-content:center; border-radius:7px;
+    background:#15181d; font-weight:900; font-size:13px; color:#fff;
+  }
+  .nm{display:block; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); font-size:12px}
+  .odds-line{display:flex; align-items:center; gap:6px; margin-top:4px}
+  .odds-line input{width:62px; min-height:28px; padding:2px 5px; color:var(--gold); font:800 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace; text-align:right}
+  .pc{color:var(--muted); font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .hint{color:var(--muted); font-size:12px; margin:10px 0 0}
+  .empty{color:#889b91; font-style:italic; padding:9px 2px}
+  .recommendations{display:grid; gap:10px; margin-top:12px}
+  .ticket{
+    border:1px solid var(--line); border-radius:8px; background:#0d1b15; padding:12px;
+  }
+  .ticket.top-pick{border-color:rgba(57,192,122,.72); background:linear-gradient(135deg,rgba(57,192,122,.16),#0d1b15 48%)}
+  .ticket-head{display:flex; align-items:flex-start; justify-content:space-between; gap:10px; margin-bottom:10px}
+  .ticket h3{margin:0; font-size:17px; letter-spacing:0}
+  .ticket p{margin:6px 0 0; color:var(--muted); font-size:13px}
+  .badge{
+    display:inline-flex; align-items:center; min-height:24px; border-radius:999px; padding:0 8px;
+    font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.08em; text-transform:uppercase; white-space:nowrap;
+  }
+  .badge.value{color:var(--turf); background:rgba(57,192,122,.13); border:1px solid rgba(57,192,122,.34)}
+  .badge.chalk{color:var(--warn); background:rgba(224,122,85,.13); border:1px solid rgba(224,122,85,.32)}
+  .badge.fun{color:var(--aqua); background:rgba(122,215,207,.13); border:1px solid rgba(122,215,207,.32)}
+  .metrics{display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:8px; margin-top:10px}
+  .metric{border:1px solid #182e25; border-radius:8px; padding:8px; min-width:0}
+  .metric span{display:block; color:var(--muted); font:700 9px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.08em; text-transform:uppercase}
+  .metric b{display:block; margin-top:5px; font-size:14px; font-variant-numeric:tabular-nums; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+  .combos{display:flex; flex-wrap:wrap; gap:6px; margin-top:10px}
+  .combo-chip{
+    border:1px solid #244638; border-radius:999px; background:#101f19; color:var(--soft);
+    padding:5px 8px; font:800 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  .calc{margin-top:14px}
+  .calc-table{width:100%; border-collapse:collapse; font-size:13px}
+  th,td{padding:7px 6px; text-align:right; border-bottom:1px solid #16291f}
+  th{font:700 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.08em; text-transform:uppercase; color:#8a93a3}
+  td.combo{text-align:left; font-weight:900; font-variant-numeric:tabular-nums}
+  .num{font-variant-numeric:tabular-nums}
+  .summary{display:flex; flex-wrap:wrap; gap:8px 18px; margin-top:10px; color:var(--muted); font-size:13px}
+  .summary b{color:var(--ink)}
+  .note{margin-top:14px; padding:12px 14px; border-left:3px solid var(--line); color:var(--muted); font-size:12.5px; background:linear-gradient(90deg,rgba(57,192,122,.06),transparent)}
+  .note b{color:var(--ink)}
+  .foot{margin-top:20px; color:var(--muted); font-size:12px; text-align:center}
+  @media (max-width:900px){
+    .layout{grid-template-columns:1fr}
+    .tool{position:static}
+  }
+  @media (max-width:660px){
+    .wrap{padding-left:12px; padding-right:12px}
+    .top{grid-template-columns:auto minmax(0,1fr); align-items:start}
+    .home{grid-column:1 / -1; width:100%}
+    .race-strip{grid-template-columns:1fr}
+    .prefs{grid-template-columns:1fr}
+    .seg{grid-template-columns:1fr}
+    .metrics{grid-template-columns:repeat(2,minmax(0,1fr))}
+  }
+</style>
+</head>
+<body>
+<main class="wrap">
+  <header class="top">
+    <img class="avatar" src="/keibamon.png" width="54" height="54" alt="Keibamon 競馬モン avatar" decoding="async">
+    <div class="brand">
+      <p class="eyebrow">keibamon · 競馬モン</p>
+      <h1>Exotic Ticket Mixer <span class="ja">馬券ミキサー</span></h1>
+      <p class="sub">Pick a race, set your budget and betting personality, and Keibamon turns the win market into fair exotic-ticket ideas. It is a recreational structure tool, not betting advice.</p>
+    </div>
+    <a class="home" href="/">Keibamon home</a>
+  </header>
+
+  <section class="layout">
+    <div class="band">
+      <div class="section-title">
+        <h2>Race board</h2>
+        <small>Tap runners to build your own box</small>
+      </div>
+      <div class="race-strip">
+        <select id="race"><option value="">Loading live card...</option></select>
+        <button class="btn" id="reload" type="button">Live odds</button>
+        <button class="btn gold" id="manual" type="button">Manual odds</button>
+      </div>
+      <div class="runners" id="runners"><div class="empty">Pick a race, or enter runners manually.</div></div>
+      <p class="hint" id="overround"></p>
+
+      <div class="calc">
+        <div class="section-title">
+          <h2>Scratchpad</h2>
+          <small>Selected runners only</small>
+        </div>
+        <div class="row">
+          <select id="bettype" aria-label="Scratchpad bet type">
+            <option value="quinella">Quinella 馬連</option>
+            <option value="wide">Wide ワイド</option>
+            <option value="exacta">Exacta 馬単</option>
+            <option value="trio">Trio 3連複</option>
+            <option value="trifecta">Trifecta 3連単</option>
+          </select>
+          <label class="num">¥<input id="unit" type="number" value="100" min="100" step="100" aria-label="Scratchpad unit stake"></label>
+          <button class="btn" id="clear" type="button">Clear</button>
+        </div>
+        <div id="result"><div class="empty">Select 2+ runners above (3+ for trio/trifecta).</div></div>
+        <div class="summary" id="summary"></div>
+      </div>
+    </div>
+
+    <aside class="tool">
+      <div class="section-title">
+        <h2>Ticket mixer</h2>
+        <small>Preference-based picks</small>
+      </div>
+      <div class="seg" id="mood">
+        <button type="button" data-mood="steady" class="on">Steady</button>
+        <button type="button" data-mood="balanced">Balanced</button>
+        <button type="button" data-mood="spicy">Spicy</button>
+      </div>
+      <div class="prefs">
+        <div class="field">
+          <label for="budget">Budget</label>
+          <input id="budget" type="number" value="1200" min="100" step="100">
+        </div>
+        <div class="field">
+          <label for="recUnit">Unit stake</label>
+          <input id="recUnit" type="number" value="100" min="100" step="100">
+        </div>
+        <div class="field">
+          <label for="flavor">Runner flavor</label>
+          <select id="flavor">
+            <option value="mixed">Mix favorites and prices</option>
+            <option value="chalk">I trust the favorites</option>
+            <option value="value">Find price horses</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="complexity">Ticket shape</label>
+          <select id="complexity">
+            <option value="auto">Let Keibamon choose</option>
+            <option value="two">2-horse exotics</option>
+            <option value="three">3-horse exotics</option>
+            <option value="straight">Ordered shots</option>
+          </select>
+        </div>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn primary" id="recommend" type="button">Mix tickets</button>
+        <button class="btn" id="quickPick" type="button">Pick contenders</button>
+      </div>
+      <div class="recommendations" id="recommendations">
+        <div class="empty">Load a race, then mix tickets.</div>
+      </div>
+      <p class="note"><b>Read this honestly.</b> Fair odds come from de-vigged win odds plus Keibamon's Henery γ = 0.856 place model. Estimated payout applies typical JRA pool return. It can make a better-shaped recreational ticket, but it cannot erase takeout.</p>
+    </aside>
+  </section>
+
+  <p class="foot"><a href="/">Keibamon</a> · <a href="/live">live dashboard</a> · © 2026 David Klan</p>
+</main>
+
+<script>
+const GAMMA = 0.856;
+const RET = {quinella:.775, wide:.775, exacta:.75, trio:.75, trifecta:.725};
+const LABEL = {quinella:"Quinella", wide:"Wide", exacta:"Exacta", trio:"Trio", trifecta:"Trifecta"};
+const $ = id => document.getElementById(id);
+let runners = [];
+let selected = [];
+let SNAP = null;
+let mood = "steady";
+
+function yen(x){ return "¥" + Math.round(x).toLocaleString(); }
+function fmt(x,d=1){ return (x == null || !isFinite(x)) ? "-" : Number(x).toFixed(d); }
+function clamp(n,min,max){ return Math.max(min, Math.min(max, n)); }
+const pow = x => Math.pow(x, GAMMA);
+
+function winProbs(){
+  const inv = {};
+  let s = 0;
+  for(const r of runners){
+    if(r.odds > 0){
+      inv[r.uma] = 1 / r.odds;
+      s += inv[r.uma];
+    }
+  }
+  const p = {};
+  for(const k in inv) p[k] = inv[k] / s;
+  return {p, overround:s};
+}
+
+function orderProb(seq, p){
+  const used = new Set();
+  let prob = 1;
+  for(let i=0; i<seq.length; i++){
+    const h = seq[i];
+    if(i === 0){
+      prob *= p[h] || 0;
+    }else{
+      let denom = 0;
+      for(const r of runners) if(!used.has(r.uma)) denom += pow(p[r.uma] || 0);
+      prob *= denom > 0 ? pow(p[h] || 0) / denom : 0;
+    }
+    used.add(h);
+  }
+  return prob;
+}
+
+const perms2 = (a,b) => [[a,b],[b,a]];
+const perms3 = (a,b,c) => [[a,b,c],[a,c,b],[b,a,c],[b,c,a],[c,a,b],[c,b,a]];
+function comboProb(type, combo, p){
+  if(type === "exacta" || type === "trifecta") return orderProb(combo, p);
+  if(type === "quinella") return perms2(...combo).reduce((s,o)=>s + orderProb(o,p), 0);
+  if(type === "trio") return perms3(...combo).reduce((s,o)=>s + orderProb(o,p), 0);
+  if(type === "wide"){
+    let s = 0;
+    for(const r of runners){
+      const c = r.uma;
+      if(c === combo[0] || c === combo[1]) continue;
+      s += perms3(combo[0], combo[1], c).reduce((a,o)=>a + orderProb(o,p), 0);
+    }
+    return s;
+  }
+  return 0;
+}
+
+function kCombos(arr,k){
+  const out = [];
+  (function rec(st,acc){
+    if(acc.length === k){ out.push(acc.slice()); return; }
+    for(let i=st; i<arr.length; i++){ acc.push(arr[i]); rec(i+1,acc); acc.pop(); }
+  })(0,[]);
+  return out;
+}
+function kPerms(arr,k){
+  const out = [];
+  (function rec(rem,acc){
+    if(acc.length === k){ out.push(acc.slice()); return; }
+    for(let i=0; i<rem.length; i++){
+      const n = rem.slice();
+      const [x] = n.splice(i,1);
+      acc.push(x); rec(n,acc); acc.pop();
+    }
+  })(arr,[]);
+  return out;
+}
+
+function favOrder(p){
+  return runners.filter(r=>p[r.uma]).sort((a,b)=>p[b.uma]-p[a.uma]).map(r=>r.uma);
+}
+function rankClass(combo, p){
+  const order = favOrder(p);
+  const favCut = order.slice(0, Math.max(2, Math.ceil(order.length / 3)));
+  const favs = combo.filter(u=>favCut.includes(u)).length;
+  if(favs === combo.length) return ["chalk","Chalk"];
+  if(favs === 0) return ["value","Value"];
+  return ["fun","Blend"];
+}
+
+function renderRunners(){
+  const box = $("runners");
+  if(!runners.length){
+    box.innerHTML = '<div class="empty">Pick a race, or enter runners manually.</div>';
+    $("overround").textContent = "";
+    return;
+  }
+  const {p, overround} = winProbs();
+  box.innerHTML = runners.map(r=>{
+    const on = selected.includes(r.uma);
+    const pc = p[r.uma] ? (p[r.uma] * 100).toFixed(1) + "%" : "-";
+    return `<div class="runner ${on ? "sel" : ""}" data-uma="${r.uma}">
+      <span class="uma">${r.uma}</span>
+      <span class="meta"><span class="nm">${r.name || ("#" + r.uma)}</span>
+        <span class="odds-line"><input type="number" data-od="${r.uma}" value="${r.odds}" min="1" step="0.1" onclick="event.stopPropagation()"> <span class="pc">${pc}</span></span></span>
+    </div>`;
+  }).join("");
+  const takeout = overround ? ((1 - 1 / overround) * 100).toFixed(0) : "-";
+  $("overround").textContent = `Win-pool overround ${fmt(overround,3)} implies roughly ${takeout}% already priced into the board.`;
+}
+
+function drawScratchpad(){
+  renderRunners();
+  const res = $("result");
+  const sum = $("summary");
+  const type = $("bettype").value;
+  const need = (type === "trio" || type === "trifecta") ? 3 : 2;
+  if(selected.length < need){
+    res.innerHTML = `<div class="empty">Select ${need}+ runners above for ${LABEL[type]}.</div>`;
+    sum.innerHTML = "";
+    return;
+  }
+  const {p} = winProbs();
+  const ordered = type === "exacta" || type === "trifecta";
+  const combos = ordered ? kPerms(selected, need) : kCombos(selected, need);
+  const unit = Math.max(100, +$("unit").value || 100);
+  const rows = combos.map(c=>{
+    const prob = comboProb(type, c, p);
+    const fairOdds = prob > 0 ? 1 / prob : Infinity;
+    const estPay = prob > 0 ? (RET[type] / prob) : Infinity;
+    const [cls,lbl] = rankClass(c,p);
+    return {c, prob, fairOdds, estPay, cls, lbl};
+  }).sort((a,b)=>a.fairOdds-b.fairOdds);
+  const sep = ordered ? " > " : " - ";
+  const top = rows.slice(0, 42);
+  res.innerHTML = `<table class="calc-table"><thead><tr><th style="text-align:left">Combo (${combos.length})</th><th>Fair %</th><th>Fair odds</th><th>Est. ${yen(unit)}</th><th></th></tr></thead><tbody>${
+    top.map(r=>`<tr><td class="combo">${r.c.join(sep)}</td>
+      <td class="num">${(r.prob*100).toFixed(r.prob < .01 ? 2 : 1)}%</td>
+      <td class="num">${fmt(r.fairOdds,1)}</td>
+      <td class="num">${isFinite(r.estPay) ? yen(r.estPay * unit) : "-"}</td>
+      <td><span class="badge ${r.cls}">${r.lbl}</span></td></tr>`).join("")
+    }${combos.length > 42 ? `<tr><td colspan="5" class="empty">Showing 42 most likely of ${combos.length}.</td></tr>` : ""}</tbody></table>`;
+  const cost = combos.length * unit;
+  const evReturn = rows.reduce((s,r)=>s + r.prob * (isFinite(r.estPay) ? r.estPay * unit : 0), 0);
+  sum.innerHTML = `<span>Box <b>${combos.length}</b> bets</span><span>Cost <b>${yen(cost)}</b></span><span>Fair expected return <b>${yen(evReturn)}</b></span><span><b>${((evReturn/cost-1)*100).toFixed(0)}%</b> vs stake</span>`;
+}
+
+function contenderPool(p){
+  const order = favOrder(p);
+  const n = order.length;
+  const favorite = order.slice(0, Math.max(3, Math.ceil(n * .28)));
+  const mid = order.slice(Math.max(2, Math.ceil(n * .2)), Math.max(5, Math.ceil(n * .68)));
+  const price = order.slice(Math.max(3, Math.ceil(n * .42)));
+  const flavor = $("flavor").value;
+  if(flavor === "chalk") return unique([...favorite, ...mid.slice(0,2)]).slice(0, 7);
+  if(flavor === "value") return unique([...mid, ...price]).slice(0, 8);
+  return unique([...favorite.slice(0,4), ...mid.slice(0,4), ...price.slice(0,2)]).slice(0, 8);
+}
+function unique(arr){ return [...new Set(arr)]; }
+
+function candidateTypes(){
+  const shape = $("complexity").value;
+  if(shape === "two") return ["wide","quinella","exacta"];
+  if(shape === "three") return ["trio","trifecta"];
+  if(shape === "straight") return ["exacta","trifecta"];
+  if(mood === "steady") return ["wide","quinella","trio"];
+  if(mood === "spicy") return ["trio","exacta","trifecta"];
+  return ["quinella","wide","trio","exacta"];
+}
+
+function scoreTicket(t, p){
+  const fairReturnRatio = t.expected / Math.max(1, t.cost);
+  const hit = t.hitProb;
+  const price = Math.log(Math.max(1, t.avgPayout / Math.max(100, t.unit)));
+  const [cls] = rankClass(t.core, p);
+  let flavorBoost = cls === "fun" ? .16 : 0;
+  if($("flavor").value === "value" && cls === "value") flavorBoost += .3;
+  if($("flavor").value === "chalk" && cls === "chalk") flavorBoost += .2;
+  if(mood === "steady") return hit * 7 + fairReturnRatio * 1.5 - price * .08 + flavorBoost;
+  if(mood === "spicy") return price * .95 + hit * 1.8 + flavorBoost - (cls === "chalk" ? .25 : 0);
+  return hit * 4 + price * .35 + fairReturnRatio * 1.6 + flavorBoost;
+}
+
+function ticketName(type, cls, count){
+  if(type === "wide") return cls === "chalk" ? "Comfort wide net" : "Wide value net";
+  if(type === "quinella") return count > 3 ? "Quinella box" : "Quinella pair";
+  if(type === "exacta") return "Exacta ladder";
+  if(type === "trio") return "Trio mixer";
+  return "Trifecta dartboard";
+}
+
+function describeTicket(t){
+  if(t.type === "wide") return "Designed for a higher hit rate while avoiding a pure favorite pile-on.";
+  if(t.type === "quinella") return "A clean two-horse structure: order does not matter, so cost stays sane.";
+  if(t.type === "exacta") return "Ordered tickets with the most likely winners on top and prices underneath.";
+  if(t.type === "trio") return "Three-horse coverage that blends a market anchor with a livelier price slot.";
+  return "Low-frequency, high-payout shots. Keep this small and treat it as entertainment.";
+}
+
+function buildCandidates(){
+  const {p} = winProbs();
+  const pool = contenderPool(p);
+  const budget = Math.max(100, +$("budget").value || 1000);
+  const unit = Math.max(100, +$("recUnit").value || 100);
+  const maxLines = clamp(Math.floor(budget / unit), 1, 120);
+  const types = candidateTypes();
+  const out = [];
+  for(const type of types){
+    const need = (type === "trio" || type === "trifecta") ? 3 : 2;
+    if(pool.length < need) continue;
+    const ordered = type === "exacta" || type === "trifecta";
+    const raw = ordered ? kPerms(pool, need) : kCombos(pool, need);
+    const ranked = raw.map(c=>{
+      const prob = comboProb(type, c, p);
+      const fairOdds = prob > 0 ? 1 / prob : Infinity;
+      const payout = prob > 0 ? RET[type] / prob * unit : Infinity;
+      const [cls] = rankClass(c, p);
+      const longshotMix = c.reduce((s,u)=>s + (1 - (p[u] || 0)), 0) / c.length;
+      let comboScore = prob * (mood === "steady" ? 7 : mood === "balanced" ? 4 : 1.3);
+      comboScore += Math.log(Math.max(1, fairOdds)) * (mood === "spicy" ? .65 : .2);
+      if($("flavor").value === "value") comboScore += longshotMix * .32;
+      if($("flavor").value === "chalk") comboScore += (1 - longshotMix) * .32;
+      if(cls === "chalk" && mood !== "steady") comboScore -= .25;
+      return {c, prob, fairOdds, payout, comboScore};
+    }).filter(x=>isFinite(x.fairOdds) && x.prob > 0).sort((a,b)=>b.comboScore-a.comboScore);
+    const wanted = type === "trifecta" ? Math.min(maxLines, mood === "spicy" ? 18 : 8)
+      : type === "trio" ? Math.min(maxLines, mood === "steady" ? 8 : 14)
+      : Math.min(maxLines, mood === "steady" ? 6 : 10);
+    const lines = ranked.slice(0, wanted);
+    if(!lines.length) continue;
+    const hitProb = clamp(lines.reduce((s,x)=>s + x.prob, 0), 0, .98);
+    const cost = lines.length * unit;
+    const expected = lines.reduce((s,x)=>s + x.prob * x.payout, 0);
+    const avgPayout = lines.reduce((s,x)=>s + x.payout, 0) / lines.length;
+    const core = unique(lines.flatMap(x=>x.c));
+    const [cls,lbl] = rankClass(core, p);
+    const ticket = {type, lines, hitProb, cost, expected, avgPayout, core, cls, lbl, unit};
+    ticket.score = scoreTicket(ticket, p);
+    out.push(ticket);
+  }
+  return out.sort((a,b)=>b.score-a.score).slice(0,3);
+}
+
+function renderRecommendations(){
+  const box = $("recommendations");
+  if(runners.length < 3){
+    box.innerHTML = '<div class="empty">Add at least three runners for recommendations.</div>';
+    return;
+  }
+  const tickets = buildCandidates();
+  if(!tickets.length){
+    box.innerHTML = '<div class="empty">No usable tickets from the current preferences.</div>';
+    return;
+  }
+  box.innerHTML = tickets.map((t,i)=>{
+    const sep = (t.type === "exacta" || t.type === "trifecta") ? " > " : " - ";
+    const shown = t.lines.slice(0, 9);
+    return `<article class="ticket ${i === 0 ? "top-pick" : ""}">
+      <div class="ticket-head">
+        <div>
+          <h3>${i === 0 ? "Top mix: " : ""}${ticketName(t.type, t.cls, t.lines.length)}</h3>
+          <p>${LABEL[t.type]} · ${describeTicket(t)}</p>
+        </div>
+        <span class="badge ${t.cls}">${t.lbl}</span>
+      </div>
+      <div class="metrics">
+        <div class="metric"><span>Lines</span><b>${t.lines.length}</b></div>
+        <div class="metric"><span>Cost</span><b>${yen(t.cost)}</b></div>
+        <div class="metric"><span>Hit est.</span><b>${(t.hitProb*100).toFixed(t.hitProb < .1 ? 1 : 0)}%</b></div>
+        <div class="metric"><span>Avg payout</span><b>${yen(t.avgPayout)}</b></div>
+      </div>
+      <div class="combos">${shown.map(x=>`<span class="combo-chip">${x.c.join(sep)}</span>`).join("")}${t.lines.length > shown.length ? `<span class="combo-chip">+${t.lines.length - shown.length}</span>` : ""}</div>
+    </article>`;
+  }).join("");
+}
+
+function quickPick(){
+  if(!runners.length) return;
+  const {p} = winProbs();
+  const pool = contenderPool(p).slice(0, mood === "spicy" ? 6 : 5);
+  selected = pool;
+  drawScratchpad();
+}
+
+function setRunnersFromRace(race){
+  runners = (race.runners || [])
+    .filter(r=>r.win_odds > 0)
+    .map(r=>({uma:String(r.umaban), name:r.name || null, odds:r.win_odds}));
+  selected = [];
+  drawScratchpad();
+  renderRecommendations();
+}
+
+async function loadLive(){
+  try{
+    const res = await fetch("/api/live", {cache:"no-store"});
+    SNAP = await res.json();
+    const races = (SNAP.races || []).filter(r=>(r.runners || []).some(x=>x.win_odds > 0));
+    if(!races.length) throw new Error("No live card");
+    $("race").innerHTML = races.map(r=>`<option value="${r.race_no}">R${r.race_no} · ${r.name || ("Race " + r.race_no)}</option>`).join("");
+    const feature = races.find(r=>/g1|takarazuka/i.test(r.name || "")) || races[races.length - 1];
+    $("race").value = feature.race_no;
+    setRunnersFromRace(feature);
+  }catch(e){
+    $("race").innerHTML = '<option value="">No live card - enter manually</option>';
+    if(!runners.length) manualEntry(true);
+  }
+}
+
+function manualEntry(seedOnly){
+  const n = seedOnly ? 12 : parseInt(prompt("How many runners?", "12") || "0", 10);
+  if(!n) return;
+  const names = ["Market Star","Rail Runner","Late Kick","Turf Logic","Deep Closer","Gold Tempo","Quiet Form","Wide Draw","Storm Line","Pocket Trip","Green Signal","Long Fuse","Fast Return","Night Odds","Sharp Bend","Final Call","Lucky Gate","Blue Turn"];
+  runners = Array.from({length:n},(_,i)=>({
+    uma:String(i + 1),
+    name:names[i] || null,
+    odds:Number((2.1 + i * 1.35 + (i % 3) * .7).toFixed(1))
+  }));
+  selected = [];
+  $("race").innerHTML = '<option>manual entry</option>';
+  drawScratchpad();
+  renderRecommendations();
+}
+
+$("runners").addEventListener("click", e=>{
+  const od = e.target.closest("input[data-od]");
+  if(od) return;
+  const el = e.target.closest(".runner");
+  if(!el) return;
+  const u = el.dataset.uma;
+  const i = selected.indexOf(u);
+  if(i >= 0) selected.splice(i, 1); else selected.push(u);
+  drawScratchpad();
+});
+$("runners").addEventListener("input", e=>{
+  const od = e.target.closest("input[data-od]");
+  if(!od) return;
+  const r = runners.find(x=>x.uma === od.dataset.od);
+  if(r){ r.odds = +od.value || 0; drawScratchpad(); renderRecommendations(); }
+});
+$("mood").addEventListener("click", e=>{
+  const b = e.target.closest("button[data-mood]");
+  if(!b) return;
+  mood = b.dataset.mood;
+  [...$("mood").children].forEach(c=>c.classList.toggle("on", c === b));
+  renderRecommendations();
+});
+["bettype","unit"].forEach(id=>$(id).addEventListener("input", drawScratchpad));
+["budget","recUnit","flavor","complexity"].forEach(id=>$(id).addEventListener("input", renderRecommendations));
+$("clear").addEventListener("click", ()=>{ selected = []; drawScratchpad(); });
+$("recommend").addEventListener("click", renderRecommendations);
+$("quickPick").addEventListener("click", quickPick);
+$("reload").addEventListener("click", loadLive);
+$("manual").addEventListener("click", ()=>manualEntry(false));
+$("race").addEventListener("change", e=>{
+  const r = (SNAP && SNAP.races || []).find(x=>String(x.race_no) === e.target.value);
+  if(r) setRunnersFromRace(r);
+});
+loadLive();
+</script>
+</body>
+</html>
