@@ -271,6 +271,11 @@ def build_jravan_odds_timeseries(lake: LakePaths) -> dict[str, int]:
                 continue
             rid = _race_id(rec)
             meta = _meta_columns(rec["_meta"])
+            # Bronze _meta timestamps can be ISO strings; coerce to datetime so
+            # they don't collide with netkeiba's datetime column at write time
+            # (same fix as the realtime path below, commit d5527e5).
+            meta["ingested_at"] = _as_utc_opt(meta.get("ingested_at"))
+            meta["published_time"] = _as_utc_opt(meta.get("published_time"))
             for e in rec["entries"]:
                 pool = e["bet_type"]
                 if pool == "win":
