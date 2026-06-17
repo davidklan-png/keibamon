@@ -28,6 +28,9 @@ export const en = {
     winProb: "Win %",
     noLive: "No live card available. Start with manual entry.",
     placeholderRace: "(manual entry race)",
+    standardCta: "Standard tickets · 3 picks",
+    standardHint: "Style and intuition are optional refinements — adjust later.",
+    refine: "Refine by style / intuition →",
   },
   style: {
     title: "Choose your style",
@@ -76,6 +79,7 @@ export const en = {
     backToIntuition: "Change intuition",
     noCandidates: "No usable tickets for these constraints. Loosen them.",
     noRunners: "Add at least three runners first.",
+    resetStandard: "Reset to standard",
     topMix: "Top mix",
     variance: "High variance",
     lowVariance: "Low variance",

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useCallback, useSyncExternalStore } from "react";
 import { ja } from "./ja";
 import { en } from "./en";
 
@@ -22,13 +22,79 @@ function detectInitial(): Lang {
   }
   const nav =
     (typeof navigator !== "undefined" &&
-      (navigator.language || (navigator as any).userLanguage)) ||
+      (navigator.language || (navigator as unknown as { userLanguage?: string }).userLanguage)) ||
     "";
   if (nav.toLowerCase().startsWith("en")) return "en";
   return "ja";
 }
 
-const DICTS: Record<Lang, typeof ja> = { ja, en };
+// ---------------------------------------------------------------------------
+// Single shared store. Module-level state + listener Set, surfaced to React
+// via useSyncExternalStore. This is the fix for the bug where useI18n() was
+// called separately in ~7 components and held language in a per-component
+// useState — toggling updated only the instance that owned the button.
+//
+// No Context provider, no library. The store is the single source of truth.
+// ---------------------------------------------------------------------------
+
+let currentLang: Lang = detectInitial();
+const listeners = new Set<() => void>();
+
+function persistAndApplyDom(next: Lang) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, next);
+  } catch {
+    /* ignore */
+  }
+  if (typeof document !== "undefined") {
+    document.documentElement.lang = next === "ja" ? "ja-JP" : "en";
+  }
+}
+
+// Apply the DOM side-effect for whatever we detected at module load, so the
+// very first paint has the right <html lang> without waiting for a render.
+if (typeof window !== "undefined") {
+  persistAndApplyDom(currentLang);
+}
+
+function subscribe(cb: () => void): () => void {
+  listeners.add(cb);
+  return () => {
+    listeners.delete(cb);
+  };
+}
+
+function getSnapshot(): Lang {
+  return currentLang;
+}
+
+/** Mutate the shared language. Notifies every subscribed component. */
+export function setLang(next: Lang): void {
+  if (next === currentLang) return;
+  currentLang = next;
+  persistAndApplyDom(next);
+  for (const l of listeners) l();
+}
+
+/** Read the current language without subscribing. */
+export function getLang(): Lang {
+  return currentLang;
+}
+
+const DICTS = { ja, en } as const;
+
+function lookup(lang: Lang, key: string): string | undefined {
+  const parts = key.split(".");
+  let cur: unknown = DICTS[lang];
+  for (const p of parts) {
+    if (cur && typeof cur === "object" && p in (cur as Record<string, unknown>)) {
+      cur = (cur as Record<string, unknown>)[p];
+    } else {
+      return undefined;
+    }
+  }
+  return typeof cur === "string" ? cur : undefined;
+}
 
 /**
  * Tiny hand-rolled i18n hook. No library, no provider boilerplate.
@@ -39,53 +105,33 @@ const DICTS: Record<Lang, typeof ja> = { ja, en };
  *     {lang === "ja" ? "EN" : "JA"}
  *   </button>
  *
- * Persists choice to localStorage('keibamon.lang') so the toggle sticks.
+ * Reads the shared store via useSyncExternalStore, so EVERY component calling
+ * useI18n() re-renders on a single setLang() call. Persists to localStorage.
+ *
+ * Lookup contract (no raw key ever renders):
+ *   1. Try current language.
+ *   2. Fall back to English.
+ *   3. If both miss, return "" and console.warn — never the raw key.
  */
 export function useI18n() {
-  const [lang, setLangState] = useState<Lang>(detectInitial);
+  const lang = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  useEffect(() => {
-    try {
-      window.localStorage.setItem(STORAGE_KEY, lang);
-    } catch {
-      /* ignore */
-    }
-    if (typeof document !== "undefined") {
-      document.documentElement.lang = lang === "ja" ? "ja-JP" : "en";
-    }
-  }, [lang]);
-
-  const setLang = useCallback((next: Lang) => setLangState(next), []);
-
-  const dict = DICTS[lang];
-
-  /** Lookup a dotted key, e.g. t("race.title"). Falls back to EN then to key. */
   const t = useCallback(
     (key: string): string => {
-      const parts = key.split(".");
-      let cur: any = dict;
-      for (const p of parts) {
-        if (cur && typeof cur === "object" && p in cur) {
-          cur = cur[p];
-        } else {
-          // Fall back to English, then to the raw key.
-          let fb: any = DICTS.en;
-          for (const q of parts) {
-            if (fb && typeof fb === "object" && q in fb) fb = fb[q];
-            else return key;
-          }
-          return typeof fb === "string" ? fb : key;
-        }
+      const inLang = lookup(lang, key);
+      if (inLang !== undefined) return inLang;
+      const inEn = lookup("en", key);
+      if (inEn !== undefined) return inEn;
+      // Hard guard: never render a raw key. Warn so missing-key bugs are
+      // still visible in dev, but the user never sees "personality.9".
+      if (typeof console !== "undefined") {
+        console.warn(`[i18n] unresolved key: ${key}`);
       }
-      return typeof cur === "string" ? cur : key;
+      return "";
     },
-    [dict],
+    [lang],
   );
 
-  /**
-   * Lookup a key with {placeholder} substitution.
-   *   tFmt("race.overroundMsg", { taken: "23", sum: "1.30" })
-   */
   const tFmt = useCallback(
     (key: string, vars: Record<string, string | number>): string => {
       const raw = t(key);

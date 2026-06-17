@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "./i18n";
 import {
   winProbs,
@@ -116,14 +116,14 @@ function App() {
     setRunners(next);
     setRaceLabel(race.name || `${t("race.placeholderRace")} ${race.race_no}`);
     setIntuition({});
-    setTickets([]);
+    // Auto-regen effect (driven by [runners, style, intuition]) will refill
+    // tickets; no need to set them here.
   }
 
   function seedManual(n = 12) {
     setRunners(seedManualRunners(n));
     setRaceLabel(t("race.placeholderRace"));
     setIntuition({});
-    setTickets([]);
   }
 
   function addRunner() {
@@ -144,16 +144,54 @@ function App() {
   const allUmas = useMemo(() => runners.map((r) => r.uma), [runners]);
 
   // ---------- Generate recommendations ----------
-  function generate() {
-    const out = recommend({
-      allUmas,
-      p,
-      style,
-      intuition,
-    });
+  //
+  // Fix 3: tickets auto-regenerate as soon as a race has >=2 runners, and
+  // again whenever style/intuition change. The TICKETS tab is never a dead
+  // end. Style/Intuition are reframed as optional refinement; the
+  // "Standard tickets" CTA on the Race screen jumps straight to results.
+  function regenerate(overrideStyle?: StyleState, overrideIntuition?: Record<string, IntuitionState>) {
+    const s = overrideStyle ?? style;
+    const i = overrideIntuition ?? intuition;
+    const out = recommend({ allUmas, p, style: s, intuition: i });
     setTickets(out);
     setActiveTicketId(out[0]?.id ?? null);
+  }
+
+  // Auto-regen on any change to runners/style/intuition. Skip the very first
+  // render (handled by the initial loadLive flow). Stay on the current step.
+  const firstRender = useRef(true);
+  useEffect(() => {
+    if (runners.length < 2) {
+      setTickets([]);
+      setActiveTicketId(null);
+      return;
+    }
+    if (firstRender.current) {
+      firstRender.current = false;
+    }
+    regenerate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runners, style, intuition]);
+
+  /** "Standard tickets" CTA — apply DEFAULT_STYLE + empty intuition, jump. */
+  function standardTickets() {
+    setStyle(DEFAULT_STYLE);
+    setIntuition({});
+    regenerate(DEFAULT_STYLE, {});
     setStep("tickets");
+  }
+
+  /** Explicit "I want to see tickets now" — used by Intuition Generate + Remix. */
+  function goToTickets() {
+    regenerate();
+    setStep("tickets");
+  }
+
+  /** Reset over-constraints and try again — used by the empty state. */
+  function resetToStandard() {
+    setStyle(DEFAULT_STYLE);
+    setIntuition({});
+    regenerate(DEFAULT_STYLE, {});
   }
 
   // ---------- Step nav ----------
@@ -226,7 +264,8 @@ function App() {
           onAddRunner={addRunner}
           onSetOdds={setOdds}
           onApplyRace={applyRace}
-          onNext={() => setStep("style")}
+          onStandard={standardTickets}
+          onRefine={() => setStep("style")}
         />
       )}
 
@@ -253,14 +292,15 @@ function App() {
             })
           }
           onBack={() => setStep("style")}
-          onGenerate={generate}
+          onGenerate={goToTickets}
         />
       )}
 
       {step === "tickets" && (
         <TicketsScreen
           tickets={tickets}
-          onRemix={generate}
+          onRemix={goToTickets}
+          onReset={resetToStandard}
           onBackStyle={() => setStep("style")}
           onBackIntuition={() => setStep("intuition")}
           onExplain={(id) => {
@@ -300,7 +340,8 @@ interface RaceScreenProps {
   onAddRunner: () => void;
   onSetOdds: (uma: string, odds: number) => void;
   onApplyRace: (r: LiveRace) => void;
-  onNext: () => void;
+  onStandard: () => void;
+  onRefine: () => void;
 }
 
 function RaceScreen(props: RaceScreenProps) {
@@ -319,7 +360,8 @@ function RaceScreen(props: RaceScreenProps) {
     onAddRunner,
     onSetOdds,
     onApplyRace,
-    onNext,
+    onStandard,
+    onRefine,
   } = props;
 
   const liveRaces = (snap?.races || []).filter((r) =>
@@ -439,9 +481,20 @@ function RaceScreen(props: RaceScreenProps) {
         className="btn primary"
         style={{ width: "100%" }}
         disabled={runners.length < 2}
-        onClick={onNext}
+        onClick={onStandard}
       >
-        {t("nav.style")} →
+        {t("race.standardCta")}
+      </button>
+      <p className="hint" style={{ textAlign: "center", marginTop: 8 }}>
+        {t("race.standardHint")}
+      </p>
+      <button
+        className="btn ghost"
+        style={{ width: "100%", marginTop: 8 }}
+        onClick={onRefine}
+        disabled={runners.length < 2}
+      >
+        {t("race.refine")}
       </button>
     </>
   );
@@ -662,6 +715,7 @@ function IntuitionScreen(props: IntuitionScreenProps) {
 interface TicketsScreenProps {
   tickets: Ticket[];
   onRemix: () => void;
+  onReset: () => void;
   onBackStyle: () => void;
   onBackIntuition: () => void;
   onExplain: (id: string) => void;
@@ -669,12 +723,22 @@ interface TicketsScreenProps {
 
 function TicketsScreen(props: TicketsScreenProps) {
   const { t, tFmt } = useI18n();
-  const { tickets, onRemix, onBackStyle, onBackIntuition, onExplain } = props;
+  const { tickets, onRemix, onReset, onBackStyle, onBackIntuition, onExplain } = props;
   if (tickets.length === 0) {
+    // Only reachable when a real regenerate() returned 0 tickets — i.e. the
+    // current constraints (typically too many "avoid" tags) are unsolvable.
+    // Pair the message with a one-tap reset instead of a dead end.
     return (
       <>
         <section className="section">
           <p className="empty">{t("tickets.noCandidates")}</p>
+          <button
+            className="btn primary"
+            style={{ width: "100%", marginTop: 12 }}
+            onClick={onReset}
+          >
+            {t("tickets.resetStandard")}
+          </button>
         </section>
         <div className="btn-row">
           <button className="btn ghost" onClick={onBackStyle}>
@@ -707,7 +771,6 @@ function TicketsScreen(props: TicketsScreenProps) {
                     {t(`betType.${tk.type}`)}
                   </h3>
                   <p className="tpdesc">
-                    {t(`personality.${tk.variance === "high" ? "" : ""}`)}
                     {shownLines.length} {t("tickets.lines")} ·{" "}
                     {t(`valueTag.${tk.tag}`)}
                   </p>
