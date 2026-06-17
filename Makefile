@@ -1,5 +1,8 @@
 .PHONY: test api ui
 
+# Canonical interpreter. Override with `make PYTHON=python3 ...` if needed.
+PYTHON ?= ./venv64/bin/python
+
 test:
 	pytest
 
@@ -11,4 +14,4 @@ ui:
 
 
 jravan-import:
-	python tools/jravan/import_delta.py --from /Volumes/KEIBA/keibamon-xfer
+	$(PYTHON) tools/jravan/import_delta.py --from /Volumes/KEIBA/keibamon-xfer
