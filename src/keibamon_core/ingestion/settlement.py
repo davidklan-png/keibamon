@@ -209,10 +209,28 @@ def _load_scratched_runner_keys(
 
 
 def _normalize_selection(selection: str, pool: str) -> str:
+    """Normalize a bet selection into the canonical payout-table combo form.
+
+    Payout combos are stored as concatenated digits (no dashes):
+    - win/place:   ``'01'``
+    - quinella/wide: ``'0108'`` (2-digit per horse, ascending)
+    - exacta:       ``'1109'`` (2-digit per horse, finishing order)
+    - trifecta:     ``'110910'`` (3 x 2-digit, finishing order)
+    - trio:         ``'040507'`` (3 x 2-digit, ascending)
+    - bracket_quinella: ``'23'`` (single-digit brackets, ascending)
+
+    Callers may pass either the payout-format string directly (passthrough) or
+    a dash-separated form (``'01-08'`` -> ``'0108'``). The single-int path that
+    used to mangle ``'0208'`` quinella into ``'208'`` is gone -- exotics are
+    multi-digit by construction and any concatenated digit string is already
+    canonical.
+    """
     parts = [p for p in str(selection).replace("-", " ").split() if p]
     if pool in ("win", "place"):
         return f"{int(parts[0]):02d}"
-    return "-".join(f"{int(p):02d}" for p in parts)
+    if len(parts) == 1:
+        return parts[0]
+    return "".join(f"{int(p):02d}" for p in parts)
 
 
 def _sql(value: str) -> str:
