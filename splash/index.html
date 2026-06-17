@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keibamon 競馬モン — local-first horse-racing data & ML</title>
-<meta name="description" content="Keibamon: a local-first data and ML platform for Japanese horse racing (JRA/NAR) — point-in-time features, walk-forward backtesting, and honest, published validation. Built in public.">
+<title>Keibamon 競馬モン — a horse-racing data lab, built in public</title>
+<meta name="description" content="Keibamon: a local-first data & ML platform for Japanese horse racing (JRA). A leakage-guarded, walk-forward evaluation spine — and the honest finding that the JRA market prices public information efficiently. Five signals tested, five honest nulls.">
 <meta property="og:title" content="Keibamon 競馬モン">
-<meta property="og:description" content="Local-first horse-racing data & ML platform for JRA/NAR. Built in public.">
+<meta property="og:description" content="A local-first horse-racing data lab for JRA. Rigorous evaluation spine; honest market-efficiency findings. Built in public.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://keibamon.com/keibamon.png">
 <style>
@@ -24,7 +24,7 @@
   .eyebrow{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.18em; text-transform:uppercase; color:var(--turf)}
   h1{font-size:clamp(40px,9vw,76px); line-height:.98; margin:.35em 0 .1em; letter-spacing:-.02em}
   h1 .ja{color:var(--gold); font-weight:700}
-  .lede{font-size:clamp(17px,2.6vw,21px); color:var(--muted); max-width:60ch; margin:.4em 0 0}
+  .lede{font-size:clamp(17px,2.6vw,21px); color:var(--muted); max-width:62ch; margin:.4em 0 0}
   .status{display:inline-flex; align-items:center; gap:.5em; margin-top:22px; padding:.4em .8em;
     border:1px solid var(--line); border-radius:999px; background:var(--panel); font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; color:var(--muted)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--turf);box-shadow:0 0 0 4px rgba(57,192,122,.18)}
@@ -34,15 +34,25 @@
   .card .k{font:600 11px/1 ui-monospace,monospace; letter-spacing:.12em; color:var(--gold)}
   .card h3{margin:.6em 0 .3em; font-size:18px}
   .card p{margin:0; color:var(--muted); font-size:14.5px}
+  .card .stat{font:700 22px/1 ui-monospace,monospace; color:var(--ink); margin:.5em 0 .15em}
+  /* scoreboard */
+  .score{display:flex; flex-direction:column; gap:10px}
+  .scorerow{display:flex; align-items:center; justify-content:space-between; gap:14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 16px}
+  .scorerow .name{font-weight:600; font-size:15px}
+  .scorerow .name span{display:block; color:var(--muted); font-size:13px; font-weight:400; margin-top:2px}
+  .tag{font:600 10.5px/1 ui-monospace,monospace; letter-spacing:.1em; padding:.5em .7em; border-radius:999px; white-space:nowrap; text-transform:uppercase}
+  .tag--null{color:var(--gold); background:rgba(224,179,65,.1); border:1px solid rgba(224,179,65,.32)}
+  .tag--live{color:var(--turf); background:rgba(57,192,122,.12); border:1px solid rgba(57,192,122,.34)}
   .links{display:flex; flex-wrap:wrap; gap:12px; margin-top:22px}
   .btn{display:inline-flex; align-items:center; gap:.55em; text-decoration:none; font-weight:600;
     padding:.7em 1.1em; border-radius:12px; border:1px solid var(--line); color:var(--ink); background:var(--panel); transition:transform .15s,border-color .15s}
   .btn:hover{transform:translateY(-2px); border-color:var(--turf)}
   .btn--turf{background:var(--turf); color:#062014; border-color:transparent}
   .note{margin-top:40px; padding:16px 18px; border-left:3px solid var(--rail); color:var(--muted); font-size:14px; background:linear-gradient(90deg,rgba(57,192,122,.05),transparent)}
+  .note b{color:var(--ink)}
   footer{margin-top:48px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; display:flex; flex-wrap:wrap; gap:6px 18px; justify-content:space-between}
   a{color:var(--turf)}
-  svg.shoe{vertical-align:-2px}
   .avatar{width:104px;height:104px;border-radius:22px;border:1px solid var(--line);background:var(--panel);object-fit:cover;box-shadow:0 14px 34px rgba(0,0,0,.5);margin-bottom:20px;display:block}
 </style>
 </head>
@@ -51,30 +61,77 @@
     <img class="avatar" src="keibamon.png" width="104" height="104" alt="Keibamon 競馬モン avatar" decoding="async">
     <p class="eyebrow">build in public · 個人開発</p>
     <h1>Keibamon <span class="ja">競馬モン</span></h1>
-    <p class="lede">A local-first data &amp; machine-learning platform for Japanese horse racing (JRA / NAR) — built to turn open racing data into honest, testable insight.</p>
-    <span class="status"><span class="dot"></span>ALPHA · ANALYZER UI IN PROGRESS</span>
+    <p class="lede">A local-first data &amp; machine-learning lab for Japanese horse racing (JRA) — built to turn open racing data into honest, testable insight. The point isn't a tip sheet. It's a yardstick rigorous enough to tell a real signal from a flattering coincidence — and the willingness to publish what it says.</p>
+    <span class="status"><span class="dot"></span>PROGRAMME COMPLETE · 6 NULLS · MARKET EFFICIENT</span>
 
-    <h2>// Objectives</h2>
+    <h2>// The platform</h2>
     <div class="grid">
       <div class="card">
-        <div class="k">DATA PLATFORM</div>
-        <h3>Medallion data lake</h3>
-        <p>JRA-VAN fundamentals + netkeiba odds dynamics, normalized into a replayable bronze→silver→gold lake.</p>
+        <div class="k">DATA LAKE</div>
+        <div class="stat">30 yrs</div>
+        <h3>Medallion lake</h3>
+        <p>JRA-VAN official records normalized bronze→silver→gold: ~462k race entries, plus a full year of intraday odds curves (83M time-series rows), training times (12.5M), mining, going &amp; weather.</p>
       </div>
       <div class="card">
         <div class="k">INTEGRITY</div>
-        <h3>Point-in-time features</h3>
-        <p>Every feature respects what was knowable at race time — no leakage, validated with walk-forward backtesting.</p>
+        <div class="stat">PIT</div>
+        <h3>The evaluation spine</h3>
+        <p>Point-in-time correct (a decision at time <em>t</em> sees only what was knowable at <em>t</em>), leakage-guarded, walk-forward, settled at official payouts, judged against a calibrated market baseline. The yardstick everything is measured against.</p>
       </div>
       <div class="card">
-        <div class="k">MODELING</div>
-        <h3>AI-assisted analysis</h3>
-        <p>Within-race standardized indices and ML models that surface notable horses, with predictor scoring.</p>
+        <div class="k">LIVE</div>
+        <div class="stat">race-day</div>
+        <h3>Capture &amp; dashboard</h3>
+        <p>Official realtime odds captured race-day, residual-drift &amp; going context surfaced to a phone dashboard. Informational only — never a bet recommender.</p>
+      </div>
+    </div>
+
+    <h2>// Findings — the market-test scoreboard</h2>
+    <div class="score">
+      <div class="scorerow"><div class="name">Data-mining (DM / TM)<span>JRA-VAN's own time &amp; score models</span></div><span class="tag tag--null">priced in</span></div>
+      <div class="scorerow"><div class="name">Going / track-condition handling<span>per-horse wet-vs-firm aptitude</span></div><span class="tag tag--null">priced in</span></div>
+      <div class="scorerow"><div class="name">Training times (坂路 · woodchip)<span>final-furlong gallop splits</span></div><span class="tag tag--null">priced in</span></div>
+      <div class="scorerow"><div class="name">Odds curve / closing-line<span>announcement→post movement</span></div><span class="tag tag--null">priced in</span></div>
+      <div class="scorerow"><div class="name">Exotic pools (Harville / Henery)<span>cross-pool win-implied projection</span></div><span class="tag tag--null">priced in</span></div>
+      <div class="scorerow"><div class="name">Multivariate model (Benter two-stage)<span>real signal alone — but blend weight a=0 with the market in</span></div><span class="tag tag--null">priced in</span></div>
+    </div>
+    <p class="note"><b>Six signals tested, six honest nulls.</b> Each was held to the same bar — beat the de-vigged market, out of sample, net of takeout, with the confidence interval clearing zero. The capstone is the cleanest: a full multivariate model that genuinely predicts in isolation (it learns real handicapping signal), yet contributes <em>exactly zero</em> once the market price is in the blend — the market had already priced every scrap. The JRA pari-mutuel prices public information efficiently, across static factors, intraday dynamics, and cross-pool projection. These negative results are the most valuable thing here: knowing the market is efficient beats <em>paying</em> to find out. The public-information edge-hunt is closed.</p>
+
+    <h2>// What the data did reveal</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">STRUCTURE</div>
+        <h3>Henery γ ≈ 0.856</h3>
+        <p>Favorites are less dominant in 2nd/3rd than naive Harville pricing assumes — reproduced walk-forward, matching the racing-statistics literature (Henery 1981 / Stern 1994).</p>
       </div>
       <div class="card">
-        <div class="k">HONESTY</div>
-        <h3>Published validation</h3>
-        <p>Accuracy and recovery measured and shown openly. Curated results published here; raw data stays local.</p>
+        <div class="k">STRUCTURE</div>
+        <h3>Favorite-longshot bias compounds</h3>
+        <p>In exotics, popular combinations are overbet and thin longshot combos underbet — boxing favorites systematically overpays. A "bet-smarter" nuance, not an edge.</p>
+      </div>
+      <div class="card">
+        <div class="k">WHY IT'S TRUSTWORTHY</div>
+        <h3>Market is calibrated — even the tail</h3>
+        <p>The de-vigged win market is near-perfectly calibrated (no exploitable favorite-longshot mispricing). That sound baseline is precisely why the nulls hold up.</p>
+      </div>
+    </div>
+
+    <h2>// Now &amp; next</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">LIVE NOW</div>
+        <h3>Fair-value bet helper →</h3>
+        <p>The research is done; the fun isn't. The Henery joint-distribution model is now a live tool: turn any race's win odds into honest exacta/quinella/trio/trifecta prices, dodge the overbet chalk, and structure recreational tickets that aren't sucker bets. <a href="/helper.html">Open the helper →</a></p>
+      </div>
+      <div class="card">
+        <div class="k">CONCLUDED</div>
+        <h3>The efficient frontier</h3>
+        <p>Six nulls close the public-information programme. The de-vigged win market is the frontier for public data; any remaining edge needs private data, cross-pool information, or latency at close — none of them recreational.</p>
+      </div>
+      <div class="card">
+        <div class="k">ONGOING</div>
+        <h3>The platform lives on</h3>
+        <p>Forward odds-curve capture keeps banking race-day data, the evaluation spine stands ready for any future signal, and the lake remains a clean research instrument — edge or no edge.</p>
       </div>
     </div>
 
@@ -84,14 +141,16 @@
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
         GitHub — keibamon repo
       </a>
+      <a class="btn btn--turf" href="/helper.html">⚖ Fair-value bet helper</a>
+      <a class="btn" href="/live.html">Live race-day dashboard →</a>
       <a class="btn" href="https://kinokoholic.com" target="_blank" rel="noreferrer">き kinokoholic.com — portfolio</a>
     </div>
 
-    <p class="note">Keibamon is one of the build-in-public projects under <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>. The platform runs locally; only curated, derived results are published to this site.</p>
+    <p class="note">Keibamon is one of the build-in-public projects under <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>. The platform runs locally; only curated, derived results are published here. Nothing on this site is betting advice.</p>
 
     <footer>
       <span>© 2026 David Klan · built in public</span>
-      <span>JRA / NAR · データ分析 &amp; ML</span>
+      <span>JRA · データ分析 &amp; ML · honest validation</span>
     </footer>
   </main>
 </body>
