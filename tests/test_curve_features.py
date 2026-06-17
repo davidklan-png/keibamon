@@ -11,10 +11,10 @@ pytest.importorskip("duckdb")
 from keibamon_core.features.point_in_time import assert_point_in_time
 from keibamon_core.ingestion.jravan_silver import build_jravan_odds_timeseries
 from keibamon_core.ingestion.curve_features import CURVE_FEATURE_SET, build_curve_features
+from keibamon_core.ingestion.settlement import Bet, settle_many
 from keibamon_core.lake import read_dataset, write_dataset, write_parquet
 from keibamon_core.paths import LakePaths
 from keibamon_core.schemas import FeatureRow
-from tools.validate_curve_signal import settle_win_bets
 
 
 def _dt(hour: int, minute: int = 0) -> datetime:
@@ -133,13 +133,16 @@ def test_drift_sign_rank_change_and_devig_centering(curve_lake: LakePaths) -> No
 def test_settlement_uses_final_payout_not_early_odds(curve_lake: LakePaths) -> None:
     build_curve_features(curve_lake, decision_minutes=(10,))
     bet = _rows(curve_lake)[1]
-    payouts = read_dataset(curve_lake.silver_dataset("jravan_payouts"))
-
-    report = settle_win_bets([bet], payouts)
-    assert report.bets == 1
-    assert report.hit_rate == 1.0
-    assert report.infinitesimal_roi == pytest.approx(5.0)  # 600 yen per 100 yen stake
-    assert report.infinitesimal_roi != pytest.approx(9.0)  # not the 10.0 early price
+    settlements = settle_many(
+        curve_lake,
+        [Bet(bet["race_id"], "win", f"{int(bet['horse_number']):02d}", stake_yen=100)],
+    )
+    assert len(settlements) == 1
+    s = settlements[0]
+    assert s.returned_yen == 600          # 600 yen official payout per 100-yen stake
+    assert s.returned_yen != 1000         # NOT the 10.0 early price * 100 yen
+    assert s.payout_yen > 0               # it was a winning bet
+    assert s.reason == "official_payout"
 
 
 def test_build_odds_timeseries_from_netkeiba_snapshots(tmp_path: Path) -> None:
