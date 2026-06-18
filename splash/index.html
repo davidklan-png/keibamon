@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Keibamon 競馬モン — a horse-racing data lab, built in public</title>
-<meta name="description" content="Keibamon: a local-first data & ML platform for Japanese horse racing (JRA). A leakage-guarded, walk-forward evaluation spine — and the honest finding that the JRA market prices public information efficiently. Five signals tested, five honest nulls.">
+<meta name="description" content="Keibamon: a local-first data & ML platform for Japanese horse racing (JRA). A leakage-guarded, walk-forward evaluation spine — and the honest finding that the JRA market prices public information efficiently. Six signals tested, six honest nulls.">
 <meta property="og:title" content="Keibamon 競馬モン">
 <meta property="og:description" content="A local-first horse-racing data lab for JRA. Rigorous evaluation spine; honest market-efficiency findings. Built in public.">
 <meta property="og:type" content="website">
@@ -86,6 +86,28 @@
       </div>
     </div>
 
+    <h2>// How it runs — the architecture</h2>
+    <div class="grid">
+      <div class="card">
+        <div class="k">TOPOLOGY</div>
+        <div class="stat">one host</div>
+        <h3>Local-first, single machine</h3>
+        <p>Consolidating onto one stationary workstation: ingestion, the medallion lake, modeling, race-day capture and the edge push all run on the same local machine — no cloud database of record, no cross-machine handoff. The git repo and the local lake are the only sources of truth.</p>
+      </div>
+      <div class="card">
+        <div class="k">DATA FLOW</div>
+        <div class="stat">source → spine → phone</div>
+        <h3>Lake to edge</h3>
+        <p>Race data lands as immutable bronze, normalizes through silver→gold→marts in DuckDB, and is judged by the evaluation spine. Only curated, derived results push to a throwaway Cloudflare D1 + Worker that a phone reads at the track — if the edge goes stale, the lake is still the truth.</p>
+      </div>
+      <div class="card">
+        <div class="k">MIGRATION</div>
+        <div class="stat">in progress</div>
+        <h3>Retiring the licensed feed</h3>
+        <p>The original two-machine design — a Windows JV-Link host feeding the analytics machine over an airgap — is collapsing to a single, scrape-sourced host. The licensed historical pull is frozen as an immutable cross-check oracle; the new feed must reconcile against it at zero mismatch before the old host is switched off.</p>
+      </div>
+    </div>
+
     <h2>// Findings — the market-test scoreboard</h2>
     <div class="score">
       <div class="scorerow"><div class="name">Data-mining (DM / TM)<span>JRA-VAN's own time &amp; score models</span></div><span class="tag tag--null">priced in</span></div>
@@ -122,6 +144,11 @@
         <div class="k">LIVE NOW</div>
         <h3>Fair-value bet helper →</h3>
         <p>The research is done; the fun isn't. The Henery joint-distribution model is now a live tool: turn any race's win odds into honest exacta/quinella/trio/trifecta prices, dodge the overbet chalk, and structure recreational tickets that aren't sucker bets. <a href="/helper">Open the helper →</a></p>
+      </div>
+      <div class="card">
+        <div class="k">NEXT</div>
+        <h3>A recreational race companion</h3>
+        <p>The helper is being reworked into a guided five-step flow — pick a race, tell it how you like to play, add your read on the runners, get three honest ticket shapes (Safe / Balanced / Spicy) with plain-language reasons. Fun and legible, never a tip sheet or a profit claim.</p>
       </div>
       <div class="card">
         <div class="k">CONCLUDED</div>
