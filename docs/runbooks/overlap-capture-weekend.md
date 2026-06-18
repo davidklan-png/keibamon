@@ -15,16 +15,22 @@ together. Substitute `DATE=YYYYMMDD`, `VENUE=<slug>` throughout.
 
 ---
 
-## Thursday — sync + select + post (Mac)
+## Thursday — sync + scrape card + select + post (Mac)
 
 - [ ] `python tools/whichdevice.py` → `mac-dev`.
 - [ ] Green test, then **push** so the PC can mirror: `pytest -q` → `git push origin main`.
-- [ ] `weekend_run.py select --date $DATE --venue $VENUE` → sanity-check the card.
+- [ ] **Scrape the card once entries post:** `scrape_ingest.py --date $DATE` →
+      populates entries + each race's `grade`, `netkeiba_race_id`, and post time.
+      **This is what `track --grades` resolves from on race day** — skip it and the
+      one-command track has nothing to look up (it will warn and skip, not guess).
+- [ ] `weekend_run.py select --date $DATE --grades G1,G2,G3` → confirm it lists the
+      graded races (this weekend: the 2 Sunday GⅢ). Drop `--grades` to see the full card.
 - [ ] `post` (pipeline fn) → freeze our model odds **pre-market**. Confirm
       `posted_before_market = True`. (Source `CF_*` first.)
 
 > Why now: posting before the market prints is the whole point of the calibration
-> record. A late post still logs, but flagged contaminated.
+> record. A late post still logs, but flagged contaminated. And the card scrape must
+> precede race-day `track --grades` — that's the dependency that makes it lookup-free.
 
 ## Thursday — sync down (PC)
 
@@ -36,14 +42,23 @@ together. Substitute `DATE=YYYYMMDD`, `VENUE=<slug>` throughout.
 - [ ] If the tool reports FAIL, stop and reconcile on the Mac — do not merge on
       the PC (it is a pull-only mirror).
 
-## Saturday — track the live curve (Mac), all race day
+## Race day (Sat/Sun) — track the live curve (Mac), graded races only
+
+Live odds are **graded-only by policy** (G1/G2/G3) — keeps polling polite (ADR-0004).
 
 - [ ] Mac **stationary, lid forced open**; disable lid-close sleep in System Settings.
 - [ ] Source `CF_*`.
-- [ ] `weekend_run.py track --date $DATE --venue $VENUE --nk-race-ids <...> --post-times-jst <...>`.
+- [ ] **Preferred — one command, no lookups:**
+      `weekend_run.py track --date $DATE --grades G1,G2,G3`
+      resolves *which* races are graded, their race numbers, netkeiba ids, and post
+      times from the lake — no hand-entered race numbers or nk ids, across all venues
+      that day. (This weekend: the 2 Sunday GⅢ — Fuchu Himba S at Tokyo, Shirasagi S
+      at Hanshin.)
+- [ ] *Fallback only if grade-resolve is unavailable:* name them explicitly with
+      `--venue $VENUE --races <n> --nk-race-ids <...> --post-times-jst <HH:MM>`.
 - [ ] Watch the cycle line: `last_banked` climbing, `last_push=ok`. A
       `preflight warnings:` line = fix sleep/creds **without** stopping the loop.
-- [ ] Leave running until after the last race posts.
+- [ ] Leave running until after the last graded race posts.
 
 > This is the only unrecoverable job: no realtime entitlement, no `0B41/0B42`
 > backfill. A missed curve is gone. The June 14 loss was a closed lid — don't repeat it.

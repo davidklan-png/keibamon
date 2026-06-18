@@ -36,6 +36,8 @@ _RACES_MART_COLS = {
     "results_available",
     "source_name",
     "content_hash",
+    "grade",
+    "netkeiba_race_id",
 }
 
 _RACE_A = "jra-20260614-09-01"  # jyo 09 = Hanshin (project's non-standard map)
@@ -61,7 +63,9 @@ def _jravan_race_row(rid: str, *, post: datetime | None = _POST_A) -> dict[str, 
         "scheduled_post_time": post,
         # --- extra jravan columns the mart must NOT carry ---
         "race_name": "Tenno Sho (Spring)",
-        "grade_code": "G1",
+        # JV-Data 2003.グレードコード letter (A=G1, B=G2, C=G3, ...). The mart
+        # normalizes via adapters.jravan.grade_label.
+        "grade_code": "A",
         "last_3f_seconds": 34.1,
         "weather": "fine",
         "going_turf": "good",
@@ -218,6 +222,11 @@ def test_races_mart_from_jravan_computes_field_size_and_results_available(lake):
     assert b["field_size"] == 3
     assert b["results_available"] is False
     assert b["scheduled_post_time"] is None  # NULL post time surfaces as None
+    # grade normalized from grade_code 'A' -> 'G1' (spec-derived map).
+    assert a["grade"] == "G1"
+    assert b["grade"] == "G1"
+    # netkeiba_race_id is absent on JV-Link-only rows -> None.
+    assert a["netkeiba_race_id"] is None
 
 
 # --- CSV fallback still builds the mart --------------------------------------
@@ -270,3 +279,83 @@ def test_jravan_preferred_over_csv_when_both_present(lake):
     refresh_marts(lake)
     ids = {r["race_id"] for r in read_parquet(lake.mart(MART_RACES))}
     assert ids == {_RACE_A, _RACE_B}  # jravan wins; CSV-only race excluded
+
+
+# --- grade normalization + cross-source coalesce ----------------------------
+
+
+def test_races_mart_normalizes_grade_from_grade_code(lake):
+    """grade_code letters (spec table) -> canonical grade label."""
+    races = [
+        {**_jravan_race_row("jra-20260614-09-01"), "grade_code": "A"},  # G1
+        {**_jravan_race_row("jra-20260614-09-02"), "grade_code": "B"},  # G2
+        {**_jravan_race_row("jra-20260614-09-03"), "grade_code": "C"},  # G3
+        {**_jravan_race_row("jra-20260614-09-04"), "grade_code": "D"},  # non-graded stakes
+        {**_jravan_race_row("jra-20260614-09-05"), "grade_code": "E"},  # special
+        {**_jravan_race_row("jra-20260614-09-06"), "grade_code": "L"},  # listed
+        {**_jravan_race_row("jra-20260614-09-07"), "grade_code": None},  # unknown
+        {**_jravan_race_row("jra-20260614-09-08"), "grade_code": "F"},  # JG1 (jump)
+    ]
+    write_dataset(races, lake.silver_dataset("jravan_races"))
+    refresh_marts(lake)
+    by_id = {r["race_id"]: r for r in read_parquet(lake.mart(MART_RACES))}
+
+    assert by_id["jra-20260614-09-01"]["grade"] == "G1"
+    assert by_id["jra-20260614-09-02"]["grade"] == "G2"
+    assert by_id["jra-20260614-09-03"]["grade"] == "G3"
+    assert by_id["jra-20260614-09-04"]["grade"] is None  # non-graded
+    assert by_id["jra-20260614-09-05"]["grade"] is None  # special
+    assert by_id["jra-20260614-09-06"]["grade"] is None  # listed
+    assert by_id["jra-20260614-09-07"]["grade"] is None  # unknown
+    assert by_id["jra-20260614-09-08"]["grade"] == "JG1"  # jump grade
+
+
+def _nk_race_row(rid: str, *, nk_id: str = "202606090301", grade_code: str | None = "C") -> dict[str, Any]:
+    """netkeiba_races silver row shape (mirrors what adapters/netkeiba_races.py
+    will write). Carries the same shape as jravan_races PLUS netkeiba_race_id;
+    written to its own silver table so the JV-Link silver schema stays clean."""
+    base = _jravan_race_row(rid)
+    base.update({
+        "source_name": "netkeiba",
+        "content_hash": f"hash-nk-{rid}",
+        "netkeiba_race_id": nk_id,
+        "grade_code": grade_code,
+    })
+    return base
+
+
+def test_races_mart_dedupes_by_race_id_preferring_jravan(lake):
+    """When JV-Link + netkeiba both have a row for the same race_id, the mart
+    shows ONE row (JV-Link preferred) but coalesces netkeiba-only fields.
+    Each source writes to its OWN silver table (jravan_races vs netkeiba_races)
+    so the JV-Link schema stays byte-identical."""
+    jra_row = _jravan_race_row(_RACE_A)
+    jra_row["content_hash"] = "jravan-hash"  # pin for the cross-source assertion
+    nk_row = _nk_race_row(_RACE_A, nk_id="202606090301")
+    write_dataset([jra_row], lake.silver_dataset("jravan_races"))
+    write_dataset([nk_row], lake.silver_dataset("netkeiba_races"))
+
+    refresh_marts(lake)
+    rows = read_parquet(lake.mart(MART_RACES))
+    assert len(rows) == 1
+    only = rows[0]
+    # JV-Link preferred -> its content_hash surfaces.
+    assert only["content_hash"] == "jravan-hash"
+    assert only["source_name"] == "jravan"
+    # netkeiba-only field coalesces across tables so self-resolving track can
+    # still look up the nk id on a JV-Link-covered race.
+    assert only["netkeiba_race_id"] == "202606090301"
+
+
+def test_races_mart_keeps_netkeiba_row_when_no_jravan(lake):
+    """Pre-market scrape: only the netkeiba row exists yet. It surfaces as-is."""
+    nk_row = _nk_race_row(_RACE_A, nk_id="202606090301", grade_code="C")
+    write_dataset([nk_row], lake.silver_dataset("netkeiba_races"))
+
+    refresh_marts(lake)
+    rows = read_parquet(lake.mart(MART_RACES))
+    assert len(rows) == 1
+    only = rows[0]
+    assert only["source_name"] == "netkeiba"
+    assert only["netkeiba_race_id"] == "202606090301"
+    assert only["grade"] == "G3"

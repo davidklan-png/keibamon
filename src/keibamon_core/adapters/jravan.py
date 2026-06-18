@@ -166,6 +166,40 @@ def going_label(code: str | None) -> str | None:
     return GOING_LABELS.get(w) if w else None
 
 
+# JV-Data 2003.グレードコード -> normalized grade label. Derived from the spec
+# code table (sheet5 of JV-Data仕様書_4.9.0.1.xlsx) and validated against the
+# distinct grade_code values present in jravan_races (A/B/C/D/E/F/G/H/L).
+#   A=G1(平地)   B=G2(平地)   C=G3(平地)
+#   D=グレードのない重賞   E=重賞以外の特別   L=リステッド     -> not graded
+#   F=J・G1(障害)  G=J・G2(障害)  H=J・G3(障害)
+# D / E / L / NULL / unknown -> None (not a graded race).
+GRADE_CODE_MAP: dict[str, str] = {
+    "A": "G1", "B": "G2", "C": "G3",        # flat graded
+    "F": "JG1", "G": "JG2", "H": "JG3",     # jump graded
+}
+
+# The default "live odds = graded only" set (ADR-0003/0004 polite-volume policy).
+# JRA flat grades only. Jump grades (JG1/JG2/JG3) are out by default -- add them
+# here (one-line change) to include jump-graded racing.
+#
+# NOTE on JpnI/II/III: per the JV-Data spec 特記事項, the international-G vs
+# domestic-Jpn distinction is NOT encoded in grade_code -- code A covers BOTH G1
+# and JpnI (likewise B->G2/JpnII, C->G3/JpnIII; e.g. かしわ記念=Jpn1 carries
+# code A). The disambiguating "国際格付けを持つ重賞レース一覧" CSV has been
+# deprecated since 2011, so JpnI/II/III races pass through as "G1"/"G2"/"G3" and
+# cannot be filtered out at the grade_code layer.
+GRADED_DEFAULT: tuple[str, ...] = ("G1", "G2", "G3")
+
+
+def grade_label(code: str | None) -> str | None:
+    """JV-Data 2003.グレードコード -> normalized grade label, or None.
+
+    Non-graded / listed / unknown codes map to None. See :data:`GRADE_CODE_MAP`
+    and :data:`GRADED_DEFAULT` for the policy notes (incl. the Jpn conflation).
+    """
+    return GRADE_CODE_MAP.get((code or "").strip())
+
+
 # --------------------------------------------------------------------------- #
 # Record layouts.  ALL offsets are BYTE positions from the JV-Data spec PDF.
 #

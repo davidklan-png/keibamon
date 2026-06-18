@@ -91,6 +91,7 @@ def select(
     min_field_size: int = 1,
     include_run: bool = False,
     races: list[int] | None = None,
+    grades: tuple[str, ...] | None = None,
 ) -> list[str]:
     """Pick the race_ids on the card we will post for. Mac-only (lake + ML).
 
@@ -106,15 +107,18 @@ def select(
     we can still post a pre-market card for. ``include_run=True`` lifts the
     results gate for backfilling / replays.
 
-    The ``races`` mart has no ``grade`` column (see ``ingestion/marts``), so
-    grade-based selection is not possible without a schema add -- flagged as a
-    follow-up, not faked here. Optional ``venue`` matches ``racecourse``;
-    optional ``races`` is a race-number subset (e.g. ``[1, 2, 11]``).
+    The ``races`` mart carries a normalized ``grade`` column (G1/G2/G3/JG1/
+    JG2/JG3 or NULL). ``grades=("G1","G2","G3")`` filters to graded only --
+    the ADR-0003/0004 polite-volume policy is "live odds = graded only by
+    default"; pass ``None`` (the default) for the unfiltered card.
+
+    Optional ``venue`` matches ``racecourse``; optional ``races`` is a
+    race-number subset (e.g. ``[1, 2, 11]``).
 
     Returns canonical ``race_id``\\ s sorted by ``scheduled_post_time`` then
     ``race_id`` (the day's running order). An empty result is a valid answer
-    (no card / wrong date) -- returns ``[]``, never raises on the filter. A
-    wrong device still raises :class:`WrongDeviceError`.
+    (no card / wrong date / no graded race matches) -- returns ``[]``, never
+    raises on the filter. A wrong device still raises :class:`WrongDeviceError`.
 
     See :func:`select_specs` for the ``(race_id, scheduled_post_time)``
     companion; ``track``'s adaptive cadence reads post times from there to
@@ -125,7 +129,7 @@ def select(
             lake, race_date,
             role_file=role_file, venue=venue,
             min_field_size=min_field_size,
-            include_run=include_run, races=races,
+            include_run=include_run, races=races, grades=grades,
         )
     ]
 
@@ -139,6 +143,7 @@ def select_specs(
     min_field_size: int = 1,
     include_run: bool = False,
     races: list[int] | None = None,
+    grades: tuple[str, ...] | None = None,
 ) -> list[tuple[str, Any]]:
     """Same selection as :func:`select`, but returns
     ``(race_id, scheduled_post_time)`` tuples so the caller (e.g.
@@ -168,6 +173,12 @@ def select_specs(
     if venue:
         preds.append("LOWER(racecourse) = ?")
         params.append(venue.lower())
+    if grades:
+        # Filter to the normalized grade label set. NULL grade (non-graded
+        # races) never matches -- the ADR-0003/0004 policy is "graded only".
+        placeholders = ", ".join("?" for _ in grades)
+        preds.append(f"grade IN ({placeholders})")
+        params.extend(grades)
 
     sql = (
         f"SELECT race_id, scheduled_post_time "

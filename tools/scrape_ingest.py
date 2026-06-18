@@ -4,14 +4,21 @@ Ingests one race day's worth of entries / results / payouts into the lake,
 mapping netkeiba race ids (``r-YYYY-MMDD-<venue>-NN``) to canonical lake ids
 (``jra-YYYYMMDD-<jyo>-NN``) via :func:`curve_log.crosswalk_race_id`.
 
+ALSO fetches each race's header into the ``netkeiba_races`` silver table, which
+carries the self-resolve mapping the weekend track depends on (``grade_code``
+for the graded-only filter; ``scheduled_post_time`` for adaptive cadence;
+``netkeiba_race_id`` for the live-odds lookup). Run this once on Thursday when
+the card posts so race-day ``track --grades`` is lookup-free.
+
 Usage::
 
     tools/scrape_ingest.py --date 20260620 [--venue hanshin] [--races 1,2,3]
-                           [--entries] [--results] [--payouts]   # default: all three
+                           [--entries] [--results] [--payouts] [--no-header]
+                           # default: all four (header + entries + results + payouts)
 
-Pipeline per race: ``build_entries`` -> ``build_results`` -> ``build_payouts``.
-Each is idempotent on ``(natural_key, available_at)`` thanks to the
-partition-aware upsert, so re-running a settled day adds zero rows.
+Pipeline per race: ``build_race`` -> ``build_entries`` -> ``build_results`` ->
+``build_payouts``. Each is idempotent on ``(natural_key, available_at)`` thanks
+to the partition-aware upsert, so re-running a settled day adds zero rows.
 
 For an empty/missing race card (weather cancellation), prints a clear status
 and exits 0 -- race cards go dark on cancellations and that is not a failure.
@@ -28,6 +35,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from keibamon_core.adapters import (
     netkeiba_entries,
     netkeiba_payouts,
+    netkeiba_races,
     netkeiba_results,
 )
 from keibamon_core.ingestion.curve_log import VENUE_JYO, crosswalk_race_id
@@ -46,22 +54,35 @@ def main() -> int:
         help="Comma-separated race numbers (e.g. 1,2,3). Default: list from the day's card.",
     )
     parser.add_argument(
-        "--entries", action="store_true", help="Ingest entries (default: all three)."
+        "--entries", action="store_true", help="Ingest entries (default: all four)."
     )
     parser.add_argument(
-        "--results", action="store_true", help="Ingest results (default: all three)."
+        "--results", action="store_true", help="Ingest results (default: all four)."
     )
     parser.add_argument(
-        "--payouts", action="store_true", help="Ingest payouts (default: all three)."
+        "--payouts", action="store_true", help="Ingest payouts (default: all four)."
+    )
+    parser.add_argument(
+        "--header", action="store_true",
+        help="Ingest the race header into netkeiba_races (default: all four). The "
+             "header carries grade_code + post time + netkeiba_race_id -- the "
+             "self-resolve mapping `track --grades` depends on.",
+    )
+    parser.add_argument(
+        "--no-header", action="store_true",
+        help="Skip the race header fetch (use when only entries/results/payouts "
+             "are needed and the card has already been scraped).",
     )
     args = parser.parse_args()
 
-    # Default: all three. If any --entries/--results/--payouts flag is given,
-    # do ONLY those (caller-selected subset).
-    default_all = not (args.entries or args.results or args.payouts)
-    do_entries = args.entries or default_all
-    do_results = args.results or default_all
-    do_payouts = args.payouts or default_all
+    # Default: all four. If any subset flag is given, do ONLY those. --no-header
+    # is a shortcut for "skip the header, do everything else" so legacy callers
+    # (`scrape_ingest.py --date ...`) still work without surprise.
+    any_subset = args.entries or args.results or args.payouts or args.header
+    do_header = (args.header or (not any_subset)) and not args.no_header
+    do_entries = args.entries or (not any_subset)
+    do_results = args.results or (not any_subset)
+    do_payouts = args.payouts or (not any_subset)
 
     lake = LakePaths()
     lake.ensure()
@@ -83,7 +104,7 @@ def main() -> int:
             )
             return 0
 
-    total = {"entries": 0, "results": 0, "payouts": 0}
+    total = {"header": 0, "entries": 0, "results": 0, "payouts": 0}
     for rno in races:
         nk_id = f"r-{yyyy}-{mmdd}-{venue}-{rno}"
         try:
@@ -94,6 +115,10 @@ def main() -> int:
 
         per_race = 0
         try:
+            if do_header:
+                n = netkeiba_races.build_race(lake, nk_id, race_id)
+                total["header"] += n
+                per_race += n
             if do_entries:
                 n = netkeiba_entries.build_entries(lake, nk_id, race_id)
                 total["entries"] += n
@@ -118,7 +143,8 @@ def main() -> int:
 
     print(
         f"Ingested {args.date} @ {venue}: "
-        f"entries={total['entries']}, results={total['results']}, payouts={total['payouts']}"
+        f"header={total['header']}, entries={total['entries']}, "
+        f"results={total['results']}, payouts={total['payouts']}"
     )
     return 0
 

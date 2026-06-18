@@ -35,14 +35,25 @@ changes.
 > until the ADR-0004 cutover gate prints `VERDICT: PASS` on a real overlap. Git
 > syncs the repo; the USB moves the data oracle.
 
-## Step 1 — Thu/Fri, pre-market: select + post
+## Step 1 — Thu/Fri, pre-market: scrape the card + select + post
 
 ```
-# pick the card (upcoming races with entries posted)
+# 1a. Scrape the card once entries post. This writes entries/results/payouts
+#     AND the race header (netkeiba_races) -- the header carries each race's
+#     grade_code, scheduled_post_time, and netkeiba_race_id (the numeric id
+#     that encodes kai/nichi and is NOT derivable from the canonical id).
+#     That header is what `track --grades` resolves from on race day -- skip
+#     it and the lookup-free track has nothing to look up (it will warn and
+#     skip, never fabricate an id).
+PYTHONPATH=src ./venv64/bin/python tools/scrape_ingest.py --date $DATE --venue $VENUE
+
+# 1b. Pick the card (default: upcoming + field_size>=1). Pass --grades G1,G2,G3
+#     to narrow to graded only -- the ADR-0003/0004 polite-volume default for
+#     live odds. Without --grades you get the whole card.
 PYTHONPATH=src ./venv64/bin/python tools/weekend_run.py select --date $DATE --venue $VENUE
 
-# freeze OUR model odds pre-market + push the card to D1
-#   (post is reached via the pipeline fn; CF_* must be sourced first)
+# 1c. Freeze OUR model odds pre-market + push the card to D1
+#     (post is reached via the pipeline fn; CF_* must be sourced first)
 PYTHONPATH=src ./venv64/bin/python -c "
 from keibamon_core.paths import LakePaths
 from keibamon_core.weekend import pipeline
@@ -62,9 +73,19 @@ The Mac is the sole live source (ADR-0004). It must be **stationary, lid forced
 open**; `track` spawns `caffeinate -dis` but also disable lid-close sleep in System
 Settings. Source `CF_*` first (they don't persist across shells).
 
+Live odds are **graded-only by policy** (G1/G2/G3) — keeps polling polite (ADR-0004).
+
 ```
-# --nk-race-ids is REQUIRED (netkeiba's id encodes kai/nichi); supply post times to
-# enable the adaptive cadence near post.
+# PREFERRED -- self-resolving, no lookups. Requires the Step 1a card scrape so
+# the lake carries each graded race's netkeiba_race_id + post time + grade.
+# Resolves *which* races are graded (across all venues that day), their post
+# times, and the netkeiba ids -- all from the lake. A graded race missing its
+# stored nk id is named and skipped (never fabricated).
+PYTHONPATH=src ./venv64/bin/python tools/weekend_run.py track \
+    --date $DATE --grades G1,G2,G3
+
+# FALLBACK -- explicit args. Use when the lake lacks the self-resolve mapping
+# (e.g. a quick test on a known race) or you want to narrow to one venue.
 PYTHONPATH=src ./venv64/bin/python tools/weekend_run.py track \
     --date $DATE --venue $VENUE \
     --nk-race-ids <id01,id02,...> \

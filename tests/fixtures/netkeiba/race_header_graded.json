@@ -1,0 +1,16 @@
+{
+  "status": "ok",
+  "data": {
+    "official_datetime": "2026-06-20 09:00:00",
+    "race_id": "20260609031111",
+    "race_num": "11",
+    "date": "2026-06-20",
+    "venue": "hanshin",
+    "race_name": "Takarazuka Kinen",
+    "grade": "GⅠ",
+    "post_time": "15:40",
+    "distance_m": 2200,
+    "track_code": "10",
+    "headcount": 18
+  }
+}

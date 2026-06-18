@@ -38,6 +38,7 @@ def _race(
     post_hour: int | None = None,
     field_size: int = 12,
     results_available: bool = False,
+    grade: str | None = None,
 ) -> dict[str, Any]:
     """One races-mart row. ``post_hour`` None -> NULL scheduled_post_time."""
     post_time = (
@@ -57,6 +58,7 @@ def _race(
         "results_available": results_available,
         "source_name": "jravan",
         "content_hash": "x" * 16,
+        "grade": grade,
     }
 
 
@@ -256,3 +258,141 @@ def test_accepts_iso_date_input(populated_lake, role_file):
     assert pipeline.select(populated_lake, "2026-06-20", role_file=role_file) == (
         pipeline.select(populated_lake, _TARGET_DAY, role_file=role_file)
     )
+
+
+# --- grades filter (the ADR-0003/0004 polite-volume default) ----------------
+
+
+@pytest.fixture
+def graded_lake(lake: LakePaths) -> LakePaths:
+    """A card across TWO venues with the graded/non-graded mix the grades filter
+    must distinguish. On 20260620 (the only day that matters):
+
+      Tokyo (jyo 05):
+        R10  grade=G2   -> graded-in for ("G1","G2","G3")
+        R11  grade=G1   -> graded-in
+        R05  grade=None (non-graded stakes) -> graded-out
+      Hanshin (jyo 09):
+        R11  grade=G3   -> graded-in (multi-venue in one selection)
+        R09  grade=None -> graded-out
+      Hanshin R01 grade=None -> graded-out (the day's maiden opener)
+    """
+    rows = [
+        # Tokyo graded
+        _race("jra-20260620-05-10", racecourse="tokyo", post_hour=14, grade="G2"),
+        _race("jra-20260620-05-11", racecourse="tokyo", post_hour=15, grade="G1"),
+        _race("jra-20260620-05-05", racecourse="tokyo", post_hour=11, grade=None),
+        # Hanshin graded + non-graded
+        _race("jra-20260620-09-11", racecourse="hanshin", post_hour=15, grade="G3"),
+        _race("jra-20260620-09-09", racecourse="hanshin", post_hour=13, grade=None),
+        _race("jra-20260620-09-01", racecourse="hanshin", post_hour=9,  grade=None),
+    ]
+    write_parquet(rows, lake.mart(MART_RACES))
+    return lake
+
+
+def test_grades_filter_returns_only_races_with_listed_grade(graded_lake, role_file):
+    """--grades G1,G2,G3 keeps only the graded races; non-graded are dropped."""
+    ids = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file,
+        grades=("G1", "G2", "G3"),
+    )
+    assert set(ids) == {
+        "jra-20260620-05-10",  # G2 Tokyo
+        "jra-20260620-05-11",  # G1 Tokyo
+        "jra-20260620-09-11",  # G3 Hanshin
+    }
+    # the filter is across venues (multi-venue self-resolve)
+    assert "jra-20260620-05-05" not in ids  # non-graded Tokyo
+    assert "jra-20260620-09-09" not in ids  # non-graded Hanshin
+
+
+def test_grades_filter_subsets_to_a_single_grade(graded_lake, role_file):
+    """Filtering to just G3 narrows to the single G3 race."""
+    ids = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file, grades=("G3",)
+    )
+    assert ids == ["jra-20260620-09-11"]
+
+
+def test_grades_filter_composes_with_venue(graded_lake, role_file):
+    """grades + venue intersects (multi-venue selection narrowed to one venue)."""
+    tokyo_g = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file,
+        venue="tokyo", grades=("G1", "G2", "G3"),
+    )
+    assert set(tokyo_g) == {"jra-20260620-05-10", "jra-20260620-05-11"}
+    # Hanshin G3 only
+    hanshin_g3 = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file,
+        venue="hanshin", grades=("G3",),
+    )
+    assert hanshin_g3 == ["jra-20260620-09-11"]
+
+
+def test_grades_none_means_all(graded_lake, role_file):
+    """grades=None (the default) is the unfiltered card -- no behavior change
+    for existing callers."""
+    all_ids = pipeline.select(graded_lake, _TARGET_DAY, role_file=role_file)
+    # 6 races carded, all upcoming with field >= 1 -> all returned
+    assert len(all_ids) == 6
+    # the grades-included call is a strict subset
+    graded_only = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file, grades=("G1", "G2", "G3")
+    )
+    assert set(graded_only) < set(all_ids)
+
+
+def test_grades_filter_keeps_sort_order(graded_lake, role_file):
+    """Graded races come back in the day's running order (post time, NULLS LAST)."""
+    ids = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file,
+        grades=("G1", "G2", "G3"),
+    )
+    # Post times: Tokyo R10=14:00, Tokyo R11=15:00, Hanshin R11=15:00.
+    # Tie on 15:00 -> race_id ascending (05 < 09). Order:
+    assert ids == [
+        "jra-20260620-05-10",  # 14:00
+        "jra-20260620-05-11",  # 15:00 (race_id asc: 05-11 before 09-11)
+        "jra-20260620-09-11",  # 15:00
+    ]
+
+
+def test_grades_filter_with_no_graded_match_returns_empty(graded_lake, role_file):
+    """Asking for jump grades (JG1) on a card with only flat grades -> []."""
+    ids = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file, grades=("JG1",)
+    )
+    assert ids == []
+
+
+def test_grades_filter_composes_with_include_run(graded_lake, role_file):
+    """A graded race that already ran shows up under include_run only."""
+    # Re-write Hanshin R11 (G3) as already-run.
+    rows = [
+        {**_race(
+            "jra-20260620-09-11", racecourse="hanshin",
+            post_hour=15, grade="G3", results_available=True,
+        )},
+    ]
+    # Append to the existing mart (refresh_marts semantics; tests write directly).
+    existing = []  # read_parquet would be the real call; here we just rewrite.
+    from keibamon_core.lake import read_parquet, write_parquet as _wp
+    from keibamon_core.ingestion.marts import MART_RACES
+    existing = read_parquet(graded_lake.mart(MART_RACES))
+    # Replace R11's row.
+    patched = [r for r in existing if r["race_id"] != "jra-20260620-09-11"] + rows
+    _wp(patched, graded_lake.mart(MART_RACES))
+
+    # Default (upcoming): G3 race is excluded because results_available=True.
+    default_graded = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file, grades=("G3",)
+    )
+    assert default_graded == []
+
+    # include_run: G3 race surfaces.
+    with_run = pipeline.select(
+        graded_lake, _TARGET_DAY, role_file=role_file,
+        grades=("G3",), include_run=True,
+    )
+    assert with_run == ["jra-20260620-09-11"]
