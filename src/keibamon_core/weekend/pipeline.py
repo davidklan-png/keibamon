@@ -20,8 +20,11 @@ enforces the boundaries. The real work lives in:
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
+
+from keibamon_core.weekend.model_card import freeze_model_card
 
 # Role tokens mirror tools/whichdevice.py / .device. Kept here so the guard does
 # not import the CLI module; the source of truth for the map is whichdevice.py.
@@ -79,16 +82,161 @@ def select(lake: Any, race_date: str, *, role_file: Path | None = None) -> list[
 
 # --- Stage 2: posting (Mac) --------------------------------------------------
 
-def post(lake: Any, race_ids: list[str], *, predictor: Any, role_file: Path | None = None) -> dict[str, Any]:
+def post(
+    lake: Any,
+    race_ids: list[str],
+    *,
+    predictor: Any,
+    role_file: Path | None = None,
+    push_d1: bool = True,
+    push_fn: Any = None,
+) -> dict[str, Any]:
     """Freeze our model_card (our odds + gate) pre-market and push to D1. Mac-only.
 
-    STUB: for each race call weekend.model_card.freeze_model_card (append-only,
-    soft pre-market gate per ADR-0003 D3), then project the frozen cards into the
-    D1 live_snapshot via tools.jravan.publish_d1.push_to_d1 (lake first, D1 after
-    -- ADR-0003 D4). Requires CF_* creds preflighted before the push.
+    For each race: call :func:`weekend.model_card.freeze_model_card` (append-only,
+    soft pre-market gate per ADR-0003 D3). After ALL lake writes succeed, project
+    the frozen cards into a D1 document and push via
+    :func:`tools.jravan.publish_d1.push_to_d1` (key ``model_cards``).
+
+    Lake first, D1 after (ADR-0003 D4): the lake writes have already landed
+    before any network call, so a D1 failure (missing creds, network, non-2xx)
+    does NOT lose a card. CF_* env vars are preflighted; if any are missing the
+    push is recorded as skipped with the reason, not raised -- the lake is the
+    record, D1 is disposable display.
+
+    ``push_fn`` is an injection seam for tests; production resolves to the
+    importlib-loaded ``tools.jravan.publish_d1.push_to_d1``.
     """
     _require_role(("mac-dev",), "post", role_file)
-    raise NotImplementedError("post: wire freeze_model_card + push_to_d1 on the Mac.")
+
+    # 1. LAKE FIRST -- freeze every race before any network call. A failure here
+    #    aborts the stage with a partial card set; the lake is still internally
+    #    consistent (each completed race's rows are durable).
+    new_rows: list[dict[str, Any]] = []
+    for rid in race_ids:
+        new_rows.extend(freeze_model_card(lake, rid, predictor=predictor))
+
+    # 2. D1 AFTER -- best-effort projection. Never raises over the lake write.
+    d1_result = _push_to_d1_best_effort(new_rows, push_d1=push_d1, push_fn=push_fn)
+    return {
+        "races_posted": len(race_ids),
+        "rows_written": len(new_rows),
+        "card_versions": sorted({r["card_version"] for r in new_rows}),
+        "d1": d1_result,
+    }
+
+
+# Resolve tools/jravan/publish_d1.py lazily -- tools/ is not a Python package, so
+# we load it by path (same pattern as tests/test_publish_d1.py). Resolved on first
+# push so an absent tools/ tree does not break importing this module.
+_PUBLISH_D1_PATH = (
+    Path(__file__).resolve().parents[3] / "tools" / "jravan" / "publish_d1.py"
+)
+
+
+def _load_push_to_d1():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location("publish_d1", _PUBLISH_D1_PATH)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"could not load publish_d1 from {_PUBLISH_D1_PATH}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.push_to_d1
+
+
+def _push_to_d1_best_effort(rows, *, push_d1: bool, push_fn: Any) -> dict[str, Any]:
+    """Project frozen cards into a D1 document and push, swallowing failures.
+
+    Returns a status dict so the caller can record the D1 outcome without losing
+    the lake write that already succeeded.
+
+    A caller-supplied ``push_fn`` bypasses the CF_* preflight: tests inject a
+    fake pusher and own its behavior, so the env-var guard (which is about the
+    production urllib path that reads CF_* via os.environ) does not apply.
+    """
+    if not push_d1:
+        return {"status": "disabled"}
+
+    snapshot = _project_cards_snapshot(rows)
+    if push_fn is None:
+        missing = [
+            k for k in ("CF_ACCOUNT_ID", "CF_D1_DATABASE_ID", "CF_API_TOKEN")
+            if not os.environ.get(k)
+        ]
+        if missing:
+            return {
+                "status": "skipped",
+                "reason": f"missing CF_* env vars: {missing}",
+                "hint": "source CF_* creds before re-running; lake write already landed.",
+            }
+        fn = _load_push_to_d1()
+    else:
+        fn = push_fn
+
+    try:
+        response = fn(snapshot, key="model_cards")
+        meta = ((response.get("result") or {}).get("meta") or {}) if isinstance(response, dict) else {}
+        ok = bool(meta.get("changes", 0))
+        return {
+            "status": "ok" if ok else "pushed",
+            "key": "model_cards",
+            "rows": len(rows),
+            "response": response,
+        }
+    except Exception as exc:  # noqa: BLE001 -- D1 is disposable; never re-raise over the lake write
+        return {
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "hint": "lake write already landed; re-run push manually if needed.",
+        }
+
+
+def _project_cards_snapshot(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Turn frozen model_card rows into the JSON document pushed to D1.
+
+    One document keyed ``model_cards`` carrying per-race cards (runner-level
+    fair-odds + gate + posted_before_market). This is a derived, disposable
+    projection of the lake; D1's loss does not lose the cards.
+    """
+    by_race: dict[str, list[dict[str, Any]]] = {}
+    for r in rows:
+        by_race.setdefault(r["race_id"], []).append(r)
+
+    races = []
+    for rid, race_rows in sorted(by_race.items()):
+        race_rows.sort(key=lambda r: (r.get("card_version", 0), int(r["horse_number"])))
+        head = race_rows[0]
+        races.append({
+            "race_id": rid,
+            "card_version": head["card_version"],
+            "posted_at": head["posted_at"],
+            "posted_before_market": head["posted_before_market"],
+            "predictor_name": head["predictor_name"],
+            "runners": [
+                {
+                    "horse_number": int(r["horse_number"]),
+                    "gate": r.get("gate"),
+                    "model_p": r["model_p"],
+                    "model_fair_odds": r["model_fair_odds"],
+                }
+                for r in race_rows
+            ],
+        })
+    return {
+        "meta": {
+            "stage": "post",
+            "published_at": _utc_now_iso_helper(),
+            "rows": len(rows),
+            "races": len(races),
+        },
+        "races": races,
+    }
+
+
+def _utc_now_iso_helper() -> str:
+    # Local helper to avoid importing datetime at module top just for this.
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
 
 
 # --- Stage 3: day-of curve (capture host -- the only live, unrecoverable job) -
