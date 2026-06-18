@@ -357,6 +357,39 @@ DATA_TRAPS = {
     "training.times_null": "0000/000 = not measured, 9999/999 = over cap -> NULL (not 0.0). "
         "Woodchip horses run partial distances so most upper-distance fields are legitimately "
         "0000 -- that's expected, not a parse error.",
+    "scrape.natural_key_includes_source": "scrape_upsert's natural key for jravan_race_entries"
+        "/results/payouts is (business_id..., source_name) so a JV-Link row and a scrape row "
+        "for the SAME (race, horse)/(race, pool, combo) coexist rather than overwrite. The "
+        "cross-validation gate (tools/validate_scrape_vs_jravan) reads both sources side-by-"
+        "side over the overlap window; overwriting would erase exactly the overlap the gate "
+        "exists to audit. settle_many's MAX(payout_yen) GROUP BY (race, pool, combo) "
+        "ignores source, so duplicate rows on the read side still resolve to one payout.",
+    "scrape.tansho_is_payout_not_odds": "netkeiba's result page shows the WIN PAYOUT (yen "
+        "per 100-yen bet) for the winner, NOT decimal odds. JV-Data's SE.win_odds IS decimal "
+        "odds. netkeiba_results._result_record converts tansho_yen/100 to keep the column "
+        "semantically consistent across sources; the exact payout yen lives in jravan_payouts.",
+    "scrape.netkeiba_placeholder_horse_id": "netkeiba serves the SAME '0000000000' "
+        "placeholder for foreign IC-tagged horses as JV-Data (the trap above). The scrape "
+        "adapter preserves horse_number on every row, so the (race_id, horse_number) join "
+        "stays exact. The crosswalk from netkeiba's runner shape to silver NEVER drops "
+        "umaban -- an umaban-less runner is skipped rather than emitted as an orphan.",
+    "scrape.dead_heat_list_shape": "netkeiba payouts payloads encode dead-heat pools "
+        "(fukusho/wide) as a LIST of leaves while single-combo pools (tansho/wakuren/etc.) "
+        "are a single dict. netkeiba_payouts._iter_payout_leaves coerces both to a flat "
+        "leaf list. The parser MUST NOT dedupe -- one row per (pool, combo, payout) on the "
+        "page; settle_many's MAX-collapse resolves duplicates on read.",
+    "scrape.partition_aware_upsert": "lake.write_dataset is partition-scoped overwrite "
+        "(existing_data_behavior='delete_matching'). Calling it with rows for ONE race "
+        "would DELETE the entire (year, venue) partition and write only those rows -- "
+        "nuking every other race in that year+venue. ingestion.scrape_upsert does per-"
+        "touched-partition read-merge-write to avoid this. Regression test: "
+        "tests/test_scrape_adapters.py::test_scrape_upsert_partition_aware_no_clobber.",
+    "scrape.parser_fixture_only": "the JSON shape the netkeiba_*_payload parsers accept is "
+        "FIXTURE-DEFINED (tests/fixtures/netkeiba/*.json) and explicitly marked for "
+        "recalibration. Real netkeiba likely serves HTML; the wire-payload extractor must "
+        "be re-verified against live netkeiba BEFORE the capture PC is switched off "
+        "(ADR-0004). The silver record-builder layer is pure and load-bearing; only the "
+        "parser layer needs recalibration.",
 }
 
 

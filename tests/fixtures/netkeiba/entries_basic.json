@@ -1,0 +1,13 @@
+{
+  "status": "ok",
+  "data": {
+    "official_datetime": "2026-06-20 09:00:00",
+    "update_datetime": "2026-06-20 09:00:05",
+    "runners": [
+      {"wakuban": "1", "umaban": "01", "bamei": "Fast Horse", "ketto_num": "2016101001", "jockey_code": "05123", "trainer_code": "01045", "futan": "56.0", "bataiju": "480"},
+      {"wakuban": "2", "umaban": "02", "bamei": "Steady Type", "ketto_num": "2016101002", "jockey_code": "05200", "trainer_code": "01100", "futan": "57.0", "bataiju": "450"},
+      {"wakuban": "3", "umaban": "03", "bamei": "Foreign Invite", "ketto_num": "", "jockey_code": "05300", "trainer_code": "01200", "futan": "58.0", "bataiju": "500"},
+      {"wakuban": "8", "umaban": "08", "bamei": "Late Closer", "ketto_num": "2016101008", "jockey_code": "05400", "trainer_code": "01050", "futan": "54.0", "bataiju": "460"}
+    ]
+  }
+}

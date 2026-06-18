@@ -1,0 +1,19 @@
+{
+  "status": "ok",
+  "data": {
+    "official_datetime": "2026-06-20 15:30:30",
+    "payouts": {
+      "tansho": {"combo": "05", "payout": "210", "ninki": "1"},
+      "fukusho": [
+        {"combo": "05", "payout": "110", "ninki": "1"},
+        {"combo": "07", "payout": "150", "ninki": "2"},
+        {"combo": "09", "payout": "150", "ninki": "2"}
+      ],
+      "wide": [
+        {"combo": "0507", "payout": "210", "ninki": "4"},
+        {"combo": "0509", "payout": "210", "ninki": "4"},
+        {"combo": "0709", "payout": "780", "ninki": "18"}
+      ]
+    }
+  }
+}
