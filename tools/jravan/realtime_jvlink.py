@@ -246,7 +246,13 @@ def run(races: list[dict]) -> None:
                         print(f"  publish to D1 failed: {exc!r}")
             if not races:
                 break
-            time.sleep(next_interval(soonest if soonest is not None else 999))
+            sleep_s = next_interval(soonest if soonest is not None else 999)
+            print(
+                f"[heartbeat] {dt.datetime.now().astimezone().isoformat()} "
+                f"races_remaining={len(races)} next_sleep_s={sleep_s}",
+                flush=True,
+            )
+            time.sleep(sleep_s)
     finally:
         jv.JVClose()
 

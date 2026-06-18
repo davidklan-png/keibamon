@@ -1,0 +1,9 @@
+# Line-ending normalization across Mac (mac-dev) <-> Windows (capture-pc).
+# Prevents CRLF drift when the Windows capture PC edits tracked files
+# (the pc-drift-20260618 bundle mangled whichdevice.py: em-dash -> hyphen,
+# cp -> copy). Text files normalize to LF in the repo; Windows shell scripts
+# keep CRLF so PowerShell/.bat render correctly on the PC.
+* text=auto eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf

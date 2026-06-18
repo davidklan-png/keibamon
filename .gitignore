@@ -39,3 +39,11 @@ splash/app/
 !.dev.vars.example
 .env*
 !.env.example
+
+# Capture-PC + Mac Python venvs and runtime logs (machine-local)
+venv32/
+venv64/
+logs/
+
+# JV-Link manifest airlock (per-card manifests are machine-local, never commit)
+tools/jravan/manifests/

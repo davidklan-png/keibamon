@@ -107,3 +107,26 @@ Realtime integration carries its own small spec/eventing tax (`JVRTOpen` +
 
 Related: [[ADR-0001]] (JRA-VAN additive bronze). The realtime path is the live
 complement to ADR-0001's bulk historical pull, using the same records and lake.
+
+---
+
+## Status update (2026-06-17): entitlement acquired — curve backfill UNBLOCKED
+
+The original note above (entitlement not held; `0B41/0B42` un-backfillable) is
+superseded. The 速報/時系列 entitlement is now held — proven empirically by the
+2026-06-14 race-day `0B30` realtime capture, which the PC pulled via `JVRTOpen`
+and which is now in the lake as source `jravan_rt` (folded into
+`jravan_odds_timeseries`). JRA-VAN registration + 利用キー setup post-dated the
+original decision.
+
+**Consequences:**
+
+- `0B41/0B42` 時系列オッズ (1-year retention) is now pullable on the PC. A
+  one-shot trailing-year backfill (manifest airlock → Mac import) is the fast
+  path to the curve validator's 200-race threshold.
+  See `tools/jravan/backfill_timeseries.py`.
+- Live `0B30` race-day capture is the forward-accumulate source; the curve is
+  inherently forward-only (1-year cap), so the binding constraint is reliable
+  always-on PC capture, not entitlement.
+- Original "genuinely cannot be backfilled" lines are retained for history but
+  no longer apply.
