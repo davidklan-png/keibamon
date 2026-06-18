@@ -24,7 +24,9 @@ import os
 from pathlib import Path
 from typing import Any
 
+from keibamon_core.weekend.calibration import calibration_report
 from keibamon_core.weekend.model_card import freeze_model_card
+from keibamon_core.weekend.settle_card import settle_card
 
 # Role tokens mirror tools/whichdevice.py / .device. Kept here so the guard does
 # not import the CLI module; the source of truth for the map is whichdevice.py.
@@ -261,14 +263,188 @@ def track(race_ids: list[str], *, role_file: Path | None = None) -> None:
 
 # --- Stage 4: results (Mac) --------------------------------------------------
 
-def settle(lake: Any, race_ids: list[str], *, role_file: Path | None = None) -> dict[str, Any]:
-    """Settle at official final payouts and score the weekend. Mac-only.
 
-    STUB: settle curve_log via tools.jravan.settle_curve_log and the hypothetical
-    model_card bets via ingestion.settlement.settle_many (official payout table,
-    never decision-time odds -- modeling-spine.md step 1). Then join settled
-    model_card to results, grouped by posted_before_market, for the calibration
-    log. No edge claim; this is the measurement, not a bet.
+def settle(
+    lake: Any,
+    race_ids: list[str],
+    *,
+    role_file: Path | None = None,
+    push_d1: bool = True,
+    push_fn: Any = None,
+    market_prob_by_key: dict[tuple[str, int], float] | None = None,
+) -> dict[str, Any]:
+    """Settle at official final payouts and score the card. Mac-only.
+
+    Three steps, wired in order:
+
+      1. **Curve log** (reused): settle the frozen ``curve_log`` rows for these
+         races in place via :func:`curve_log.settle_curve_records`. The market
+         curve and our card settle in one stage so both artifacts are current.
+      2. **Card** (new sibling): :func:`settle_card.settle_card` writes
+         ``model_card_settled`` -- the immutable ``model_card`` joined to
+         official results + a hypothetical 1-unit win settlement on the model's
+         top pick per ``(race_id, card_version)``. ``model_card`` itself stays
+         byte-identical (runtime-checked in ``settle_card``).
+      3. **Calibration report**: :func:`calibration.calibration_report` over the
+         settled rows, sliced by ``posted_before_market``. Clean cards are the
+         headline; contaminated cards are reported separately, never blended
+         (ADR-0003 D3). Optional ``market_prob_by_key`` lets the report compare
+         ``model_p`` to the de-vigged market as the bar (Model 0).
+
+    Returns a summary dict. The full :class:`CalibrationReport` is attached as
+    ``report``; a compact scalar view is at the top level for log readability.
+
+    Optionally projects the report to D1 under key ``model_card_calibration``
+    using the same best-effort, lake-first, CF_*-preflight pattern as
+    :func:`post` -- never raise over the lake writes that already landed.
     """
     _require_role(("mac-dev",), "settle", role_file)
-    raise NotImplementedError("settle: wire settle_curve_log + settle_many on the Mac.")
+
+    curve_summary = _settle_curve_log_for_races(lake, race_ids)
+    settled_rows = settle_card(lake, race_ids)
+    report = calibration_report(
+        settled_rows, market_prob_by_key=market_prob_by_key
+    )
+
+    summary = {
+        "races": len(race_ids),
+        "curve_log_settled": curve_summary,
+        "model_card_settled_rows": len(settled_rows),
+        "clean": _slice_summary(report.clean),
+        "contaminated": _slice_summary(report.contaminated),
+        "report": report,
+    }
+
+    if push_d1:
+        summary["d1"] = _push_calibration_to_d1_best_effort(
+            report, settled_rows, push_fn=push_fn
+        )
+    return summary
+
+
+def _settle_curve_log_for_races(lake: Any, race_ids: list[str]) -> dict[str, Any]:
+    """Settle the frozen curve_log rows for these races in place.
+
+    Reuses :func:`curve_log.settle_curve_records` -- the same logic
+    ``tools/jravan/settle_curve_log.py --settle`` runs. Idempotent. Returns a
+    small summary; ``model_card_settled`` is written next, separately, so the
+    two tables stay independent.
+    """
+    from keibamon_core.ingestion.curve_log import (
+        read_curve_log, settle_curve_records, upsert_curve_log,
+    )
+    from keibamon_core.weekend.settle_card import _read_results
+
+    if not race_ids:
+        return {"settled_rows": 0, "races_with_results": 0}
+
+    rid_set = set(race_ids)
+    frozen = [
+        r for r in read_curve_log(lake)
+        if r.get("race_id") in rid_set
+    ]
+    if not frozen:
+        return {"settled_rows": 0, "races_with_results": 0}
+
+    results = _read_results(lake, rid_set)
+    if not results:
+        return {"settled_rows": 0, "races_with_results": 0, "frozen_rows": len(frozen)}
+
+    settled = settle_curve_records(frozen, results)
+    upsert_curve_log(lake, settled)
+    done = sum(1 for r in settled if r.get("settled"))
+    return {
+        "settled_rows": done,
+        "frozen_rows": len(frozen),
+        "races_with_results": len({k[0] for k in results.keys()}),
+    }
+
+
+def _slice_summary(s: Any) -> dict[str, Any] | None:
+    """Compact scalar view of one CalibrationReport slice for log readability.
+
+    None when the slice is empty (e.g. no contaminated cards this weekend).
+    """
+    if s is None:
+        return None
+    return {
+        "posted_before_market": s.posted_before_market,
+        "n_runners": s.n_runners,
+        "n_races": s.n_races,
+        "races_with_winner": s.probability.races,
+        "model_log_loss": s.probability.model_log_loss,
+        "model_brier": s.probability.model_brier,
+        "market_log_loss": s.probability.market_log_loss,
+        "market_brier": s.probability.market_brier,
+        "log_loss_delta_vs_market": s.probability.model_log_loss_delta_vs_market,
+        "top_pick_roi": s.top_pick_roi.roi,
+        "top_pick_n": s.top_pick_roi.n,
+        "top_pick_thin": s.top_pick_roi.thin,
+        "top_pick_beats_takeout": s.top_pick_roi.beats_takeout,
+        "bins_thin_count": sum(1 for b in s.bins if b.thin and b.n > 0),
+        "bins_populated_count": sum(1 for b in s.bins if b.n > 0),
+    }
+
+
+def _push_calibration_to_d1_best_effort(
+    report: Any, settled_rows: list[dict[str, Any]], *, push_fn: Any
+) -> dict[str, Any]:
+    """Project the calibration report to D1 (key ``model_card_calibration``).
+
+    Same pattern as :func:`post`'s D1 push: best-effort, lake-first. A caller-
+    supplied ``push_fn`` bypasses the CF_* preflight (tests own the fake
+    pusher). Production resolves to :func:`tools.jravan.publish_d1.push_to_d1`.
+    Never raises over the lake writes that already landed.
+    """
+    snapshot = _project_calibration_snapshot(report, settled_rows)
+
+    if push_fn is None:
+        missing = [
+            k for k in ("CF_ACCOUNT_ID", "CF_D1_DATABASE_ID", "CF_API_TOKEN")
+            if not os.environ.get(k)
+        ]
+        if missing:
+            return {
+                "status": "skipped",
+                "reason": f"missing CF_* env vars: {missing}",
+                "hint": "source CF_* creds before re-running; settle is already durable.",
+            }
+        fn = _load_push_to_d1()
+    else:
+        fn = push_fn
+
+    try:
+        response = fn(snapshot, key="model_card_calibration")
+        meta = ((response.get("result") or {}).get("meta") or {}) if isinstance(response, dict) else {}
+        ok = bool(meta.get("changes", 0))
+        return {
+            "status": "ok" if ok else "pushed",
+            "key": "model_card_calibration",
+            "response": response,
+        }
+    except Exception as exc:  # noqa: BLE001 -- D1 is disposable; never re-raise over the lake write
+        return {
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "hint": "settle already landed; re-run push manually if needed.",
+        }
+
+
+def _project_calibration_snapshot(
+    report: Any, settled_rows: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Derived, disposable D1 projection of the calibration report.
+
+    The lake (``model_card_settled`` + ``curve_log``) is the record; this is
+    display only. Carries the headline (clean) slice + contaminated, never
+    blended, plus thin-bin flags so the dashboard can't flatter a sparse bucket.
+    """
+    return {
+        "meta": {
+            "stage": "settle",
+            "published_at": _utc_now_iso_helper(),
+            "settled_rows": len(settled_rows),
+        },
+        "headline": _slice_summary(report.clean),
+        "contaminated": _slice_summary(report.contaminated),
+    }
