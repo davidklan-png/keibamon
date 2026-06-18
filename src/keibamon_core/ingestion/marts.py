@@ -3,11 +3,29 @@ from __future__ import annotations
 from typing import Any
 
 from keibamon_core.ingestion.gold import GOLD_FEATURE_SET
-from keibamon_core.lake import read_parquet_if_exists, write_parquet
+from keibamon_core.lake import read_dataset, read_parquet_if_exists, write_parquet
 from keibamon_core.paths import LakePaths
 
 MART_RACES = "races"
 MART_RACE_ENTRIES = "race_entries"
+
+
+def _read_silver_any(lake: LakePaths, table: str) -> list[dict[str, Any]]:
+    """Source-resolve a silver table, preferring the canonical ``jravan_*`` dataset.
+
+    The live lake holds ``jravan_*`` tables (Hive-partitioned under
+    ``normalized/jravan_<table>/year=.../venue=.../``), written by
+    ``jravan_silver.build_jravan_silver``. The CSV-source path writes a single
+    ``normalized/<table>.parquet`` (see ``ingestion/silver.py``). Prefer
+    ``jravan_*`` when it is present and non-empty; fall back to the CSV table so
+    the fixture-driven CSV tests stay green and a legacy lake still resolves.
+    """
+    jravan_dir = lake.silver_dataset(f"jravan_{table}")
+    if jravan_dir.exists():
+        rows = read_dataset(jravan_dir)
+        if rows:
+            return rows
+    return read_parquet_if_exists(lake.silver_table(table))
 
 
 def refresh_marts(lake: LakePaths) -> dict[str, int]:
@@ -16,9 +34,9 @@ def refresh_marts(lake: LakePaths) -> dict[str, int]:
     Marts are plain Parquet files under ``data/marts`` so they can be queried
     directly with DuckDB (``read_parquet``) or served by FastAPI.
     """
-    races = read_parquet_if_exists(lake.silver_table("races"))
-    entries = read_parquet_if_exists(lake.silver_table("race_entries"))
-    results = read_parquet_if_exists(lake.silver_table("race_results"))
+    races = _read_silver_any(lake, "races")
+    entries = _read_silver_any(lake, "race_entries")
+    results = _read_silver_any(lake, "race_results")
     features = read_parquet_if_exists(lake.gold_features(GOLD_FEATURE_SET))
 
     results_by_key = {(r["race_id"], r["horse_id"]): r for r in results}
@@ -31,19 +49,23 @@ def refresh_marts(lake: LakePaths) -> dict[str, int]:
 
     race_rows: list[dict[str, Any]] = []
     for race in sorted(races, key=lambda r: (r["race_date"], r["race_id"])):
+        # `.get` so either silver schema (jravan_* or CSV-source) maps without
+        # KeyError. The jravan races mart shape carries every column below, but
+        # this stays robust if a future source omits one.
+        rid = race["race_id"]
         race_rows.append(
             {
-                "race_id": race["race_id"],
-                "race_date": race["race_date"],
-                "racecourse": race["racecourse"],
-                "country": race["country"],
-                "surface": race["surface"],
-                "distance_m": race["distance_m"],
+                "race_id": rid,
+                "race_date": race.get("race_date"),
+                "racecourse": race.get("racecourse"),
+                "country": race.get("country"),
+                "surface": race.get("surface"),
+                "distance_m": race.get("distance_m"),
                 "scheduled_post_time": race.get("scheduled_post_time"),
-                "field_size": field_sizes.get(race["race_id"], 0),
-                "results_available": race["race_id"] in races_with_results,
-                "source_name": race["source_name"],
-                "content_hash": race["content_hash"],
+                "field_size": field_sizes.get(rid, 0),
+                "results_available": rid in races_with_results,
+                "source_name": race.get("source_name"),
+                "content_hash": race.get("content_hash"),
             }
         )
 

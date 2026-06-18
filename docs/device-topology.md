@@ -1,5 +1,14 @@
 # Keibamon device topology & demarcation
 
+> **⚠ Superseded in part by [[ADR-0004]] (2026-06-18): going Mac-only,
+> scrape-sourced.** The capture PC is **deprecated** — JV-Link is being retired and
+> the Mac becomes the sole device for ingest, lake, dev, live capture, and D1 push.
+> The PC stays in the **hybrid** transitional role (weekly official JV-Link pull
+> only) **until** the Mac scrape feed covers results + payouts + entries and passes
+> a 0.0000%-mismatch cross-validation against the final JV-Link overlap (ADR-0004
+> prerequisite). Do **not** power off the PC before then. Sections below describe
+> the pre-ADR-0004 topology; read them as the state we are migrating *away from*.
+
 The system spans several machines with **hard role boundaries**. Crossing a
 boundary (e.g. running JV-Link on the Mac, or trusting the laptop as the race-day
 capture host) is how things break. This is the canonical map. Any human or agent
@@ -8,11 +17,17 @@ working on the system must know **which device they are on** before acting — r
 
 ## The devices
 
-### 1. Capture PC — Windows, always-on, **stationary** (the capture host of record)
+### 1. Capture PC — Windows, always-on, **stationary** (DEPRECATED — ADR-0004)
+> Being retired. Kept only for the weekly official JV-Link bulk pull during the
+> hybrid transition; do not build new dependencies on it.
 - **Role:** authoritative live odds capture. Runs **JV-Link** (32-bit COM) —
   `JVOpen` for bulk/蓄積 history and `JVRTOpen` for realtime/速報 (0B30 all-pool,
   0B41/0B42 time-series). Entry points: `tools/jravan/ingest_jvlink.py` (bulk →
   bronze) and `tools/jravan/realtime_jvlink.py` (realtime → lake + D1 push).
+  **Code-sync** entrypoint: `python tools\thursday_sync.py` — a pull-only mirror
+  of the Mac-pushed repo (device guard → `git pull --ff-only` → preflight). The
+  PC never authors code or pushes; it only pulls. (Moves **code only** — lake
+  bronze still crosses on the USB; see ADR-0004 + the data-flow diagram.)
 - **Owns:** bronze ingestion from JV-Link; the official odds time-series; the
   race-day live feed.
 - **Tech:** Windows, **32-bit** Python venv (JV-Link COM is 32-bit), pywin32.
