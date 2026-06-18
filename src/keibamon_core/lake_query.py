@@ -60,7 +60,7 @@ def src(path: Path) -> str:
     return f"read_parquet('{posix}')"
 
 
-def query(sql_template: str, con=None, **tables: Path):
+def query(sql_template: str, con=None, params: list | None = None, **tables: Path):
     """Run ``sql_template`` and return an Arrow table.
 
     Reference lake tables in the SQL by ``{name}`` placeholders; pass each as a
@@ -68,12 +68,19 @@ def query(sql_template: str, con=None, **tables: Path):
 
         query("SELECT surface, count(*) n FROM {races} GROUP BY surface",
               races=lake.silver_table("jravan_races"))
+
+    For parameterized SQL (``?`` placeholders), pass ``params`` -- it is
+    forwarded to ``con.execute`` and works whether or not ``{name}`` table
+    placeholders are also present::
+
+        query("SELECT race_id FROM {races} WHERE CAST(race_date AS DATE) = ?",
+              params=[target_date], races=mart_path)
     """
     owned = con is None
     con = con or connect()
     try:
         sql = _expand(sql_template, tables)
-        return _to_arrow(con.execute(sql))
+        return _to_arrow(con.execute(sql, params))
     finally:
         if owned:
             con.close()

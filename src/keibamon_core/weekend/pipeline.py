@@ -31,7 +31,7 @@ from __future__ import annotations
 import os
 import sys
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -82,15 +82,126 @@ def _require_role(allowed: tuple[str, ...], stage: str, role_file: Path | None =
 
 # --- Stage 1: selection (Mac) ------------------------------------------------
 
-def select(lake: Any, race_date: str, *, role_file: Path | None = None) -> list[str]:
+def select(
+    lake: Any,
+    race_date: str,
+    *,
+    role_file: Path | None = None,
+    venue: str | None = None,
+    min_field_size: int = 1,
+    include_run: bool = False,
+    races: list[int] | None = None,
+) -> list[str]:
     """Pick the race_ids on the card we will post for. Mac-only (lake + ML).
 
-    STUB: query marts for the day's races (and any selection filter -- venue,
-    grade, our-confidence threshold). Returns canonical race_ids. Offline and
-    deterministic; safe to run Thu/Fri ahead of the weekend.
+    Selects **races** (not horses -- horse-level ranking is stage 2's
+    :func:`freeze_model_card`). Offline and deterministic; safe to run Thu/Fri
+    ahead of the weekend.
+
+    Reads the ``races`` mart scoped to ``race_date`` via :mod:`lake_query`
+    predicate pushdown (DuckDB does the filter inside the engine -- only the
+    matching rows cross into Python, per CLAUDE.md's read-path rule). Default
+    filter is the PIT-honest upcoming set -- ``race_date == target AND
+    field_size >= min_field_size AND results_available == False`` -- i.e. what
+    we can still post a pre-market card for. ``include_run=True`` lifts the
+    results gate for backfilling / replays.
+
+    The ``races`` mart has no ``grade`` column (see ``ingestion/marts``), so
+    grade-based selection is not possible without a schema add -- flagged as a
+    follow-up, not faked here. Optional ``venue`` matches ``racecourse``;
+    optional ``races`` is a race-number subset (e.g. ``[1, 2, 11]``).
+
+    Returns canonical ``race_id``\\ s sorted by ``scheduled_post_time`` then
+    ``race_id`` (the day's running order). An empty result is a valid answer
+    (no card / wrong date) -- returns ``[]``, never raises on the filter. A
+    wrong device still raises :class:`WrongDeviceError`.
+
+    See :func:`select_specs` for the ``(race_id, scheduled_post_time)``
+    companion; ``track``'s adaptive cadence reads post times from there to
+    avoid re-querying the mart.
+    """
+    return [
+        rid for rid, _post in select_specs(
+            lake, race_date,
+            role_file=role_file, venue=venue,
+            min_field_size=min_field_size,
+            include_run=include_run, races=races,
+        )
+    ]
+
+
+def select_specs(
+    lake: Any,
+    race_date: str,
+    *,
+    role_file: Path | None = None,
+    venue: str | None = None,
+    min_field_size: int = 1,
+    include_run: bool = False,
+    races: list[int] | None = None,
+) -> list[tuple[str, Any]]:
+    """Same selection as :func:`select`, but returns
+    ``(race_id, scheduled_post_time)`` tuples so the caller (e.g.
+    :func:`track`'s adaptive cadence) gets the post times without re-reading
+    the mart.
+
+    ``scheduled_post_time`` may be ``None`` (the mart allows NULL); callers
+    that rely on it should handle that. Order matches :func:`select`.
     """
     _require_role(("mac-dev",), "select", role_file)
-    raise NotImplementedError("select: implement lake/marts query on the Mac.")
+
+    from keibamon_core import lake_query
+    from keibamon_core.ingestion.marts import MART_RACES
+
+    mart_path = lake.mart(MART_RACES)
+    if not mart_path.exists():
+        return []
+
+    target_date = _normalize_race_date(race_date)
+    preds = ["CAST(race_date AS DATE) = ?"]
+    params: list[Any] = [target_date]
+    if not include_run:
+        preds.append("NOT results_available")
+    if min_field_size > 0:
+        preds.append("COALESCE(field_size, 0) >= ?")
+        params.append(min_field_size)
+    if venue:
+        preds.append("LOWER(racecourse) = ?")
+        params.append(venue.lower())
+
+    sql = (
+        f"SELECT race_id, scheduled_post_time "
+        f"FROM {lake_query.src(mart_path)} "
+        f"WHERE {' AND '.join(preds)} "
+        f"ORDER BY scheduled_post_time NULLS LAST, race_id"
+    )
+    rows = lake_query.query(sql, params=params).to_pylist()
+
+    if races:
+        wanted = {int(n) for n in races}
+        rows = [r for r in rows if _parse_race_no(r["race_id"]) in wanted]
+
+    return [(r["race_id"], r["scheduled_post_time"]) for r in rows]
+
+
+def _normalize_race_date(value: str) -> date:
+    """Accept ``YYYYMMDD`` or ``YYYY-MM-DD`` and return a ``date``.
+
+    The ``races`` mart stores ``race_date`` as a UTC datetime (silver carries
+    it through ``_ensure_utc``); comparing ``CAST(race_date AS DATE) = ?`` with
+    a Python ``date`` parameter is portable across TIMESTAMP / TIMESTAMPTZ
+    storage and sidesteps the session-tz display gotcha (memory: DuckDB
+    projects TIMESTAMPTZ to the session tz on read).
+    """
+    s = value.strip()
+    for fmt in ("%Y%m%d", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(s, fmt).date()
+        except ValueError:
+            continue
+    raise ValueError(
+        f"race_date must be YYYYMMDD or YYYY-MM-DD, got {value!r}"
+    )
 
 
 # --- Stage 2: posting (Mac) --------------------------------------------------

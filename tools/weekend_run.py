@@ -19,8 +19,8 @@ wrong host. Run ``python tools/whichdevice.py`` first.
     python tools/weekend_run.py settle --date 20260620
 
 This is a thin shell over ``keibamon_core.weekend.pipeline``; the stages wire
-existing modules together. ``track`` is implemented (ADR-0004); select is still
-a stub pending the lake/marts query.
+existing modules together. ``select`` and ``track`` are implemented (ADR-0004);
+``post``/``settle`` are reached via their pipeline functions directly.
 """
 from __future__ import annotations
 
@@ -41,11 +41,16 @@ def main(argv: list[str] | None = None) -> int:
         help="which weekend stage to run (each guards its own device).",
     )
     parser.add_argument("--date", required=True, help="race date, YYYYMMDD")
-    # track-only options; ignored for other stages.
-    parser.add_argument("--venue", help="track only. netkeiba venue slug (e.g. hanshin).")
+    # options shared by select / track; ignored for stages that don't use them.
+    parser.add_argument(
+        "--venue",
+        help="select/track. racecourse/venue slug (e.g. hanshin). Select matches "
+             "the races mart's racecourse; track maps via netkeiba's VENUE_JYO.",
+    )
     parser.add_argument(
         "--races",
-        help="track only. comma-separated race numbers (e.g. 1,2,3). Default: R1..R12.",
+        help="select/track. comma-separated race numbers (e.g. 1,2,3). Select "
+             "filters the mart to this subset; track defaults to R1..R12.",
     )
     parser.add_argument(
         "--nk-race-ids",
@@ -70,17 +75,53 @@ def main(argv: list[str] | None = None) -> int:
         help="track only. skip the caffeinate spawn (use after disabling lid sleep "
              "manually, or in environments without caffeinate).",
     )
+    # select-only options; ignored for other stages.
+    parser.add_argument(
+        "--min-field-size", type=int, default=1,
+        help="select only. drop races whose entries are not yet posted "
+             "(field_size below this). Default 1.",
+    )
+    parser.add_argument(
+        "--include-run", action="store_true",
+        help="select only. include races that have already run "
+             "(results_available == True). Default: upcoming only.",
+    )
     args = parser.parse_args(argv)
+
+    if args.stage == "select":
+        return _run_select(args)
 
     if args.stage == "track":
         return _run_track(args)
 
-    # Stubs: select/post/settle wiring already lives in pipeline; the CLI for
-    # those stages is intentionally minimal here. They raise NotImplementedError
-    # or WrongDeviceError with actionable messages when invoked directly via
-    # their pipeline functions.
+    # post/settle wiring already lives in pipeline; the CLI for those stages is
+    # intentionally minimal here. They raise NotImplementedError or
+    # WrongDeviceError with actionable messages when invoked directly via their
+    # pipeline functions.
     print(f"[weekend_run] stage={args.stage} date={args.date}")
     print("[weekend_run] use keibamon_core.weekend.pipeline directly for this stage.")
+    return 0
+
+
+def _run_select(args: argparse.Namespace) -> int:
+    """Dispatch to pipeline.select. The device guard lives in the pipeline
+    (single source of truth); the CLI just parses filters and prints."""
+    if len(args.date) != 8 or not args.date.isdigit():
+        raise SystemExit(f"--date must be YYYYMMDD, got {args.date!r}")
+    race_nos = _parse_race_numbers(args.races) if args.races else None
+    lake = LakePaths()
+    lake.ensure()
+    race_ids = pipeline.select(
+        lake, args.date,
+        venue=args.venue,
+        min_field_size=args.min_field_size,
+        include_run=args.include_run,
+        races=race_nos,
+    )
+    for rid in race_ids:
+        print(rid)
+    print(f"[select] date={args.date} venue={args.venue or '*'} "
+          f"selected={len(race_ids)}")
     return 0
 
 
