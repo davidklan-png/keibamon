@@ -1,5 +1,14 @@
 """run_dashboard_feed.py -- race-day live dashboard feed (Mac).
 
+.. deprecated:: ADR-0004
+   Superseded by ``tools/weekend_run.py track`` (which calls
+   :func:`keibamon_core.weekend.pipeline.track` -> :func:`track_once`).
+   ``track_once`` carries the same fetch/parse/bank/drift/push flow with
+   preflight discipline added (sleep inhibition + ``CF_*`` check) and is the
+   canonical path going forward. This file is retained for the 2026-06-14
+   Hanshin card it was built for; new cards should go through
+   ``weekend_run.py track``.
+
 Polls the full Hanshin card from netkeiba's win/place JSON API (the tested poller
 fetch/parse path), tracks each horse's OPENING odds, flags *residual* drift
 (movement against the race's own field-wide pool compression -- the honest signal,

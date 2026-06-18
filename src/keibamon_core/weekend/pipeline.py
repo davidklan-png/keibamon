@@ -7,20 +7,31 @@ traveling laptop, or JV-Link on the Mac).
 
   select  (Mac)          -> stage 1: pick races/runners from the lake.
   post    (Mac)          -> stage 2: freeze model_card + push our odds to D1.
-  track   (capture host) -> stage 3: live odds time-series (the only live job).
+  track   (Mac)          -> stage 3: live odds time-series (the only live job).
   settle  (Mac)          -> stage 4: settle at official payouts; score the card.
+
+ADR-0004 collapses every stage's guard to ``mac-dev`` (the capture PC is
+retired; the netkeiba feed on the Mac is the sole live source). Stage 3
+carries the operational risk: a missed curve is gone, because the JV-Link
+``0B41/0B42`` 1-year backfill dies with the PC. So ``track`` preflights sleep
+inhibition + ``CF_*`` before the loop, banks every snapshot to silver
+``odds_snapshots`` (lake first), and pushes the D1 projection best-effort.
 
 This module is orchestration only -- it wires existing modules together and
 enforces the boundaries. The real work lives in:
   - weekend.model_card.freeze_model_card  (stage 2)
-  - ingestion.curve_log                   (stage 3 freeze)
-  - tools/jravan realtime + run_dashboard_feed (stage 3 capture)
+  - ingestion.odds.append_odds_snapshots  (stage 3 lake write)
+  - polling.netkeiba / polling.drift      (stage 3 fetch+parse+drift)
+  - ingestion.curve_log                   (stage 3 freeze -> stage 4 settle)
   - ingestion.settlement / tools.jravan.settle_curve_log (stage 4)
   - tools/jravan/publish_d1.push_to_d1    (D1 projection, all stages)
 """
 from __future__ import annotations
 
 import os
+import sys
+import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -146,6 +157,20 @@ def _load_push_to_d1():
     return module.push_to_d1
 
 
+def _missing_cf_creds() -> list[str]:
+    """The CF_* env vars ``push_to_d1`` reads via ``os.environ``; empty when all present.
+
+    Shared by every D1 push path (post / settle / track) so the missing-cred
+    check never drifts between them. Per CLAUDE.md the CF_* vars don't persist
+    across Mac shells -- a missing cred is a startup-preflight concern, not a
+    silent per-cycle drop.
+    """
+    return [
+        k for k in ("CF_ACCOUNT_ID", "CF_D1_DATABASE_ID", "CF_API_TOKEN")
+        if not os.environ.get(k)
+    ]
+
+
 def _push_to_d1_best_effort(rows, *, push_d1: bool, push_fn: Any) -> dict[str, Any]:
     """Project frozen cards into a D1 document and push, swallowing failures.
 
@@ -161,10 +186,7 @@ def _push_to_d1_best_effort(rows, *, push_d1: bool, push_fn: Any) -> dict[str, A
 
     snapshot = _project_cards_snapshot(rows)
     if push_fn is None:
-        missing = [
-            k for k in ("CF_ACCOUNT_ID", "CF_D1_DATABASE_ID", "CF_API_TOKEN")
-            if not os.environ.get(k)
-        ]
+        missing = _missing_cf_creds()
         if missing:
             return {
                 "status": "skipped",
@@ -241,24 +263,489 @@ def _utc_now_iso_helper() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-# --- Stage 3: day-of curve (capture host -- the only live, unrecoverable job) -
+# --- Stage 3: day-of curve (mac-dev only -- ADR-0004) -----------------------
+#
+# ADR-0004 retires the capture PC; the Mac is the sole device and the live
+# source is the netkeiba feed. With JV-Link retired there is no 0B41/0B42
+# 1-year backfill -- an intraday curve not captured live is lost forever, so
+# the preflight discipline below (sleep inhibition + CF_* preflight) is
+# race-day critical. This is the only UNRECOVERABLE weekend job.
 
-def track(race_ids: list[str], *, role_file: Path | None = None) -> None:
-    """Capture the live odds time-series, announcement -> post. Capture host only.
+_JST = timezone(timedelta(hours=9))
 
-    Capture-pc is the host of record (JVRTOpen / 0B30 / 0B41/0B42). The Mac is the
-    interim backup ONLY (netkeiba feed) and ONLY while stationary with lid-sleep
-    disabled (ADR-0002 blocked; ADR-0003 D5). A missed curve cannot be re-run.
 
-    STUB: delegate to tools/jravan/realtime_jvlink.py (PC) or
-    tools/jravan/run_dashboard_feed.py (Mac backup); both land snapshots in the
-    lake and push D1. This wrapper exists to enforce the device guard up front.
+def track(
+    lake: Any,
+    race_ids: list[str],
+    *,
+    role_file: Path | None = None,
+    poll_seconds: int = 120,
+    tighten_poll_seconds: int = 30,
+    tighten_within_minutes: float = 10.0,
+    inhibit_sleep: bool = True,
+    fetch_fn: Any = None,
+    push_fn: Any = None,
+    nk_race_ids: list[str] | None = None,
+    post_times_jst: list[str] | None = None,
+    race_names: list[str] | None = None,
+    snapshot_key: str = "netkeiba_track",
+    max_cycles: int | None = None,
+    sleep_fn: Any = None,
+) -> dict[str, Any]:
+    """Capture the live odds time-series, announcement -> post. mac-dev only.
+
+    Loop: each cycle is one :func:`track_once` pass over ``race_specs`` -- for
+    each race, fetch+parse the netkeiba odds, append to silver ``odds_snapshots``
+    (**lake first**), then push the whole-card snapshot to D1 best-effort. The
+    unchanged-timestamp backoff falls out of ``append_odds_snapshots``' dedupe
+    on ``(race_id, horse_number, available_at)``: if netkeiba hasn't updated,
+    the append returns 0 and the cycle is a no-op for that race.
+    ``tighten_within_minutes`` shortens the cadence when a race is approaching
+    its post time.
+
+    Restartable: the dedupe means a crash and restart picks up where the curve
+    left off without duplicating rows or losing the opening-odds baseline.
+
+    Preflight (the two failures that cost the June 14 curves):
+
+      - **Sleep inhibition.** Spawns ``caffeinate -dis`` for the loop's lifetime
+        (display + idle + system sleep). Per CLAUDE.md ``caffeinate -i`` does
+        NOT hold against a closed lid -- the user must ALSO disable lid Sleep
+        in System Settings > Battery; this function only handles the
+        caffeinate half. If spawn fails it warns loudly and continues (we
+        cannot reliably verify sleep state from userspace, and refusing would
+        sacrifice the curve to a false negative).
+      - **CF_* creds.** Loud startup warning if missing; the loop still banks
+        the curve, push is skipped per cycle with a reason.
+
+    Injection seams for tests: ``fetch_fn`` / ``push_fn`` mirror :func:`post`;
+    ``sleep_fn(seconds)`` replaces ``time.sleep``; ``max_cycles=N`` stops after
+    N cycles so the test runs one pass; ``inhibit_sleep=False`` skips the
+    caffeinate spawn entirely. Device guard is the single source of truth here
+    (ADR-0003 D1 / ADR-0004) -- the CLI does NOT re-check.
     """
-    _require_role(("capture-pc", "mac-dev"), "track", role_file)
-    raise NotImplementedError(
-        "track: run realtime_jvlink (PC) or run_dashboard_feed (Mac backup). "
-        "If Mac: caffeinate -dis + disable lid sleep first (ADR-0003 D5)."
+    _require_role(("mac-dev",), "track", role_file)
+
+    race_specs = _resolve_race_specs(
+        race_ids,
+        nk_race_ids=nk_race_ids,
+        post_times_jst=post_times_jst,
+        race_names=race_names,
     )
+
+    # --- preflight: print loudly, do not refuse (a false negative would cost
+    #     the curve; the lake capture is what's unrecoverable, the push isn't).
+    # A caller-supplied push_fn bypasses the CF_* preflight (tests own their
+    # fake pusher); mirror _push_to_d1_best_effort's bypass.
+    cred_warning = _preflight_creds_or_warn(push_fn=push_fn)
+    sleep_proc, sleep_warning = (None, None)
+    if inhibit_sleep:
+        sleep_proc, sleep_warning = _inhibit_sleep_or_warn()
+
+    try:
+        open_state: dict[tuple[str, int], float] = {}
+        cycles: list[dict[str, Any]] = []
+        cycle_no = 0
+        while True:
+            cycle_no += 1
+            cycle = track_once(
+                lake, race_specs,
+                fetch_fn=fetch_fn, push_fn=push_fn,
+                open_state=open_state, snapshot_key=snapshot_key,
+            )
+            cycles.append(cycle)
+            if max_cycles is not None and cycle_no >= max_cycles:
+                break
+            _sleep_between_cycles(
+                race_specs, sleep_fn,
+                poll_seconds=poll_seconds,
+                tighten_poll_seconds=tighten_poll_seconds,
+                tighten_within_minutes=tighten_within_minutes,
+            )
+    finally:
+        if sleep_proc is not None:
+            sleep_proc.terminate()
+
+    return {
+        "stage": "track",
+        "device": "mac-dev",
+        "race_ids": list(race_ids),
+        "cycles": cycles,
+        "preflight": {"cf_creds": cred_warning, "sleep": sleep_warning},
+    }
+
+
+def track_once(
+    lake: Any,
+    race_specs: list[dict[str, Any]],
+    *,
+    fetch_fn: Any = None,
+    push_fn: Any = None,
+    push_d1: bool = True,
+    open_state: dict[tuple[str, int], float] | None = None,
+    snapshot_key: str = "netkeiba_track",
+) -> dict[str, Any]:
+    """One polling cycle. Lake-first per race, then best-effort D1 push.
+
+    For each race in ``race_specs``:
+
+      1. ``fetch_fn(spec["nk_race_id"]) -> payload_text`` (production: the
+         polite conditional-GET fetcher in ``polling.netkeiba``; tests inject
+         a fixture-returning stub so the loop runs offline).
+      2. Parse via :func:`polling.netkeiba.parse_odds_payload` -> silver
+         ``odds_snapshots`` row shape.
+      3. **Lake first**: :func:`ingestion.odds.append_odds_snapshots` banks
+         the curve (deduped on ``(race_id, horse_number, available_at)``).
+      4. Track opening odds (first sighting wins) and residual drift
+         (:func:`polling.drift.residual_edges`) -- display only, NEVER a bet
+         signal (ADR-0003 "explicitly out of scope").
+
+    After every race is banked, the whole-card snapshot is projected and pushed
+    via ``push_fn`` (production: :func:`tools.jravan.publish_d1.push_to_d1`;
+    tests inject a stub). A push failure does NOT lose any lake write --
+    ADR-0003 D4 (lake is the record, D1 is disposable display).
+
+    ``open_state`` is the cross-cycle opening-odds cache; the caller passes the
+    same mutable dict each cycle so the opening-odds baseline survives restarts
+    within a process. (Across process restarts the baseline is rebuilt from the
+    earliest ``odds_snapshots`` row on disk if needed by downstream consumers --
+    ``build_curve_records`` derives ``open_odds`` from the earliest snapshot.)
+
+    Returns a per-cycle summary dict.
+    """
+    from keibamon_core.ingestion.odds import append_odds_snapshots
+    from keibamon_core.polling.drift import residual_edges
+    from keibamon_core.polling.netkeiba import (
+        fetch_odds_payload as _default_fetch,
+        parse_odds_payload,
+    )
+
+    fetch = fetch_fn or _default_fetch
+    open_state = open_state if open_state is not None else {}
+
+    races_out: list[dict[str, Any]] = []
+    total_banked = 0
+    for spec in race_specs:
+        race_id = spec["race_id"]
+        nk_id = spec["nk_race_id"]
+        captured = datetime.now(timezone.utc)
+        try:
+            payload = fetch(nk_id)
+            recs = parse_odds_payload(
+                payload, race_id=race_id,
+                raw_uri=f"netkeiba:{nk_id}", captured_at=captured,
+            )
+        except Exception as exc:  # noqa: BLE001 - one race must not kill the cycle
+            print(f"  {race_id}: fetch/parse failed ({exc!r})", file=sys.stderr)
+            races_out.append(_empty_race_snapshot(spec, captured, reason=f"fetch_failed: {exc!r}"))
+            continue
+
+        # LAKE FIRST: bank the curve before any push runs. A failure here is
+        # logged but does not abort the cycle -- the other races still capture.
+        try:
+            banked = append_odds_snapshots(lake, recs)
+            total_banked += banked
+        except Exception as exc:  # noqa: BLE001
+            print(f"  {race_id}: lake append failed ({exc!r})", file=sys.stderr)
+            banked = 0
+
+        # Opening-odds cache + residual drift (display only -- NOT a bet).
+        drift_rows = []
+        for r in recs:
+            uma, win = r["horse_number"], r.get("win_odds")
+            key = (race_id, uma)
+            if win and key not in open_state:
+                open_state[key] = win  # first sighting = opening price
+            drift_rows.append((uma, win, open_state.get(key)))
+        edges = residual_edges(drift_rows)
+
+        races_out.append(_race_snapshot(spec, recs, open_state, edges, captured, banked))
+
+    snapshot = _project_track_snapshot(race_specs, races_out)
+    push_result = _push_track_to_d1_best_effort(
+        snapshot, push_d1=push_d1, push_fn=push_fn, key=snapshot_key,
+    )
+    return {
+        "cycle_at": snapshot["meta"]["published_at"],
+        "races": len(races_out),
+        "snapshots_banked": total_banked,
+        "movers": sum(
+            1 for r in races_out for x in r["runners"] if x.get("edge_label")
+        ),
+        "d1": push_result,
+    }
+
+
+# --- track internals ---------------------------------------------------------
+
+
+def _resolve_race_specs(
+    race_ids: list[str],
+    *,
+    nk_race_ids: list[str] | None = None,
+    post_times_jst: list[str] | None = None,
+    race_names: list[str] | None = None,
+) -> list[dict[str, Any]]:
+    """Build the per-race spec dicts ``track_once`` consumes.
+
+    Parallel lists are optional; missing fields default sensibly:
+      - ``nk_race_id`` defaults to ``race_id`` itself (tests don't care;
+        production must supply the real netkeiba-format id via ``nk_race_ids``).
+      - ``post_time_jst`` defaults to None (adaptive cadence treats as unknown).
+      - ``name`` defaults to "Race N" when a race_no is derivable from the id.
+    """
+    if nk_race_ids is not None and len(nk_race_ids) != len(race_ids):
+        raise ValueError("nk_race_ids must parallel race_ids")
+    if post_times_jst is not None and len(post_times_jst) != len(race_ids):
+        raise ValueError("post_times_jst must parallel race_ids")
+    if race_names is not None and len(race_names) != len(race_ids):
+        raise ValueError("race_names must parallel race_ids")
+
+    out: list[dict[str, Any]] = []
+    for i, rid in enumerate(race_ids):
+        nk = (nk_race_ids[i] if nk_race_ids else None) or rid
+        pt = post_times_jst[i] if post_times_jst else None
+        race_no = _parse_race_no(rid)
+        nm = race_names[i] if race_names else None
+        if nm is None:
+            nm = f"Race {race_no}" if race_no is not None else rid
+        out.append({
+            "race_id": rid,
+            "nk_race_id": nk,
+            "post_time_jst": pt,
+            "name": nm,
+            "race_no": race_no,
+        })
+    return out
+
+
+def _parse_race_no(rid: str) -> int | None:
+    """Best-effort race number from any id form. 'jra-20260620-09-11' -> 11."""
+    parts = rid.split("-")
+    try:
+        return int(parts[-1])
+    except (ValueError, IndexError):
+        return None
+
+
+def _race_snapshot(
+    spec: dict[str, Any],
+    recs: list[dict[str, Any]],
+    open_state: dict[tuple[str, int], float],
+    edges: dict[Any, Any],
+    captured: datetime,
+    banked: int,
+) -> dict[str, Any]:
+    """Build one race entry for the D1 snapshot (display shape, disposable)."""
+    race_id = spec["race_id"]
+    runners = []
+    for r in recs:
+        uma = r["horse_number"]
+        win = r.get("win_odds")
+        flag = edges.get(uma)
+        runners.append({
+            "umaban": uma,
+            "win_odds": win,
+            "win_open": open_state.get((race_id, uma)),
+            "place_low": r.get("place_odds_low"),
+            "place_high": r.get("place_odds_high"),
+            "edge_label": flag.label if flag else None,
+            "drift_dir": flag.direction if flag else None,
+            "drift_z": round(flag.z, 1) if flag else None,
+        })
+    return {
+        "race_no": spec.get("race_no"),
+        "race_id": race_id,
+        "name": spec.get("name") or f"Race {spec.get('race_no') or '?'}",
+        "post_time_jst": spec.get("post_time_jst"),
+        "status": "open" if runners else "waiting",
+        "result": None,
+        "capture": {
+            "last_update": captured.isoformat(),
+            "snapshots_banked_this_cycle": banked,
+            "pools": ["win_place"],
+        },
+        "runners": runners,
+    }
+
+
+def _empty_race_snapshot(
+    spec: dict[str, Any], captured: datetime, *, reason: str
+) -> dict[str, Any]:
+    """A race entry for a failed fetch -- preserves shape so the dashboard still
+    renders, with a status marker."""
+    return {
+        "race_no": spec.get("race_no"),
+        "race_id": spec["race_id"],
+        "name": spec.get("name") or f"Race {spec.get('race_no') or '?'}",
+        "post_time_jst": spec.get("post_time_jst"),
+        "status": "waiting",
+        "result": None,
+        "capture": {
+            "last_update": captured.isoformat(),
+            "snapshots_banked_this_cycle": 0,
+            "pools": [],
+            "reason": reason,
+        },
+        "runners": [],
+    }
+
+
+def _project_track_snapshot(
+    race_specs: list[dict[str, Any]], races_out: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Whole-card D1 document. Mirrors ``run_dashboard_feed``'s shape so the
+    existing splash/live dashboard and ``publish_d1.push_to_d1`` consume it
+    unchanged. Display-only -- the lake is the record."""
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return {
+        "meta": {
+            "stage": "track",
+            "status": "live",
+            "source": "netkeiba-live",
+            "message": (
+                "Live win/place odds. \u25bc=firming vs field (money in), "
+                "\u25b2=draining vs field. Residual move vs this race's own pool "
+                "compression -- filters pool-fill noise. Watch only, not a bet signal."
+            ),
+            "published_at": now_iso,
+        },
+        "races": races_out,
+    }
+
+
+def _push_track_to_d1_best_effort(
+    snapshot: dict[str, Any], *, push_d1: bool, push_fn: Any, key: str
+) -> dict[str, Any]:
+    """Best-effort D1 push for one track cycle. Same pattern as
+    :func:`_push_to_d1_best_effort` (post) and
+    :func:`_push_calibration_to_d1_best_effort` (settle): a caller-supplied
+    ``push_fn`` bypasses the CF_* preflight (tests own the fake pusher);
+    otherwise the preflight gates the real ``publish_d1.push_to_d1``. Never
+    raises over the lake writes that already landed."""
+    if not push_d1:
+        return {"status": "disabled"}
+    if push_fn is None:
+        missing = _missing_cf_creds()
+        if missing:
+            return {
+                "status": "skipped",
+                "reason": f"missing CF_* env vars: {missing}",
+                "hint": "source CF_* creds; lake curves already banked.",
+            }
+        fn = _load_push_to_d1()
+    else:
+        fn = push_fn
+    try:
+        response = fn(snapshot, key=key)
+        meta = ((response.get("result") or {}).get("meta") or {}) if isinstance(response, dict) else {}
+        ok = bool(meta.get("changes", 0))
+        return {
+            "status": "ok" if ok else "pushed",
+            "key": key,
+            "response": response,
+        }
+    except Exception as exc:  # noqa: BLE001 -- D1 is disposable; never re-raise over the lake write
+        return {
+            "status": "failed",
+            "error": f"{type(exc).__name__}: {exc}",
+            "hint": "lake curves already banked; re-run push manually if needed.",
+        }
+
+
+def _preflight_creds_or_warn(*, push_fn: Any = None) -> str | None:
+    """Loud startup warning if CF_* are missing. Does NOT refuse to start --
+    the loop still banks curves to the lake; push is skipped per cycle with
+    a reason. Returns the warning string (or None when all creds present).
+
+    A caller-supplied ``push_fn`` bypasses the preflight entirely (tests own
+    their fake pusher) -- mirrors :func:`_push_to_d1_best_effort`'s bypass.
+    """
+    if push_fn is not None:
+        return None
+    missing = _missing_cf_creds()
+    if not missing:
+        return None
+    msg = (
+        f"WARNING: CF_* env vars missing ({missing}); D1 push will be skipped. "
+        "Source CF_* creds in the shell before race day. Curve capture still runs."
+    )
+    print(msg, file=sys.stderr)
+    return msg
+
+
+def _inhibit_sleep_or_warn() -> tuple[Any, str | None]:
+    """Spawn ``caffeinate -dis`` to prevent display/idle/system sleep.
+
+    Returns ``(proc_or_None, warning_or_None)``. ``caffeinate -dis`` is the
+    polite macOS way to hold the host awake (d=display, i=idle, s=system on
+    AC). Per CLAUDE.md ``caffeinate -i`` does NOT prevent lid-close sleep --
+    the user must ALSO disable lid Sleep in System Settings > Battery; this
+    function only handles the caffeinate half. If spawn fails it warns loudly
+    and continues -- we cannot reliably verify sleep state from userspace, and
+    refusing would sacrifice the curve to a false negative.
+    """
+    import subprocess
+    try:
+        proc = subprocess.Popen(
+            ["caffeinate", "-dis"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+        return proc, None
+    except (OSError, FileNotFoundError) as exc:
+        warning = (
+            f"WARNING: could not spawn caffeinate ({exc!r}); the Mac may sleep "
+            "and the live curve will be lost. Disable lid-close sleep manually "
+            "in System Settings > Battery (June 14 curves lost to this)."
+        )
+        print(warning, file=sys.stderr)
+        return None, warning
+
+
+def _sleep_between_cycles(
+    race_specs: list[dict[str, Any]],
+    sleep_fn: Any,
+    *,
+    poll_seconds: int,
+    tighten_poll_seconds: int,
+    tighten_within_minutes: float,
+) -> None:
+    """Adaptive cadence: tighten toward post time, never faster than the
+    source updates (the dedupe handles unchanged payloads gracefully)."""
+    wait = poll_seconds
+    nearest = _minutes_to_nearest_post(race_specs)
+    if nearest is not None and nearest <= tighten_within_minutes:
+        wait = tighten_poll_seconds
+    if sleep_fn is None:
+        time.sleep(wait)
+    else:
+        sleep_fn(wait)
+
+
+def _minutes_to_nearest_post(race_specs: list[dict[str, Any]]) -> float | None:
+    """Nearest future ``post_time_jst`` across the card, in minutes from now,
+    or None if no spec has a parseable post time. ``post_time_jst`` is "HH:MM"
+    in JST; this computes the delta from the current UTC instant."""
+    now_jst = datetime.now(_JST)
+    candidates: list[float] = []
+    for spec in race_specs:
+        pt = spec.get("post_time_jst")
+        if not pt or ":" not in pt:
+            continue
+        try:
+            hh, mm = pt.split(":", 1)
+            post_jst = datetime(
+                now_jst.year, now_jst.month, now_jst.day,
+                int(hh), int(mm), tzinfo=_JST,
+            )
+        except (ValueError, TypeError):
+            continue
+        delta = (post_jst - now_jst).total_seconds() / 60.0
+        if delta >= 0:
+            candidates.append(delta)
+    if not candidates:
+        return None
+    return min(candidates)
 
 
 # --- Stage 4: results (Mac) --------------------------------------------------
@@ -399,10 +886,7 @@ def _push_calibration_to_d1_best_effort(
     snapshot = _project_calibration_snapshot(report, settled_rows)
 
     if push_fn is None:
-        missing = [
-            k for k in ("CF_ACCOUNT_ID", "CF_D1_DATABASE_ID", "CF_API_TOKEN")
-            if not os.environ.get(k)
-        ]
+        missing = _missing_cf_creds()
         if missing:
             return {
                 "status": "skipped",
