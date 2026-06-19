@@ -203,3 +203,23 @@ def _pace_to_rate_floor() -> None:
 def utc_now() -> datetime:
     """Convenience: tz-aware UTC now. Adapter modules call this for ingested_at."""
     return datetime.now(timezone.utc)
+
+
+def format_provenance_iso(dt: datetime | None) -> str | None:
+    """Format a datetime as ISO 8601 with a ``Z`` suffix, or ``None``.
+
+    Matches the existing ``jravan_*`` silver tables' ``ingested_at`` and
+    ``published_time`` columns, which are typed ``string`` (not timestamp) --
+    the JV-Link bronze path writes ISO 8601 strings and the silver builder
+    passes them through. Scrape adapters stringify to match so the
+    partition-aware upsert doesn't trip on pyarrow's type-unification
+    (``ArrowTypeError: Expected bytes, got a 'datetime.datetime' object`` --
+    the bug surfaced in the 2026-06-19 VALIDATE dry run). ``available_at``
+    stays a datetime; only the two provenance columns are string.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        from datetime import timezone as _tz
+        dt = dt.replace(tzinfo=_tz.utc)
+    return dt.isoformat().replace("+00:00", "Z")

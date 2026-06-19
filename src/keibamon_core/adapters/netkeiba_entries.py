@@ -138,12 +138,17 @@ def _entry_record(
         "carried_weight_kg": raw.get("carried_weight_kg"),
         "body_weight_kg": bw if bw and bw not in (0, 999) else None,
         # Provenance -- source_name distinguishes scrape rows from JV-Link.
+        # ingested_at + published_time are STRINGS (matching the existing
+        # jravan_* silver schema: JV-Link bronze writes ISO strings and the
+        # silver builder passes them through). available_at stays datetime --
+        # the only one of the three typed timestamp in the existing schema.
+        # See netkeiba_http.format_provenance_iso for the BUG-4 rationale.
         "source_name": SOURCE_NAME,
         "source_record_id": meta.get("source_record_id"),
         "raw_uri": meta.get("raw_uri"),
         "content_hash": meta.get("content_hash"),
-        "ingested_at": meta.get("ingested_at"),
-        "published_time": published,
+        "ingested_at": netkeiba_http.format_provenance_iso(meta.get("ingested_at")),
+        "published_time": netkeiba_http.format_provenance_iso(published),
         "available_at": published,
     }
 

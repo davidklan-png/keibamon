@@ -364,7 +364,13 @@ def test_available_at_floors_captured_at_to_utc_midnight(tmp_path: Path) -> None
     for row in rows:
         assert row["available_at"] == expected_midnight
         assert row["available_at"] != captured_at  # never the raw scrape time
-        assert row["published_time"] == expected_midnight  # same floored value
+        # published_time is a STRING (matches the existing jravan_* silver
+        # schema -- JV-Link bronze writes ISO strings; scrape stringifies to
+        # match so the partition-aware upsert doesn't trip pyarrow's
+        # type-unification). available_at stays datetime.
+        assert row["published_time"] == netkeiba_http.format_provenance_iso(
+            expected_midnight
+        )
 
 
 def test_source_name_netkeiba_stamped(tmp_path: Path) -> None:
@@ -373,7 +379,11 @@ def test_source_name_netkeiba_stamped(tmp_path: Path) -> None:
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
 
-    # JV-Link rows written directly (the licensed-feed write path).
+    # JV-Link rows written directly (the licensed-feed write path). The
+    # ingested_at / published_time columns are STRING-typed in the existing
+    # silver schema (JV-Link bronze writes ISO strings), so hand-written
+    # test rows stringify to match -- otherwise the partition-aware upsert's
+    # pyarrow type-unification trips when merging with scrape rows.
     write_dataset(
         [
             {
@@ -382,7 +392,9 @@ def test_source_name_netkeiba_stamped(tmp_path: Path) -> None:
                 "carried_weight_kg": 56.0, "body_weight_kg": 480,
                 "source_name": "jravan", "source_record_id": "jv:1",
                 "raw_uri": "jv://raw", "content_hash": "jvhash",
-                "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "ingested_at": netkeiba_http.format_provenance_iso(
+                    datetime(2026, 6, 21, tzinfo=timezone.utc)
+                ),
                 "published_time": None,
                 "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
                 "year": 2026, "venue": "05",
@@ -419,7 +431,8 @@ def test_scrape_upsert_partition_aware_no_clobber(tmp_path: Path) -> None:
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
 
-    # 5 JV-Link entries for race A in (2026, '05').
+    # 5 JV-Link entries for race A in (2026, '05'). ingested_at stringified
+    # to match the existing jravan_* silver schema (string column).
     race_a = "jra-20260601-05-11"
     jv_rows = [
         {
@@ -436,7 +449,9 @@ def test_scrape_upsert_partition_aware_no_clobber(tmp_path: Path) -> None:
             "source_record_id": f"jv:{i}",
             "raw_uri": "jv://raw",
             "content_hash": "jvhash",
-            "ingested_at": datetime(2026, 6, 1, tzinfo=timezone.utc),
+            "ingested_at": netkeiba_http.format_provenance_iso(
+                datetime(2026, 6, 1, tzinfo=timezone.utc)
+            ),
             "published_time": None,
             "available_at": datetime(2026, 6, 1, tzinfo=timezone.utc),
             "year": 2026,
@@ -446,7 +461,9 @@ def test_scrape_upsert_partition_aware_no_clobber(tmp_path: Path) -> None:
     ]
     write_dataset(jv_rows, lake.silver_dataset("jravan_race_entries"))
 
-    # 3 scrape entries for race B in the SAME (2026, '05') partition.
+    # 3 scrape entries for race B in the SAME (2026, '05') partition. These
+    # rows mimic what the adapter produces (stringified provenance times) so
+    # the merge's type-unification succeeds.
     race_b = "jra-20260601-05-12"
     scrape_rows = [
         {
@@ -463,7 +480,9 @@ def test_scrape_upsert_partition_aware_no_clobber(tmp_path: Path) -> None:
             "source_record_id": f"nk:{i}",
             "raw_uri": "nk://raw",
             "content_hash": "nkhash",
-            "ingested_at": datetime(2026, 6, 1, tzinfo=timezone.utc),
+            "ingested_at": netkeiba_http.format_provenance_iso(
+                datetime(2026, 6, 1, tzinfo=timezone.utc)
+            ),
             "published_time": None,
             "available_at": datetime(2026, 6, 1, tzinfo=timezone.utc),
             "year": 2026,
@@ -517,7 +536,10 @@ def _write_payouts(rows: list[dict], lake: LakePaths, source: str, race_id: str,
         "race_id": race_id, "pool": pool, "combo": combo, "payout_yen": payout,
         "popularity": popularity, "source_name": source, "source_record_id": f"{source}:{combo}",
         "raw_uri": f"{source}://raw", "content_hash": f"{source}hash",
-        "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+        # Stringified to match the existing jravan_* silver schema (string).
+        "ingested_at": netkeiba_http.format_provenance_iso(
+            datetime(2026, 6, 21, tzinfo=timezone.utc)
+        ),
         "published_time": None,
         "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
         "year": 2026, "venue": "05",

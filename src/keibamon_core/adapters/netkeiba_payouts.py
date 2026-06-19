@@ -169,13 +169,15 @@ def _payout_record(
         "combo": _normalize_selection(raw["combo_raw"], raw["pool"]),
         "payout_yen": raw["payout_yen"],
         "popularity": raw.get("popularity"),
-        # Provenance.
+        # Provenance -- ingested_at + published_time stringified to match the
+        # existing jravan_* silver schema (string columns). See
+        # netkeiba_http.format_provenance_iso for the BUG-4 rationale.
         "source_name": SOURCE_NAME,
         "source_record_id": meta.get("source_record_id"),
         "raw_uri": meta.get("raw_uri"),
         "content_hash": meta.get("content_hash"),
-        "ingested_at": meta.get("ingested_at"),
-        "published_time": published,
+        "ingested_at": netkeiba_http.format_provenance_iso(meta.get("ingested_at")),
+        "published_time": netkeiba_http.format_provenance_iso(published),
         "available_at": published,
     }
 
