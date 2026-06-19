@@ -146,3 +146,30 @@ PC cutover status:
       UTF-8 (Content-Type charset=UTF-8), not EUC-JP as the spec draft
       claimed — `_charset_from_content_type` defaults to UTF-8 and the
       bytes decode cleanly under it; EUC-JP/Shift-JIS/CP932 all fail.
+
+### The id-bootstrap problem — resolved by discovery, not derivation (2026-06-19)
+
+The original scrape design assumed an adapter could reach a race header from
+`(date, venue, race_no)`. It cannot: netkeiba's 12-digit `race_id` embeds 開催回/日
+(kai/nichi), which are **not** recoverable from a calendar date — a synthesized id
+returns a generic empty shell, not the race. This bootstrap gap stayed latent because
+the test suite only ever injected payloads, so the cutover path was never exercised
+against the live wire until the 2026-06-19 dry run.
+
+Resolution (commit `78f4d62`): **discover the id, don't derive it.** Once per race day
+the ingester fetches the day index (`race_list_sub.html?kaisai_date=YYYYMMDD`), reads
+each race's numeric `race_id` off the hrefs, and persists the canonical→numeric mapping
+into `netkeiba_races`. The adapters and the self-resolving `track --grades` then fetch
+by the discovered id. This is what makes the lookup-free path genuinely lookup-free:
+the human enters nothing; the day index *is* the lookup.
+
+**Venue codes.** The venue digits (positions 5–6) of the netkeiba id ARE the official
+JRA 場コード — 05=Tokyo, 08=Kyoto, 09=Hanshin, etc. netkeiba does not use a divergent
+scheme; derive venue from the id digits directly and do **not** add a netkeiba-vs-JRA
+remap (an early decode note wrongly claimed 09=Kyoto — it is Hanshin).
+
+Validated live 2026-06-19: `track --grades G1,G2,G3` self-resolved both 2026-06-21 GⅢ
+(`202605030611` Tokyo R11 / `202609030611` Hanshin R11) and banked curve rows with no
+`--venue`/`--nk-race-ids`. The first real cross-validation overlap candidate is the
+2026-06-21 card, once the PC's official JV-Link oracle for it is imported — the gate
+checkbox above stays open until it prints PASS.
