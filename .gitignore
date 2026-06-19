@@ -47,3 +47,6 @@ logs/
 
 # JV-Link manifest airlock (per-card manifests are machine-local, never commit)
 tools/jravan/manifests/
+
+# Claude Code / Cowork machine-local settings (keeps both trees clean for the PC mirror)
+.claude/settings.local.json
