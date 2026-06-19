@@ -63,7 +63,13 @@ def fetch_payload(
     static source is cheap. The conditional cache is process-local; the bronze
     archive is the durable layer.
 
-    Enforces :data:`MIN_FETCH_INTERVAL_SECONDS` between any two calls. Tests
+    Paces itself: if less than :data:`MIN_FETCH_INTERVAL_SECONDS` has elapsed
+    since the last fetch (from ANY caller in this process -- discovery counts
+    against the per-race adapter calls), sleeps until the floor is satisfied.
+    This is the BUG-3 fix: the orchestrator (``tools/scrape_ingest.py``) loops
+    through up to four adapter calls per race, and each ``build_*`` calls
+    ``fetch_payload`` once -- the floor at the network layer keeps every
+    fetch polite without the orchestrator having to know about it. Tests
     bypass this by injecting a ``fetch_fn=`` seam into the adapter; they never
     touch this network path.
 
@@ -74,7 +80,7 @@ def fetch_payload(
     rather than hard-code UTF-8 so a future server-side change doesn't silently
     produce mojibake.
     """
-    _enforce_rate_floor()
+    _pace_to_rate_floor()
     headers: dict[str, str] = {"User-Agent": USER_AGENT}
     cached = _COND_CACHE.get(url)
     if cached:
@@ -172,23 +178,24 @@ def reset_rate_floor_for_tests() -> None:
     _LAST_FETCH_MONOTONIC = 0.0
 
 
-def _enforce_rate_floor() -> None:
-    """Raise if two fetches land inside :data:`MIN_FETCH_INTERVAL_SECONDS`.
+def _pace_to_rate_floor() -> None:
+    """Sleep until :data:`MIN_FETCH_INTERVAL_SECONDS` has elapsed since the
+    last fetch, then stamp the new floor.
 
-    A violation is a bug in the caller, not a network blip: scraping is the
-    post-cutover source of truth, and a rate-limit ban on the only feed would
-    silently lose race days. Fail loud.
+    Self-pacing is the BUG-3 fix: scraping is the post-cutover source of truth
+    and a rate-limit ban on the only feed would silently lose race days, so
+    the floor MUST hold across every fetch in the process -- discovery's
+    initial GET counts against the per-race adapter calls that follow. Putting
+    the sleep here (instead of in the orchestrator) means every caller stays
+    polite without having to know about the floor.
     """
     global _LAST_FETCH_MONOTONIC
-    now = time.monotonic()
-    elapsed = now - _LAST_FETCH_MONOTONIC
-    if _LAST_FETCH_MONOTONIC > 0 and elapsed < MIN_FETCH_INTERVAL_SECONDS:
-        raise RuntimeError(
-            f"polite-fetch floor violated: {elapsed:.2f}s < "
-            f"{MIN_FETCH_INTERVAL_SECONDS}s since the last fetch -- ADR-0004 "
-            "mandates this gap"
-        )
-    _LAST_FETCH_MONOTONIC = now
+    if _LAST_FETCH_MONOTONIC > 0:
+        elapsed = time.monotonic() - _LAST_FETCH_MONOTONIC
+        gap = MIN_FETCH_INTERVAL_SECONDS - elapsed
+        if gap > 0:
+            time.sleep(gap)
+    _LAST_FETCH_MONOTONIC = time.monotonic()
 
 
 # Module-level datetime helpers ------------------------------------------------
