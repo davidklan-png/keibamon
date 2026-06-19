@@ -1,10 +1,13 @@
 """Single CLI entry for netkeiba scrape-sourced ingestion.
 
-Ingests one race day's worth of entries / results / payouts into the lake,
-mapping netkeiba race ids (``r-YYYY-MMDD-<venue>-NN``) to canonical lake ids
-(``jra-YYYYMMDD-<jyo>-NN``) via :func:`curve_log.crosswalk_race_id`.
+Ingests one race day's worth of entries / results / payouts into the lake.
+Numeric netkeiba race ids are DISCOVERED from the day's race-list page (one
+polite GET) via :func:`netkeiba_discovery.discover_card` — they cannot be
+synthesized from ``(date, venue, raceno)`` because the id encodes
+``kai``/``nichi``, which aren't recoverable from the calendar date.
 
-ALSO fetches each race's header into the ``netkeiba_races`` silver table, which
+Discovery persists canonical_race_id -> numeric_nk_id into the
+``netkeiba_races`` silver table (via :func:`netkeiba_races.build_race`), which
 carries the self-resolve mapping the weekend track depends on (``grade_code``
 for the graded-only filter; ``scheduled_post_time`` for adaptive cadence;
 ``netkeiba_race_id`` for the live-odds lookup). Run this once on Thursday when
@@ -38,7 +41,8 @@ from keibamon_core.adapters import (
     netkeiba_races,
     netkeiba_results,
 )
-from keibamon_core.ingestion.curve_log import VENUE_JYO, crosswalk_race_id
+from keibamon_core.adapters.netkeiba_discovery import DiscoveredRace, discover_card
+from keibamon_core.ingestion.curve_log import VENUE_JYO
 from keibamon_core.paths import LakePaths
 
 
@@ -87,48 +91,72 @@ def main() -> int:
     lake = LakePaths()
     lake.ensure()
 
-    yyyy = args.date[:4]
-    mmdd = args.date[4:]
-    venue = args.venue
-    if args.races:
-        if not venue:
-            parser.error("--venue is required when --races is given")
-        races = _parse_race_numbers(args.races)
-    else:
-        venue, races = _discover_card(args.date, venue)
-        if not races:
-            print(
-                f"No race card found for {args.date}"
-                + (f" @ {venue}" if venue else "")
-                + ". (Card may be cancelled or not yet published.)"
+    # STEP 1: discover the day's card (one polite GET of race_list_sub.html).
+    # The numeric netkeiba id encodes kai/nichi which aren't derivable from
+    # the date alone -- they must be READ off the day's race-list hrefs. This
+    # replaces the old synthetic-id construction (``r-YYYY-MMDD-<venue>-NN``)
+    # which netkeiba's server didn't recognize and returned an empty shell.
+    discovered_all = discover_card(args.date)
+    if not discovered_all:
+        print(
+            f"No race card published for {args.date}. "
+            "(Card may be cancelled or not yet posted.)"
+        )
+        return 0
+
+    # Filter by --venue and --races if given. The venue filter matches the
+    # numeric id's venue digits (positions 5-6), which ARE the JRA track
+    # codes (per ADR-0004 -- no netkeiba-vs-JRA remap).
+    if args.venue:
+        target_code = VENUE_JYO.get(args.venue.lower())
+        if target_code is None:
+            parser.error(
+                f"unknown venue {args.venue!r}; known slugs: {sorted(VENUE_JYO)}"
             )
-            return 0
+        discovered = [d for d in discovered_all if d.venue_code == target_code]
+        venue_label = args.venue
+    else:
+        discovered = list(discovered_all)
+        venue_label = "(all venues)"
+
+    if args.races:
+        race_set = set(_parse_race_numbers(args.races))
+        discovered = [d for d in discovered if d.race_no in race_set]
+
+    if not discovered:
+        print(
+            f"No races selected for {args.date} @ {venue_label} "
+            f"(after --venue/--races filter)."
+        )
+        return 0
+
+    print(
+        f"Discovered {len(discovered)} race(s) for {args.date} @ {venue_label}"
+    )
 
     total = {"header": 0, "entries": 0, "results": 0, "payouts": 0}
-    for rno in races:
-        nk_id = f"r-{yyyy}-{mmdd}-{venue}-{rno}"
-        try:
-            race_id = crosswalk_race_id(nk_id)
-        except ValueError as exc:
-            print(f"  {nk_id}: skip ({exc})")
-            continue
-
+    for d in discovered:
+        # STEP 2: each adapter fetches by the DISCOVERED numeric id. The
+        # numeric id is what every netkeiba ``?race_id=`` endpoint expects;
+        # the canonical race_id is the lake key. The persisted
+        # ``netkeiba_race_id`` silver column carries the numeric form so
+        # self-resolving ``track --grades`` reads it back unchanged.
         per_race = 0
         try:
             if do_header:
-                n = netkeiba_races.build_race(lake, nk_id, race_id)
+                n = netkeiba_races.build_race(lake, d.numeric_id, d.canonical_race_id)
                 total["header"] += n
                 per_race += n
             if do_entries:
-                n = netkeiba_entries.build_entries(lake, nk_id, race_id)
+                n = netkeiba_entries.build_entries(lake, d.numeric_id, d.canonical_race_id)
                 total["entries"] += n
                 per_race += n
             if do_results:
-                n = netkeiba_results.build_results(lake, nk_id, race_id)
+                n = netkeiba_results.build_results(lake, d.numeric_id, d.canonical_race_id)
                 total["results"] += n
                 per_race += n
             if do_payouts:
-                n = netkeiba_payouts.build_payouts(lake, nk_id, race_id)
+                n = netkeiba_payouts.build_payouts(lake, d.numeric_id, d.canonical_race_id)
                 total["payouts"] += n
                 per_race += n
         except Exception as exc:  # noqa: BLE001 - one bad race must not kill the day
@@ -136,13 +164,13 @@ def main() -> int:
             # Per ADR-0004, silent scrape failures lose race days -- the day's
             # other races still run, but a single-race failure must be loud.
             import traceback
-            print(f"  {race_id}: failed ({exc!r}); continuing")
+            print(f"  {d.canonical_race_id}: failed ({exc!r}); continuing")
             traceback.print_exc()
             continue
-        print(f"  {race_id}: +{per_race} rows")
+        print(f"  {d.canonical_race_id} (nk={d.numeric_id}): +{per_race} rows")
 
     print(
-        f"Ingested {args.date} @ {venue}: "
+        f"Ingested {args.date} @ {venue_label}: "
         f"header={total['header']}, entries={total['entries']}, "
         f"results={total['results']}, payouts={total['payouts']}"
     )
@@ -160,19 +188,6 @@ def _parse_race_numbers(spec: str) -> list[int]:
         except ValueError:
             raise SystemExit(f"bad --races entry {chunk!r}") from None
     return sorted(set(out))
-
-
-def _discover_card(date_yyyymmdd: str, venue_hint: str | None) -> tuple[str | None, list[int]]:
-    """List the day's race numbers. Default behavior until the live list endpoint
-    is calibrated: enumerate a small range and let the polite fetcher fail loud
-    if we hit something unexpected. Real implementation belongs in netkeiba_http
-    once the actual list endpoint shape is confirmed."""
-    # The real netkeiba race-list endpoint shape needs calibration; until then
-    # we surface a clear error so callers pass --races explicitly.
-    if venue_hint is None:
-        return None, []
-    # Conservative default race range (JRA cards are typically R1..R12).
-    return venue_hint, list(range(1, 13))
 
 
 if __name__ == "__main__":
