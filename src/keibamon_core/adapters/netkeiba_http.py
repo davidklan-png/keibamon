@@ -66,6 +66,13 @@ def fetch_payload(
     Enforces :data:`MIN_FETCH_INTERVAL_SECONDS` between any two calls. Tests
     bypass this by injecting a ``fetch_fn=`` seam into the adapter; they never
     touch this network path.
+
+    Decodes the body using the charset advertised in the ``Content-Type``
+    header, falling back to UTF-8. ADR-0004's calibration found netkeiba's
+    race pages are served as ``text/html; charset=UTF-8`` (verified against
+    multiple shutuba/result captures on 2026-06-19) -- but we honor the header
+    rather than hard-code UTF-8 so a future server-side change doesn't silently
+    produce mojibake.
     """
     _enforce_rate_floor()
     headers: dict[str, str] = {"User-Agent": USER_AGENT}
@@ -80,7 +87,11 @@ def fetch_payload(
     request = urllib.request.Request(url, headers=headers)
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
-            body = response.read().decode("utf-8")
+            raw = response.read()
+            charset = _charset_from_content_type(
+                response.headers.get("Content-Type", "")
+            )
+            body = raw.decode(charset)
             resp_headers = {
                 "ETag": response.headers.get("ETag"),
                 "Last-Modified": response.headers.get("Last-Modified"),
@@ -91,6 +102,22 @@ def fetch_payload(
         if exc.code == 304 and cached:
             return cached[2], {"ETag": cached[0], "Last-Modified": cached[1]}
         raise
+
+
+def _charset_from_content_type(content_type: str) -> str:
+    """Pull the charset=NAME token out of a Content-Type header value.
+
+    Defaults to ``utf-8`` -- empirically what netkeiba serves (verified
+    2026-06-19 against race_list_sub.html, shutuba.html, and result.html).
+    The earlier project note claiming EUC-JP was wrong; EUC-JP fails to
+    decode the actual bytes (raises ``UnicodeDecodeError`` on the first
+    multibyte sequence in every capture).
+    """
+    for chunk in content_type.split(";"):
+        chunk = chunk.strip().lower()
+        if chunk.startswith("charset="):
+            return chunk.split("=", 1)[1].strip().strip('"\'') or "utf-8"
+    return "utf-8"
 
 
 def archive_raw(

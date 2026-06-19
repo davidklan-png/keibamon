@@ -15,16 +15,44 @@ already enforces for JV-Link rows:
   - **All eight pools.** win, place, bracket_quinella, quinella, wide, exacta,
     trio, trifecta.
 
-Status: fixture-tested against ``tests/fixtures/netkeiba/payouts_*.json``.
-The record-builder is load-bearing; the parser is explicitly marked for
-real-world recalibration before PC cutover (ADR-0004).
+WIRE FORMAT. ``race.netkeiba.com/race/result.html?race_id=<numeric_id>`` is
+server-rendered HTML. The payouts live in one or more
+``<table class="Payout_Detail_Table">`` blocks. Each block has one ``<tr>`` per
+pool, with class signaling the pool:
+
+    ==================== ================= ==================== ====================
+    Row class            Pool              Combo structure     Result cell layout
+    ==================== ================= ==================== ====================
+    Tansho               win               single horse        one ``<div>``
+    Fukusho              place             N horses (top-3)    N ``<div>`` blocks
+    Wakuren              bracket_quinella  2 brackets          one ``<ul>`` (2 li)
+    Umaren               quinella          2 horses            one ``<ul>`` (2 li)
+    Wide                 wide              N pairs             N ``<ul>`` blocks
+    Umatan               exacta            2 horses ordered    one ``<ul>`` (2 li)
+    Fuku3                trio              3 horses            one ``<ul>`` (3 li)
+    Tan3                 trifecta          3 horses ordered    one ``<ul>`` (3 li)
+    ==================== ================= ==================== ====================
+
+Each row's ``<td class="Payout">`` carries payout values (yen); multi-combo
+rows separate them with ``<br />``. ``<td class="Ninki">`` similarly separates
+popularity ranks.
+
+Verified against ``tests/fixtures/netkeiba/result_202609030411.html`` (the
+live 2026-06-14 宝塚記念 G1 capture). That race's Fukusho row carries three
+winning horses (16/5/1) each with its own payout -- exactly the multi-row
+shape this parser was designed for.
+
+PIT COMPROMISE on available_at. ``result.html`` carries no reliable publish
+timestamp in its static HTML. The parser returns ``published_time=None``;
+:func:`_payout_record` falls back to ``captured_at`` (the scrape time). NOT
+the bulk-download trap: we fetch the live page.
 """
 from __future__ import annotations
 
 import hashlib
-import json
+import re
 from datetime import datetime
-from typing import Any, Callable, Iterable
+from typing import Any, Callable
 
 from keibamon_core.adapters import netkeiba_http
 from keibamon_core.ingestion.scrape_upsert import scrape_upsert
@@ -46,19 +74,17 @@ TABLE = "jravan_payouts"
 # keeps both observations distinct for the audit.
 NATURAL_KEY: tuple[str, ...] = ("race_id", "pool", "combo", "source_name")
 
-_EVENT_TIME_FIELDS = ("official_datetime", "update_datetime", "published_time")
-
-# netkeiba's Japanese pool labels -> the silver pool vocabulary that
-# settlement.py uses. ``_normalize_selection`` keys off these labels.
-_POOL_LABELS: dict[str, str] = {
-    "tansho": "win",
-    "fukusho": "place",
-    "wakuren": "bracket_quinella",
-    "umaren": "quinella",
-    "wide": "wide",
-    "umatan": "exacta",
-    "sanrenpuku": "trio",
-    "sanrentan": "trifecta",
+# netkeiba's row-class -> silver pool vocabulary. ``_normalize_selection`` keys
+# off these labels (the same vocabulary settlement.py uses).
+_POOL_ROW_CLASS: dict[str, str] = {
+    "Tansho": "win",
+    "Fukusho": "place",
+    "Wakuren": "bracket_quinella",
+    "Umaren": "quinella",
+    "Wide": "wide",
+    "Umatan": "exacta",
+    "Fuku3": "trio",
+    "Tan3": "trifecta",
 }
 
 
@@ -67,66 +93,54 @@ def parse_payouts_payload(
 ) -> list[dict[str, Any]]:
     """Extract one intermediate dict per (pool, combo, payout) on the page.
 
-    Fixture format -- the ``data.payouts`` block maps netkeiba pool labels to
-    either a single dict (one combo), or a list of dicts (multiple combos /
-    dead-heat). Each leaf dict has ``combo`` / ``payout`` / optional
-    ``ninki``:
+    Walks each ``<tr class="(Tansho|Fukusho|Wakuren|...)">`` row inside any
+    ``<table class="Payout_Detail_Table">`` block and emits one record per
+    (pool, combo, payout, popularity) tuple. Multi-combo rows (place/wide with
+    dead-heats or top-3) fan out -- the parser pairs the N result combos with
+    the N payout values via positional zip.
 
-    .. code-block:: json
+    Returns ``[]`` for a page with no Payout_Detail_Table blocks (race not yet
+    decided; pre-result shutuba page). The parser does NOT raise on a missing
+    popularity column (older races may omit it) -- those rows carry
+    ``popularity=None``.
 
-        {
-          "status": "ok",
-          "data": {
-            "official_datetime": "2026-06-20 15:30:30",
-            "payouts": {
-              "tansho": {"combo": "14", "payout": "290", "ninki": "1"},
-              "fukusho": [
-                {"combo": "14", "payout": "130", "ninki": "1"},
-                {"combo": "16", "payout": "110", "ninki": "2"}
-              ],
-              "sanrentan": {"combo": "141608", "payout": "45600", "ninki": "60"}
-            }
-          }
-        }
+    Combos are returned in RAW form (concatenated digits, e.g. ``'516'`` or
+    ``'16'``); :func:`_payout_record` runs them through
+    :func:`settlement._normalize_selection` to canonicalize.
 
-    Returns ``[]`` for payloads with no payouts block (race not yet decided).
-    Combos are NOT canonicalized here -- that happens in :func:`_payout_record`
-    via ``_normalize_selection`` so the parser stays a pure wire-extractor.
-
-    Failure modes are loud per ADR-0004's "loud monitoring on scrape failure"
-    mandate: malformed JSON raises ``ValueError`` (the bronze archive already
-    captured the raw bytes); a missing event-time field raises ``ValueError``
-    rather than silently falling back to the scrape time.
+    ``published_time`` is always ``None`` (PIT compromise -- see module
+    docstring); the caller falls back to ``captured_at``.
     """
-    payload = json.loads(payload_text)  # raises ValueError on malformed JSON
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, dict):
-        return []
-    payouts = data.get("payouts") or data.get("harai") or {}
-    if not isinstance(payouts, dict):
-        return []
-
-    published = _extract_event_time(data)
-    if published is None:
-        raise ValueError(
-            f"payouts payload for {nk_race_id} has no event-time field "
-            f"({_EVENT_TIME_FIELDS}); refusing to fall back to scrape time "
-            "(available_at_bulk_download PIT trap)"
-        )
     out: list[dict[str, Any]] = []
-    for source_label, block in payouts.items():
-        pool = _POOL_LABELS.get(source_label, source_label)
-        for leaf in _iter_payout_leaves(block):
-            combo_raw = leaf.get("combo")
-            payout = _to_int(leaf.get("payout"))
-            if combo_raw is None or payout is None:
-                continue
+    # Walk every <tr class="POOL"> row on the page. The Payout_Detail_Table
+    # blocks split across multiple <table> elements (one for single-row pools,
+    # one for wide+exotics), so a per-row scan is cleaner than per-table.
+    row_class_alt = "|".join(_POOL_ROW_CLASS)
+    for m in re.finditer(
+        rf'<tr class="({row_class_alt})"[^>]*>(.*?)</tr>',
+        payload_text, re.S,
+    ):
+        row_class = m.group(1)
+        body = m.group(2)
+        pool = _POOL_ROW_CLASS[row_class]
+        combos = _extract_combos(body, pool)
+        payouts = _extract_payouts(body)
+        popularities = _extract_popularities(body)
+
+        # Pair up positionally. If the counts mismatch (a parse bug or a
+        # page-format change), we drop the tail rather than guess -- a missing
+        # combo is loud-at-build-layer; a misaligned combo is silently wrong.
+        n = min(len(combos), len(payouts)) if payouts else 0
+        for i in range(n):
+            combo = combos[i]
+            payout = payouts[i]
+            pop = popularities[i] if i < len(popularities) else None
             out.append({
                 "pool": pool,
-                "combo_raw": str(combo_raw),
+                "combo_raw": combo,
                 "payout_yen": payout,
-                "popularity": _to_int(leaf.get("ninki")),
-                "published_time": published,
+                "popularity": pop,
+                "published_time": None,  # PIT compromise -- see module docstring
                 "source_race_id": nk_race_id,
             })
     return out
@@ -141,10 +155,14 @@ def _payout_record(
     the same function the settlement oracle uses to look up a bet's payout --
     so the scrape rows drop into ``settle_many``'s map unchanged. Mirrors
     :func:`jravan_silver.build_jravan_payouts` byte-for-byte (column set +
-    provenance). For scrape rows ``available_at`` and ``published_time`` are
-    the same instant by construction.
+    provenance). ``available_at`` is the published event time when present;
+    falls back to ``captured_at`` floored to UTC midnight when the parser
+    returned ``None`` (PIT compromise for result.html -- the page carries no
+    publish timestamp). The midnight floor lets same-day re-scrapes dedupe.
     """
-    published = raw.get("published_time")
+    published = _event_time_with_scrape_fallback(
+        raw.get("published_time"), meta.get("captured_at")
+    )
     return {
         "race_id": race_id,
         "pool": raw["pool"],
@@ -158,8 +176,26 @@ def _payout_record(
         "content_hash": meta.get("content_hash"),
         "ingested_at": meta.get("ingested_at"),
         "published_time": published,
-        "available_at": published,  # event time, NOT scrape download time
+        "available_at": published,
     }
+
+
+def _event_time_with_scrape_fallback(
+    published: datetime | None, captured_at: datetime | None
+) -> datetime | None:
+    """Pick the event time for ``available_at`` / ``published_time`` columns.
+
+    Mirrors :func:`netkeiba_races._event_time_with_scrape_fallback`. Kept
+    local so this module stays standalone.
+    """
+    if published is not None:
+        return published
+    if captured_at is None:
+        return None
+    if captured_at.tzinfo is None:
+        from datetime import timezone as _tz
+        captured_at = captured_at.replace(tzinfo=_tz.utc)
+    return captured_at.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def build_payouts(
@@ -197,6 +233,7 @@ def build_payouts(
                 "raw_uri": str(raw_path),
                 "content_hash": content_hash,
                 "ingested_at": ingested_at,
+                "captured_at": captured_at,  # for the available_at fallback
             },
         )
         for raw in parsed
@@ -223,36 +260,103 @@ def _stamp_partition_keys(records: list[dict[str, Any]], race_id: str) -> None:
         r["venue"] = venue
 
 
-def _extract_event_time(data: dict[str, Any]) -> datetime | None:
-    for key in _EVENT_TIME_FIELDS:
-        parsed = netkeiba_http.parse_official_datetime(data.get(key))
-        if parsed is not None:
-            return parsed
-    return None
+# --- HTML extractors (the brittle layer) --------------------------------------
+#
+# Each payout row has three cells we care about:
+#   <td class="Result">...</td>     -- the winning combos (one or many)
+#   <td class="Payout">...</td>     -- the payout yen values (one or many)
+#   <td class="Ninki">...</td>      -- the popularity ranks (one or many)
+#
+# Multi-combo rows (Fukusho with top-3, Wide with N pairs) split Result into
+# multiple <div> or <ul> blocks; Payout splits on <br />; Ninki splits on
+# <span>. The parser pairs them positionally.
 
 
-def _iter_payout_leaves(block: Any) -> Iterable[dict[str, Any]]:
-    """A pool's block is either a single leaf dict or a list of leaves
-    (dead-heat / multi-combo pools like place/wide). Coerce to a flat list."""
-    if isinstance(block, dict):
-        # A leaf has a `combo` key; if it lacks one, treat the dict itself as
-        # a map of {combo: payout} (a shorthand seen in some netkeiba formats).
-        if "combo" in block:
-            yield block
+def _extract_combos(cell_html: str, pool: str) -> list[str]:
+    """Pull the result cell's combos and return them as a list of raw strings.
+
+    The result-cell layout depends on pool:
+
+      - For win/place: each non-empty ``<div>`` block is one combo (single
+        horse number). Example: Fukusho's three top-3 finishers.
+      - For other multi-horse pools (quinella/wide/exacta/trio/trifecta): each
+        ``<ul>`` block is one combo (multiple horse numbers). Wide with three
+        winning pairs has three ``<ul>`` blocks.
+      - For bracket_quinella: each ``<ul>`` block is one combo of two bracket
+        numbers (single-digit, like '38').
+
+    Combo-string shape (raw, pre-normalization):
+
+      - win/place:        ``'16'`` (horse number verbatim)
+      - bracket_quinella: ``'38'`` (brackets concatenated; single-part
+                            passthrough in ``_normalize_selection`` preserves
+                            the single-digit form)
+      - multi-horse pool: ``'5-16'`` (dash-separated; ``_normalize_selection``
+                            pads each part to 2 digits and joins)
+    """
+    combos: list[str] = []
+    if pool in ("win", "place"):
+        # Each <div>...</div> block holds one winning horse number.
+        for block in re.findall(r'<div[^>]*>(.*?)</div>', cell_html, re.S):
+            nums = re.findall(r'<span>\s*([0-9]{1,2})\s*</span>', block)
+            if nums:
+                combos.append(nums[0])
+        # Fallback for pages without div wrappers: pull spans directly.
+        if not combos:
+            nums = re.findall(r'<span>\s*([0-9]{1,2})\s*</span>', cell_html)
+            combos.extend(nums)
+        return combos
+
+    # Multi-horse pools: each <ul> block is one combo.
+    uls = re.findall(r'<ul[^>]*>(.*?)</ul>', cell_html, re.S)
+    if not uls:
+        # Page variant: a single combo without <ul> wrapper (older format).
+        nums = re.findall(r'<span>\s*([0-9]{1,2})\s*</span>', cell_html)
+        if nums:
+            uls = ["<ul>" + "".join(f"<span>{n}</span>" for n in nums) + "</ul>"]
+    for ul in uls:
+        nums = re.findall(r'<span>\s*([0-9]{1,2})\s*</span>', ul)
+        if not nums:
+            continue
+        if pool == "bracket_quinella":
+            # Bracket numbers are single-digit (1-8) -- concatenate directly
+            # so _normalize_selection's single-part passthrough preserves the
+            # '38' form the JV-Link silver uses.
+            combos.append("".join(nums))
         else:
-            for combo, payout in block.items():
-                if isinstance(payout, dict):
-                    yield {"combo": combo, **payout}
-                else:
-                    yield {"combo": combo, "payout": payout}
-    elif isinstance(block, list):
-        for leaf in block:
-            if isinstance(leaf, dict):
-                yield leaf
+            # Multi-horse pools -- dash-join so _normalize_selection pads each
+            # horse to 2 digits ('5-16' -> '0516').
+            combos.append("-".join(nums))
+    return combos
 
 
-def _to_int(value: Any) -> int | None:
-    try:
-        return int(str(value).strip())
-    except (TypeError, ValueError):
-        return None
+def _extract_payouts(cell_html: str) -> list[int]:
+    """Pull each ``N円`` value out of the Payout cell. Splits on ``<br />`` for
+    multi-payout rows. Values like '1,360円' have the comma stripped."""
+    # Normalize <br /> variants to a consistent separator.
+    text = re.sub(r'<br\s*/?>', '|', cell_html)
+    # Strip remaining tags.
+    text = re.sub(r'<[^>]+>', ' ', text)
+    text = re.sub(r'\s+', ' ', text)
+    payouts: list[int] = []
+    for chunk in text.split('|'):
+        m = re.search(r'([0-9,]+)\s*円', chunk)
+        if not m:
+            continue
+        try:
+            payouts.append(int(m.group(1).replace(',', '')))
+        except ValueError:
+            continue
+    return payouts
+
+
+def _extract_popularities(cell_html: str) -> list[int | None]:
+    """Pull each ``N人気`` rank out of the Ninki cell. One per ``<span>``."""
+    spans = re.findall(r'<span>\s*([0-9]{1,2})\s*人気\s*</span>', cell_html)
+    out: list[int | None] = []
+    for s in spans:
+        try:
+            out.append(int(s))
+        except ValueError:
+            out.append(None)
+    return out

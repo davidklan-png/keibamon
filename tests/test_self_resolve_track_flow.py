@@ -13,10 +13,15 @@ Exercises the WHOLE pipeline the runbook describes:
 This is the lookup-free path: no hand-entered --venue / --nk-race-ids. A
 graded race missing its nk id is named and skipped -- never fabricated (a
 wrong nk id = wrong curve, unrecoverable).
+
+The card-scrape step here synthesizes a MINIMAL shutuba-shaped HTML payload
+that satisfies :mod:`netkeiba_races`'s parser. The real wire format is far
+richer (see ``tests/fixtures/netkeiba/shutuba_*.html`` for full captures);
+we keep this synthetic version minimal so the test stays focused on the
+self-resolve FLOW rather than wire-format coverage.
 """
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -33,6 +38,18 @@ from keibamon_core.paths import LakePaths
 
 FIXTURES = Path(__file__).parent / "fixtures" / "netkeiba"
 
+# venue slug -> kanji (the form shutuba.html's RaceData02 uses). Mirrors
+# netkeiba_races._VENUE_KANJI_TO_LABEL.
+_VENUE_KANJI: dict[str, str] = {
+    "sapporo": "札幌", "hakodate": "函館", "fukushima": "福島",
+    "niigata": "新潟", "tokyo": "東京", "nakayama": "中山",
+    "chukyo": "中京", "kyoto": "京都", "hanshin": "阪神", "kokura": "小倉",
+}
+
+# grade display (GⅠ unicode / None) -> Icon_GradeType class suffix. The parser
+# extracts grade_code from the CSS class, not the display string.
+_GRADE_DISPLAY_TO_ICON: dict[str, str] = {"GⅠ": "1", "GⅡ": "2", "GⅢ": "3"}
+
 
 def _race_header_payload(
     *,
@@ -44,22 +61,49 @@ def _race_header_payload(
     nk_id: str,
     distance_m: int = 2000,
 ) -> str:
-    """Synthesize a netkeiba-style race-header JSON payload for one race."""
-    return json.dumps({
-        "status": "ok",
-        "data": {
-            "official_datetime": "2026-06-20 09:00:00",
-            "race_id": nk_id,
-            "race_num": str(race_num),
-            "date": "2026-06-20",
-            "venue": venue,
-            "race_name": f"{venue} R{race_num}",
-            "grade": grade_display,
-            "post_time": post_time_hhmm,
-            "distance_m": distance_m,
-            "track_code": "10",
-        },
-    })
+    """Synthesize a minimal shutuba-shaped HTML payload for one race.
+
+    Includes the three pieces netkeiba_races.parse_race_payload regex-extracts:
+    ``<p class="RaceData01">`` (post time + surface/distance),
+    ``<div class="RaceData02">`` (venue kanji + N頭), and the
+    ``<h1 class="RaceName">`` block with the grade icon span. Everything else
+    from the real shutuba page is omitted -- this is a flow test, not a
+    parser-coverage test.
+    """
+    venue_kanji = _VENUE_KANJI.get(venue, venue)
+    grade_icon = _GRADE_DISPLAY_TO_ICON.get(grade_display or "")
+    grade_span = (
+        f'<span class="Icon_GradeType Icon_GradeType{grade_icon}"></span>'
+        if grade_icon else ""
+    )
+    yyyy = int(date_yyyymmdd[:4])
+    mm = int(date_yyyymmdd[4:6])
+    dd = int(date_yyyymmdd[6:8])
+    return f"""<!DOCTYPE html>
+<html><head><title>R{race_num} | {yyyy}年{mm}月{dd}日 {venue_kanji}{race_num}R</title></head>
+<body>
+<div class="RaceList_Item02">
+<div class="RaceData01">
+{post_time_hhmm}発走 /<span> 芝{distance_m}m</span> (左)
+</div>
+<div class="RaceData02">
+<span>3回</span>
+<span>{venue_kanji}</span>
+<span>4日目</span>
+<span>サラ系３歳以上</span>
+<span>オープン</span>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
+<span>(国際)</span>
+<span>定量</span>
+<span>16頭</span>
+</div>
+</div>
+<div class="RaceName">
+{venue_kanji}{race_num}R
+{grade_span}
+</div>
+</body></html>
+"""
 
 
 @pytest.fixture
@@ -79,18 +123,26 @@ def _scrape_one_race(
     grade_display: str | None, post_time_hhmm: str, nk_id: str,
 ) -> str:
     """Run the card-scrape path for one race (mirrors what
-    tools/scrape_ingest.py does). Returns the canonical race_id."""
+    tools/scrape_ingest.py does after ADR-0004's BUG 1 fix). Returns the
+    canonical race_id.
+
+    The lookup_id passed to :func:`netkeiba_races.build_race` is the NUMERIC
+    netkeiba id (``20260503041111``) -- the form the live-odds endpoint
+    expects. Under the new HTML parser contract, the lookup_id is stamped
+    verbatim into the silver row's ``netkeiba_race_id`` column (the page
+    itself doesn't repeat the id in a structured field). The canonical
+    race_id is still derived via crosswalk from the synthetic slug form."""
     from keibamon_core.ingestion.curve_log import crosswalk_race_id
 
-    lookup = f"r-2026-{race_num:02d}{jyo}-{venue_slug}-{race_num:02d}"  # not used in URL but stable
-    # Use a simpler synthetic form that crosswalk accepts.
-    lookup = f"r-2026-0620-{venue_slug}-{race_num:02d}"
-    canonical = crosswalk_race_id(lookup)
+    synthetic_lookup = f"r-2026-0620-{venue_slug}-{race_num:02d}"
+    canonical = crosswalk_race_id(synthetic_lookup)
     body = _race_header_payload(
         venue=venue_slug, race_num=race_num, grade_display=grade_display,
         post_time_hhmm=post_time_hhmm, nk_id=nk_id,
     )
-    n = netkeiba_races.build_race(lake, lookup, canonical, payload_text=body)
+    # Pass nk_id as the lookup (post-BUG-1 contract); the parser stamps it
+    # into netkeiba_race_id verbatim.
+    n = netkeiba_races.build_race(lake, nk_id, canonical, payload_text=body)
     assert n == 1, f"scrape should write 1 row, got {n}"
     return canonical
 

@@ -137,6 +137,12 @@ PC cutover status:
 - [ ] Step 5 cross-validation gate passed 0.0000% on a real weekend overlap
       (YYYY-MM-DD). **The PC is NOT switched off until this prints PASS over a
       real weekend overlap window.**
-- [ ] Parser recalibrated against live netkeiba payloads (the wire-payload
-      extractor is fixture-tested; real netkeiba likely serves HTML and the
-      parser must be re-verified before cutover).
+- [x] Parser recalibrated against live netkeiba payloads. All four adapters
+      (races / entries / results / payouts) drive REAL captured HTML fixtures
+      end-to-end: `shutuba_202605030611.html` (2026-06-21 Tokyo R11, G3),
+      `shutuba_202609030611.html` (2026-06-21 Hanshin R11, G3),
+      `result_202609030411.html` (2026-06-14 宝塚記念 G1, 18 finishers).
+      Synthetic JSON fixtures retired. **Encoding note:** pages are served
+      UTF-8 (Content-Type charset=UTF-8), not EUC-JP as the spec draft
+      claimed — `_charset_from_content_type` defaults to UTF-8 and the
+      bytes decode cleanly under it; EUC-JP/Shift-JIS/CP932 all fail.

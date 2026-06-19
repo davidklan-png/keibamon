@@ -2,24 +2,53 @@
 
 Same three-layer shape as :mod:`netkeiba_entries`:
 
-  - :func:`parse_results_payload` -- BRITTLE wire-payload extractor. Returns
-    one intermediate dict per finisher.
+  - :func:`parse_results_payload` -- BRITTLE wire-payload extractor over
+    ``result.html``'s ``<table class="RaceTable01 ... ResultRefund">`` rows.
+    Fixture-tested against a REAL captured result page
+    (``tests/fixtures/netkeiba/result_202609030411.html`` -- the live
+    2026-06-14 宝塚記念 G1 capture with 18 finishers).
   - :func:`_result_record` -- PURE silver-shape mapper; byte-identical to
     :func:`jravan_silver._result_record`. ``finish_position=None`` when the
-    source reports no official placing (DNF / excluded). ``available_at`` is
-    the official-result event time, never the scrape download time.
+    source reports no official placing (DNF / excluded).
   - :func:`build_results` -- orchestrate fetch -> bronze archive -> silver
     upsert. Same ``fetch_fn`` injection seam as the entries adapter.
 
-Calibration note: the parser is fixture-tested against
-``tests/fixtures/netkeiba/results_*.json``. Real netkeiba likely serves HTML,
-and the parser must be recalibrated before the capture PC is switched off
-(ADR-0004). The record builder is load-bearing and pure.
+WIRE FORMAT. ``race.netkeiba.com/race/result.html?race_id=<numeric_id>`` is
+server-rendered HTML. The result+refund table is one ``<table>`` with header
+row + one row per finisher. Verified columns (in order, from the 2026-06-14
+Takarazuka Kinen capture):
+
+    0. 着順 (finish_position) -- '1', '2', ... ; '0'/'00'/'' for DNF/scratched
+    1. 枠 (bracket / wakuban)
+    2. 馬番 (horse_number / umaban)
+    3. 馬名 (horse name) -- carries the ``db.netkeiba.com/horse/KETTO_NUM`` link
+    4. 性齢 (sex/age)
+    5. 斤量 (carried weight)
+    6. 騎手 (jockey) -- carries ``/jockey/result/recent/CODE/`` link
+    7. タイム (finish time, m:ss.f)
+    8. 着差 (margin)
+    9. 人気 (popularity)
+    10. 単勝オッズ (win odds, decimal)
+    11. 後3F (last-3F time)
+    12-14. corner positions, trainer, horse weight (not parsed here)
+
+The parser walks each row's ``<td>`` cells positionally and extracts the
+fields above. ``win_odds`` is converted from decimal (e.g. 3.9) per the spec
+(JV-Data's win_odds is decimal odds). The exact win payout lives in
+``jravan_payouts`` via the payouts adapter.
+
+PIT COMPROMISE on available_at. ``result.html`` carries no reliable publish
+timestamp (no 確定時刻 field in the static HTML; netkeiba stamps it via JS at
+runtime). The parser returns ``published_time=None``; :func:`_result_record`
+falls back to ``captured_at`` (the scrape time). This is the honest upper
+bound on when this version of the results became visible -- NOT the
+``available_at_bulk_download`` trap, since we fetch the live page rather than
+a bulk file.
 """
 from __future__ import annotations
 
 import hashlib
-import json
+import re
 from datetime import datetime
 from typing import Any, Callable
 
@@ -34,84 +63,47 @@ TABLE = "jravan_race_results"
 # same (race, horse) -- see netkeiba_entries.NATURAL_KEY for the rationale.
 NATURAL_KEY: tuple[str, ...] = ("race_id", "horse_number", "source_name")
 
-# JSON keys that may carry the official-result published time (event time, JST).
-_EVENT_TIME_FIELDS = ("official_datetime", "update_datetime", "published_time")
-
-# netkeiba reports finish time as a "m:ss.f" string (e.g. "1:32.4"). The source
-# sometimes drops the minutes prefix on sprint distances. We parse leniently and
-# return None on any malformed value rather than guess.
-
 
 def parse_results_payload(
     payload_text: str, nk_race_id: str
 ) -> list[dict[str, Any]]:
-    """Extract one intermediate dict per finisher.
+    """Extract one intermediate dict per finisher from ``result.html``.
 
-    Fixture format mirrors netkeiba's JSON style -- a ``data`` block with a
-    ``results`` (or ``seiseki``) list:
+    Splits the page on the ``ResultRefund`` table rows (one ``<tr>`` per
+    finisher, after the header row). Returns ``[]`` for a page with no
+    result table (race not yet run, or a malformed capture).
 
-    .. code-block:: json
-
-        {
-          "status": "ok",
-          "data": {
-            "official_datetime": "2026-06-20 15:30:00",
-            "results": [
-              {"umaban": "14", "ketto_num": "2016101234", "chakujun": "1",
-               "time": "1:32.4", "akhirashi": "33.4", "tansho": "290",
-               "ninki": "1", "makuri": "1/2"}
-            ]
-          }
-        }
-
-    Returns ``[]`` for payloads with no result list (race not yet run). A
-    ``chakujun`` of 0 / "" / "00" maps to ``finish_position=None`` (matches
-    ``_result_record``'s handling of "no official placing").
-
-    Failure modes are loud per ADR-0004's "loud monitoring on scrape failure"
-    mandate: malformed JSON raises ``ValueError`` (the bronze archive already
-    captured the raw bytes, so the data is not lost); a missing event-time
-    field raises ``ValueError`` rather than silently falling back to the scrape
-    time (the ``available_at_bulk_download`` PIT trap).
+    Failure modes:
+      - Empty table (no finishers parsed): returns ``[]``. Caller decides
+        whether to warn; per ADR-0004 a SHUTUBA page with no results is
+        expected pre-race, not a failure.
+      - Missing cell: the row's field stays ``None`` -- permissive.
+      - ``finish_position == 0`` / ``""``: mapped to ``None`` (matches
+        ``_result_record``'s handling of "no official placing").
     """
-    payload = json.loads(payload_text)  # raises ValueError on malformed JSON
-    data = payload.get("data") if isinstance(payload, dict) else None
-    if not isinstance(data, dict):
+    table = _extract_result_table(payload_text)
+    if not table:
         return []
-    results = data.get("results") or data.get("seiseki") or []
-    if not isinstance(results, list):
-        return []
-
-    published = _extract_event_time(data)
-    if published is None:
-        raise ValueError(
-            f"results payload for {nk_race_id} has no event-time field "
-            f"({_EVENT_TIME_FIELDS}); refusing to fall back to scrape time "
-            "(available_at_bulk_download PIT trap)"
-        )
     out: list[dict[str, Any]] = []
-    for raw in results:
-        if not isinstance(raw, dict):
-            continue
-        umaban = _to_int(raw.get("umaban"))
+    for row_html in _iter_data_rows(table):
+        cells = _split_cells(row_html)
+        if len(cells) < 11:
+            continue  # not a finisher row (e.g. a header or corner-summary row)
+
+        umaban = _to_int(_cell_text(cells[2]))
         if umaban is None:
             continue  # without umaban we can't join payouts / settle
-        finish = _to_int(raw.get("chakujun")) or _to_int(raw.get("chakugai"))
-        # netkeiba's result page shows the WIN PAYOUT (yen per 100-yen bet) for
-        # the winner, not decimal odds. JV-Data's `win_odds` is decimal odds,
-        # so convert payout_yen / 100 to keep the column semantically consistent
-        # across sources. The exact payout yen lives in jravan_payouts.
-        tansho_yen = _to_int(raw.get("tansho"))
-        rec = {
+        finish = _to_int(_cell_text(cells[0]))
+        rec: dict[str, Any] = {
             "horse_number": umaban,
-            "horse_id": _clean_str(raw.get("ketto_num")) or "0000000000",
-            "finish_position": finish if finish else None,  # 0 / None -> None
-            "finish_time_seconds": _parse_finish_time(raw.get("time")),
-            "margin": _clean_str(raw.get("makuri")),
-            "win_odds": (tansho_yen / 100.0) if tansho_yen else None,
-            "popularity": _to_int(raw.get("ninki")),
-            "last_3f_seconds": _to_float(raw.get("akhirashi")),
-            "published_time": published,
+            "horse_id": _extract_horse_id_from_cell(cells[3]) or "0000000000",
+            "finish_position": finish if finish else None,
+            "finish_time_seconds": _parse_finish_time(_cell_text(cells[7])),
+            "margin": _clean_str(_cell_text(cells[8])),
+            "win_odds": _to_float(_cell_text(cells[10])),
+            "popularity": _to_int(_cell_text(cells[9])),
+            "last_3f_seconds": _to_float(_cell_text(cells[11])),
+            "published_time": None,  # PIT compromise -- see module docstring
             "source_race_id": nk_race_id,
         }
         out.append(rec)
@@ -126,10 +118,14 @@ def _result_record(
     ``horse_number`` is always carried (the placeholder-id guard: when several
     runners share ``horse_id='0000000000'``, the ``(race_id, horse_number)``
     join is the only exact key -- DATA_TRAPS['SE.ketto_num=0000000000']).
-    For scrape rows ``available_at`` and ``published_time`` are the same instant
-    by construction; both kept for schema parity with JV-Link.
+    ``available_at`` is the published event time when present; falls back to
+    ``captured_at`` floored to UTC midnight when the parser returned ``None``
+    (PIT compromise for result.html -- the page carries no publish timestamp).
+    The midnight floor lets same-day re-scrapes dedupe.
     """
-    published = raw.get("published_time")
+    published = _event_time_with_scrape_fallback(
+        raw.get("published_time"), meta.get("captured_at")
+    )
     return {
         "race_id": race_id,
         "horse_id": raw.get("horse_id"),
@@ -147,8 +143,26 @@ def _result_record(
         "content_hash": meta.get("content_hash"),
         "ingested_at": meta.get("ingested_at"),
         "published_time": published,
-        "available_at": published,  # event time, NOT scrape download time
+        "available_at": published,
     }
+
+
+def _event_time_with_scrape_fallback(
+    published: datetime | None, captured_at: datetime | None
+) -> datetime | None:
+    """Pick the event time for ``available_at`` / ``published_time`` columns.
+
+    Mirrors :func:`netkeiba_races._event_time_with_scrape_fallback`. Kept
+    local so this module stays standalone.
+    """
+    if published is not None:
+        return published
+    if captured_at is None:
+        return None
+    if captured_at.tzinfo is None:
+        from datetime import timezone as _tz
+        captured_at = captured_at.replace(tzinfo=_tz.utc)
+    return captured_at.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
 def build_results(
@@ -186,6 +200,7 @@ def build_results(
                 "raw_uri": str(raw_path),
                 "content_hash": content_hash,
                 "ingested_at": ingested_at,
+                "captured_at": captured_at,  # for the available_at fallback
             },
         )
         for raw in parsed
@@ -212,20 +227,63 @@ def _stamp_partition_keys(records: list[dict[str, Any]], race_id: str) -> None:
         r["venue"] = venue
 
 
-def _extract_event_time(data: dict[str, Any]) -> datetime | None:
-    for key in _EVENT_TIME_FIELDS:
-        parsed = netkeiba_http.parse_official_datetime(data.get(key))
-        if parsed is not None:
-            return parsed
-    return None
+# --- HTML extractors (the brittle layer) --------------------------------------
 
 
-def _parse_finish_time(value: Any) -> float | None:
-    """netkeiba "m:ss.f" (e.g. '1:32.4') -> seconds. None on malformed input."""
-    if value is None:
+def _extract_result_table(html: str) -> str:
+    """Pull the inner HTML of the ResultRefund table (the one table on the
+    page that holds finishers + payouts). The class is ``RaceTable01
+    RaceCommon_Table ResultRefund Table_Show_All``."""
+    m = re.search(
+        r'<table[^>]*class="[^"]*ResultRefund[^"]*"[^>]*>(.*?)</table>',
+        html, re.S,
+    )
+    return m.group(1) if m else ""
+
+
+def _iter_data_rows(table: str):
+    """Yield each ``<tr>`` body in the table. The first row is the header
+    (cells are ``<th>``); the rest are finishers (cells are ``<td>``)."""
+    for chunk in re.split(r'<tr[^>]*>', table)[1:]:
+        end = chunk.find("</tr>")
+        if end >= 0:
+            chunk = chunk[:end]
+        yield chunk
+
+
+def _split_cells(row: str) -> list[str]:
+    """Return the inner-HTML of each ``<td>``/``<th>`` cell in the row, in
+    document order. We include both td and th so header rows and data rows
+    parse through the same positional logic."""
+    return [
+        m.group(1)
+        for m in re.finditer(r'<t[dh][^>]*>(.*?)</t[dh]>', row, re.S)
+    ]
+
+
+def _cell_text(cell_html: str) -> str:
+    """Strip nested tags and collapse whitespace -- the cell's visible text."""
+    text = re.sub(r'<[^>]+>', ' ', cell_html)
+    text = re.sub(r'\s+', ' ', text)
+    return text.strip()
+
+
+def _extract_horse_id_from_cell(cell: str) -> str | None:
+    """Cell 3 (馬名) carries the ``db.netkeiba.com/horse/KETTO_NUM`` link."""
+    m = re.search(r'db\.netkeiba\.com/horse/([0-9]{10})', cell)
+    return m.group(1) if m else None
+
+
+def _parse_finish_time(value: str) -> float | None:
+    """netkeiba 'm:ss.f' (e.g. '1:32.4') -> seconds. None on malformed input.
+
+    Distinct from :func:`netkeiba_payouts._to_float`: finish times have a
+    minutes prefix separated by ``:``. We also handle bare seconds ('32.4')
+    for sprint distances where the source sometimes drops the minute."""
+    if not value:
         return None
-    s = str(value).strip()
-    if not s or s in ("0000", "9999"):
+    s = value.strip()
+    if s in ("0000", "9999", "--", "----", "*"):
         return None
     try:
         if ":" in s:

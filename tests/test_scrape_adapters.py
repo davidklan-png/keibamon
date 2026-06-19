@@ -1,19 +1,30 @@
 """Tests for the scrape-sourced ingestion adapters (ADR-0004 prereq).
 
+Drives REAL captured payloads end-to-end so the parsers are pinned against
+the actual wire format netkeiba serves (per the user's "one real-payload
+test per adapter" rule -- the synthetic JSON fixtures are GONE; they stayed
+green over a parser that never hit the real wire, which is exactly the bug
+ADR-0004's Friday dry run caught).
+
+Real fixtures (all live captures from ADR-0004's dry run):
+  - ``shutuba_202605030611.html`` -- 2026-06-21 Tokyo R11 Fuchu Himba S, G3,
+    16 declared runners. Used for entries + race-header.
+  - ``shutuba_202609030611.html`` -- 2026-06-21 Hanshin R11 Shirasagi S, G3,
+    18 declared runners. Second entries fixture (cross-venue check).
+  - ``result_202609030411.html`` -- 2026-06-14 Hanshin R11 宝塚記念 G1.
+    Carries 18 finishers (incl. one DNF/中止) and the full payout table.
+
 Covers:
-- entries / results / payouts parsers + record builders
+- entries / results / payouts parsers + record builders (real HTML)
 - partition-aware upsert (the load-bearing constraint)
 - cross-validation gate's four oracles
-- placeholder horse_id pair handling
-- available_at event-time semantics
+- placeholder horse_id handling (synthesized -- no real fixture has one yet)
+- available_at event-time semantics (falls back to scrape-day midnight)
 - idempotent re-ingest
-
-Suite target: baseline 147 + 10 new = 157 passed, 1 skipped.
 """
 from __future__ import annotations
 
-import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
@@ -35,11 +46,11 @@ from keibamon_core.lake import read_dataset, write_dataset
 from keibamon_core.paths import LakePaths
 
 FIXTURES = Path(__file__).parent / "fixtures" / "netkeiba"
-JST = timezone(timedelta(hours=9))
 
-# Canonical ids used across the suite.
-NK_RACE_ID = "r-2026-0620-hanshin-11"
-RACE_ID = "jra-20260620-09-11"  # Hanshin = jyo 09 (per the project's NON-STANDARD mapping)
+# 2026-06-21 Tokyo R11 (Fuchu Himba S, G3). Numeric id encodes kai/nichi;
+# canonical id is the lake key.
+NK_RACE_ID = "202605030611"
+RACE_ID = "jra-20260621-05-11"  # Tokyo = jyo 05
 
 
 def _load(name: str) -> str:
@@ -51,9 +62,7 @@ def _load_gate_module():
 
     Registers the module in sys.modules BEFORE exec_module so dataclass
     processing of the gate's OracleResult/SettleEquivResult classes can
-    resolve their annotations (otherwise Python's dataclasses machinery
-    fails when ``from __future__ import annotations`` is in effect and the
-    module isn't yet in sys.modules).
+    resolve their annotations.
     """
     import importlib.util
     import sys
@@ -73,16 +82,11 @@ def _load_gate_module():
 
 
 def _jravan_entry_record_columns() -> set[str]:
-    """Get JV-Link's exact entry-record column set by calling the source of truth.
-
-    The scrape adapter's output MUST be byte-identical to this. We invoke the
-    real builder rather than hardcoding so a future change to
-    ``jravan_silver._entry_record`` automatically propagates to the assertion.
-    """
+    """Get JV-Link's exact entry-record column set by calling the source of truth."""
     sample = {
         "year": 2026,
-        "month_day": "0620",
-        "jyo_code": "09",
+        "month_day": "0621",
+        "jyo_code": "05",
         "race_num": "11",
         "ketto_num": "2016101001",
         "bamei": "X",
@@ -97,121 +101,212 @@ def _jravan_entry_record_columns() -> set[str]:
             "source_record_id": "x",
             "raw_uri": "p",
             "content_hash": "h",
-            "ingested_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+            "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
             "published_time": None,
-            "available_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+            "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
         },
     }
     return set(jravan_silver._entry_record(sample).keys())
 
 
-# --- Step 1: parser + silver-shape tests -------------------------------------
+# --- Step 1: parser + silver-shape tests (REAL HTML) -------------------------
 
 
-def test_parse_entries_fixture_to_silver_shape(tmp_path: Path) -> None:
-    """Adapter's silver rows match jravan_silver._entry_record's column set exactly."""
+def test_parse_entries_real_shutuba_fixture_to_silver_shape(tmp_path: Path) -> None:
+    """Drive the entries parser against the real Tokyo R11 shutuba capture.
+    The fixture declares 16 runners; the parser must extract every one with
+    the byte-identical-to-JV-Link column set the cross-validation gate keys
+    on."""
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
     n = netkeiba_entries.build_entries(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("entries_basic.json")
+        lake, NK_RACE_ID, RACE_ID,
+        payload_text=_load("shutuba_202605030611.html"),
     )
-    assert n == 4  # the fixture declares 4 runners
+    assert n == 16  # the Fuchu Himba S declared 16 runners (verified Friday)
 
     rows = read_dataset(lake.silver_dataset("jravan_race_entries"))
-    assert len(rows) == 4
+    assert len(rows) == 16
     expected_cols = _jravan_entry_record_columns()
     for row in rows:
-        # year/venue are partition cols (read_dataset materializes them) -- they
-        # are NOT in _entry_record's data-column set, so subtract them.
+        # year/venue are partition cols (read_dataset materializes them) --
+        # they are NOT in _entry_record's data-column set, so subtract them.
         assert set(row.keys()) - {"year", "venue"} == expected_cols
         assert row["source_name"] == "netkeiba"
-        assert row["horse_number"] in (1, 2, 3, 8)
 
-    # The placeholder-id guard: horse 3 has a blank ketto_num in the fixture.
-    horse3 = next(r for r in rows if r["horse_number"] == 3)
-    assert horse3["horse_id"] == "0000000000"
-    assert horse3["horse_name"] == "Foreign Invite"
+    # Spot-check runner 1 (マカナ, the fixture's first declared horse).
+    horse1 = next(r for r in rows if r["horse_number"] == 1)
+    assert horse1["horse_id"] == "2022100019"
+    assert horse1["horse_name"] == "マカナ"
+    assert horse1["gate"] == 1
+    assert horse1["carried_weight_kg"] == 50.0  # 馬券 weight futan from the cell
 
 
-def test_parse_results_fixture_finish_position_none_on_no_placing(tmp_path: Path) -> None:
-    """A chakujun=0 (no official placing) must map to finish_position=None.
+def test_parse_entries_hanshin_fixture_yields_18_runners(tmp_path: Path) -> None:
+    """Second real capture -- 2026-06-21 Hanshin R11 (Shirasagi S). The page
+    declares 18 runners (one more than Tokyo R11); the parser must surface
+    all 18 with distinct horse_numbers. Cross-venue check that the parser
+    isn't over-fit to Tokyo's page structure."""
+    lake = LakePaths(root=tmp_path / "data")
+    lake.ensure()
+    n = netkeiba_entries.build_entries(
+        lake, "202609030611", "jra-20260621-09-11",
+        payload_text=_load("shutuba_202609030611.html"),
+    )
+    assert n == 18
+    rows = read_dataset(lake.silver_dataset("jravan_race_entries"))
+    assert len(rows) == 18
+    assert sorted(r["horse_number"] for r in rows) == list(range(1, 19))
 
-    Mirrors jravan_silver._result_record's `pos if pos else None` handling.
-    """
+
+def test_parse_results_real_fixture_finish_position_none_on_dnf(
+    tmp_path: Path,
+) -> None:
+    """Drive the results parser against the real 2026-06-14 宝塚記念 G1
+    capture. The race had one 中止 (DNF) -- horse 15 -- which must map to
+    finish_position=None. Mirrors jravan_silver._result_record's handling
+    of 'no official placing'."""
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
     netkeiba_results.build_results(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("results_basic.json")
+        lake, "202609030411", "jra-20260614-09-11",
+        payload_text=_load("result_202609030411.html"),
     )
     rows = read_dataset(lake.silver_dataset("jravan_race_results"))
-    dnf = next(r for r in rows if r["horse_number"] == 3)
+    assert len(rows) == 18  # 18 finishers including the DNF
+    # The DNF (horse 15, マイユニバース) -- finish_position must be None.
+    dnf = next(r for r in rows if r["horse_number"] == 15)
     assert dnf["finish_position"] is None
     assert dnf["finish_time_seconds"] is None
-    # The placed runners carry their finishes.
-    winner = next(r for r in rows if r["horse_number"] == 8)
+    # The winner (horse 16, メイショウタバル) -- finish_position=1, time=2:12.1.
+    winner = next(r for r in rows if r["horse_number"] == 16)
     assert winner["finish_position"] == 1
-    assert winner["finish_time_seconds"] == 92.4  # "1:32.4" -> 92.4s
-    assert winner["win_odds"] == 2.9  # "290" -> 2.9 decimal odds
-    assert winner["popularity"] == 1
+    assert winner["finish_time_seconds"] == 132.1  # 2:12.1 -> 132.1s
+    assert winner["win_odds"] == 3.9  # decimal odds straight from the cell
+    assert winner["popularity"] == 2
+    assert winner["last_3f_seconds"] == 35.3
 
 
-def test_parse_payouts_fixture_dead_heat_emits_multiple_rows(tmp_path: Path) -> None:
-    """A dead-heat combo emits one row per (combo, payout) on the source page.
-    settlement._load_official_payouts MAX-collapses duplicates on read -- the
-    parser must NOT dedupe them upstream.
-    """
+def test_parse_payouts_real_fixture_emits_all_eight_pools(tmp_path: Path) -> None:
+    """The 宝塚記念 fixture carries the full payout table (one row per pool).
+    For the multi-combo Fukusho row (top-3 finishers 16/5/1), the parser must
+    fan out into THREE distinct rows -- one per (combo, payout). For Wide
+    (three winning pairs 5-16/1-16/1-5), THREE rows. Single-combo pools
+    (win/bracket_quinella/quinella/exacta/trio/trifecta) emit one row each."""
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
     netkeiba_payouts.build_payouts(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("payouts_dead_heat.json")
+        lake, "202609030411", "jra-20260614-09-11",
+        payload_text=_load("result_202609030411.html"),
     )
     rows = read_dataset(lake.silver_dataset("jravan_payouts"))
+    pools_present = {r["pool"] for r in rows}
+    assert pools_present == {
+        "win", "place", "bracket_quinella", "quinella",
+        "wide", "exacta", "trio", "trifecta",
+    }, "all eight pools must surface"
+
+    # Multi-combo place row: 3 finishers -> 3 rows.
     place_rows = sorted(
         (r for r in rows if r["pool"] == "place"), key=lambda r: r["combo"]
     )
-    assert len(place_rows) == 3  # 05, 07, 09 -- a triple dead-heat for 2nd
-    # The two dead-heat payouts share ninki=2 but are distinct combos with
-    # identical payout_yen -- they survive as separate rows.
-    payouts_07_09 = sorted(r["payout_yen"] for r in place_rows if r["combo"] in ("07", "09"))
-    assert payouts_07_09 == [150, 150]
+    assert len(place_rows) == 3
+    assert {r["combo"] for r in place_rows} == {"01", "05", "16"}
+    place_by_combo = {r["combo"]: r for r in place_rows}
+    assert place_by_combo["16"]["payout_yen"] == 140
+    assert place_by_combo["05"]["payout_yen"] == 120
+    assert place_by_combo["01"]["payout_yen"] == 170
 
-    # settle_many's MAX-collapse picks up the right payout per combo.
-    settled = settle_many(lake, [Bet(RACE_ID, "place", "07", stake_yen=100)])
-    assert settled[0].returned_yen == 150
+    # Multi-combo wide row: 3 winning pairs -> 3 rows.
+    wide_rows = {r["combo"]: r for r in rows if r["pool"] == "wide"}
+    assert len(wide_rows) == 3
+    assert wide_rows["0516"]["payout_yen"] == 260
+    assert wide_rows["0116"]["payout_yen"] == 490
+    assert wide_rows["0105"]["payout_yen"] == 290
+
+    # Spot-check exotics: trifecta 16-5-1 -> 6,040 yen, popularity 11.
+    trifecta = next(r for r in rows if r["pool"] == "trifecta")
+    assert trifecta["combo"] == "160501"
+    assert trifecta["payout_yen"] == 6040
+    assert trifecta["popularity"] == 11
+
+
+def test_parse_payouts_real_fixture_settles_through_settle_many(
+    tmp_path: Path,
+) -> None:
+    """End-to-end: scrape payouts -> silver -> settle_many. The scrape rows
+    must slot into settle_many's lookup unchanged (combos canonicalized via
+    _normalize_selection). This is the load-bearing contract."""
+    lake = LakePaths(root=tmp_path / "data")
+    lake.ensure()
+    netkeiba_payouts.build_payouts(
+        lake, "202609030411", "jra-20260614-09-11",
+        payload_text=_load("result_202609030411.html"),
+    )
+    race_id = "jra-20260614-09-11"
+    # A 100-yen win bet on horse 16 (the winner) pays 390 yen (per the cell).
+    settled = settle_many(lake, [Bet(race_id, "win", "16", stake_yen=100)])
+    assert settled[0].returned_yen == 390
+    # A 100-yen trifecta bet on 16-5-1 -> 6,040 yen.
+    settled_tri = settle_many(lake, [Bet(race_id, "trifecta", "16-05-01", stake_yen=100)])
+    assert settled_tri[0].returned_yen == 6040
 
 
 def test_placeholder_horse_id_pair_keyed_by_horse_number(tmp_path: Path) -> None:
     """Two runners sharing the '0000000000' placeholder horse_id must stay
     distinct, keyed by horse_number. Settlement's scratch join must not
     cross-map one runner's result to satisfy the other's lookup.
+
+    No real capture in our fixtures exercises the placeholder trap yet (the
+    Fuchu Himba S page has full ketto_num for every horse). This test
+    synthesizes the trap by writing entry rows directly -- the underlying
+    invariant is on settlement's silver-table read path, not the parser.
     """
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
-    netkeiba_entries.build_entries(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("entries_placeholder_pair.json")
+    # Synthesize: two runners with the SAME placeholder horse_id but distinct
+    # horse_numbers (5 and 6).
+    write_dataset(
+        [
+            {
+                "race_id": RACE_ID, "horse_id": "0000000000", "horse_name": "Pair A",
+                "horse_number": 5, "gate": 5, "jockey_id": "0", "trainer_id": "0",
+                "carried_weight_kg": 56.0, "body_weight_kg": 480,
+                "source_name": "netkeiba", "source_record_id": "nk:5",
+                "raw_uri": "nk://5", "content_hash": "h5",
+                "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "published_time": None,
+                "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "year": 2026, "venue": "05",
+            },
+            {
+                "race_id": RACE_ID, "horse_id": "0000000000", "horse_name": "Pair B",
+                "horse_number": 6, "gate": 6, "jockey_id": "0", "trainer_id": "0",
+                "carried_weight_kg": 56.0, "body_weight_kg": 480,
+                "source_name": "netkeiba", "source_record_id": "nk:6",
+                "raw_uri": "nk://6", "content_hash": "h6",
+                "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "published_time": None,
+                "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "year": 2026, "venue": "05",
+            },
+        ],
+        lake.silver_dataset("jravan_race_entries"),
     )
     # Result row for horse 5 ONLY -- horse 6 is a scratch.
     write_dataset(
         [
             {
-                "race_id": RACE_ID,
-                "horse_id": "0000000000",
-                "horse_number": 5,
-                "finish_position": 1,
-                "finish_time_seconds": 95.0,
-                "margin": None,
-                "win_odds": 2.1,
-                "popularity": 1,
+                "race_id": RACE_ID, "horse_id": "0000000000", "horse_number": 5,
+                "finish_position": 1, "finish_time_seconds": 95.0,
+                "margin": None, "win_odds": 2.1, "popularity": 1,
                 "last_3f_seconds": None,
-                "source_name": "jravan",
-                "source_record_id": None,
-                "raw_uri": None,
-                "content_hash": None,
-                "ingested_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+                "source_name": "jravan", "source_record_id": None,
+                "raw_uri": None, "content_hash": None,
+                "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
                 "published_time": None,
-                "available_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
-                "year": 2026,
-                "venue": "09",
+                "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "year": 2026, "venue": "05",
             }
         ],
         lake.silver_dataset("jravan_race_results"),
@@ -220,20 +315,14 @@ def test_placeholder_horse_id_pair_keyed_by_horse_number(tmp_path: Path) -> None
     write_dataset(
         [
             {
-                "race_id": RACE_ID,
-                "pool": "win",
-                "combo": "05",
-                "payout_yen": 210,
+                "race_id": RACE_ID, "pool": "win", "combo": "05", "payout_yen": 210,
                 "popularity": 1,
-                "source_name": "jravan",
-                "source_record_id": None,
-                "raw_uri": None,
-                "content_hash": None,
-                "ingested_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+                "source_name": "jravan", "source_record_id": None,
+                "raw_uri": None, "content_hash": None,
+                "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
                 "published_time": None,
-                "available_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
-                "year": 2026,
-                "venue": "09",
+                "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "year": 2026, "venue": "05",
             }
         ],
         lake.silver_dataset("jravan_payouts"),
@@ -248,27 +337,34 @@ def test_placeholder_horse_id_pair_keyed_by_horse_number(tmp_path: Path) -> None
     assert s6.returned_yen == 100
 
 
-def test_available_at_is_event_time_not_download_time(tmp_path: Path) -> None:
-    """available_at = published event time (JST->UTC), NEVER scrape time.
+# --- available_at semantics (the PIT compromise) -----------------------------
 
-    The fixture's published_time is 09:00 JST (00:00 UTC). The captured_at
-    download time is 21:00 UTC. The silver row must carry 00:00 UTC, not 21:00
-    UTC -- this is the available_at_bulk_download PIT lesson applied to scrape.
+
+def test_available_at_floors_captured_at_to_utc_midnight(tmp_path: Path) -> None:
+    """shutuba.html carries no publish timestamp (PIT compromise). available_at
+    MUST equal captured_at floored to UTC midnight -- NOT captured_at verbatim
+    (so same-day re-scrapes dedupe), NOT a fabricated publish time (which
+    would lose PIT honesty). Documented in the adapter's module docstring.
+
+    The captured_at here (21:00 UTC) is AFTER the race would have been
+    settled, but the silver row's available_at floors to that day's midnight
+    (00:00 UTC). This is the post-cutover equivalent of "the entries became
+    visible sometime on this date" -- the honest upper bound.
     """
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
-    captured_at = datetime(2026, 6, 20, 21, 0, tzinfo=timezone.utc)
+    captured_at = datetime(2026, 6, 19, 21, 0, tzinfo=timezone.utc)
+    expected_midnight = datetime(2026, 6, 19, 0, 0, tzinfo=timezone.utc)
     netkeiba_entries.build_entries(
         lake, NK_RACE_ID, RACE_ID,
-        payload_text=_load("entries_basic.json"),
+        payload_text=_load("shutuba_202605030611.html"),
         captured_at=captured_at,
     )
     rows = read_dataset(lake.silver_dataset("jravan_race_entries"))
-    expected_available_at = datetime(2026, 6, 20, 0, 0, tzinfo=timezone.utc)  # 09:00 JST = 00:00 UTC
     for row in rows:
-        assert row["available_at"] == expected_available_at
-        assert row["available_at"] != captured_at  # never the scrape time
-        assert row["published_time"] == expected_available_at
+        assert row["available_at"] == expected_midnight
+        assert row["available_at"] != captured_at  # never the raw scrape time
+        assert row["published_time"] == expected_midnight  # same floored value
 
 
 def test_source_name_netkeiba_stamped(tmp_path: Path) -> None:
@@ -281,31 +377,23 @@ def test_source_name_netkeiba_stamped(tmp_path: Path) -> None:
     write_dataset(
         [
             {
-                "race_id": RACE_ID,
-                "horse_id": "2016101001",
-                "horse_name": "JV Horse",
-                "horse_number": 1,
-                "gate": 1,
-                "jockey_id": "0",
-                "trainer_id": "0",
-                "carried_weight_kg": 56.0,
-                "body_weight_kg": 480,
-                "source_name": "jravan",
-                "source_record_id": "jv:1",
-                "raw_uri": "jv://raw",
-                "content_hash": "jvhash",
-                "ingested_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+                "race_id": RACE_ID, "horse_id": "2016101001", "horse_name": "JV Horse",
+                "horse_number": 1, "gate": 1, "jockey_id": "0", "trainer_id": "0",
+                "carried_weight_kg": 56.0, "body_weight_kg": 480,
+                "source_name": "jravan", "source_record_id": "jv:1",
+                "raw_uri": "jv://raw", "content_hash": "jvhash",
+                "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
                 "published_time": None,
-                "available_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
-                "year": 2026,
-                "venue": "09",
+                "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+                "year": 2026, "venue": "05",
             }
         ],
         lake.silver_dataset("jravan_race_entries"),
     )
     # Scrape rows via the adapter.
     netkeiba_entries.build_entries(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("entries_basic.json")
+        lake, NK_RACE_ID, RACE_ID,
+        payload_text=_load("shutuba_202605030611.html"),
     )
 
     rows = read_dataset(lake.silver_dataset("jravan_race_entries"))
@@ -313,7 +401,7 @@ def test_source_name_netkeiba_stamped(tmp_path: Path) -> None:
     for r in rows:
         by_source.setdefault(r["source_name"], []).append(r)
     assert len(by_source["jravan"]) == 1, "JV-Link row should survive the upsert"
-    assert len(by_source["netkeiba"]) == 4, "scrape rows should be added"
+    assert len(by_source["netkeiba"]) == 16, "scrape rows should be added"
     # Even though horse_number=1 appears in BOTH sources, the rows are distinct
     # because they carry different source_name + source_record_id.
     assert {r["source_name"] for r in rows} == {"jravan", "netkeiba"}
@@ -398,17 +486,24 @@ def test_scrape_upsert_partition_aware_no_clobber(tmp_path: Path) -> None:
 
 
 def test_idempotent_re_ingest_adds_no_duplicates(tmp_path: Path) -> None:
-    """Re-ingesting an unchanged payload adds zero rows (dedup on natural_key + available_at)."""
+    """Re-ingesting an unchanged payload on the same day adds zero rows
+    (dedup on natural_key + available_at). The PIT compromise's UTC-midnight
+    floor is what makes this work for shutuba's no-publish-time case."""
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
+    captured = datetime(2026, 6, 19, 12, 0, tzinfo=timezone.utc)
     n1 = netkeiba_payouts.build_payouts(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("payouts_basic.json")
+        lake, "202609030411", "jra-20260614-09-11",
+        payload_text=_load("result_202609030411.html"),
+        captured_at=captured,
     )
     assert n1 > 0
     n2 = netkeiba_payouts.build_payouts(
-        lake, NK_RACE_ID, RACE_ID, payload_text=_load("payouts_basic.json")
+        lake, "202609030411", "jra-20260614-09-11",
+        payload_text=_load("result_202609030411.html"),
+        captured_at=captured,  # SAME timestamp -> same floored available_at -> dedupe
     )
-    assert n2 == 0, "second identical ingest should add zero rows"
+    assert n2 == 0, "second identical ingest on the same day should add zero rows"
     rows = read_dataset(lake.silver_dataset("jravan_payouts"))
     assert len(rows) == n1
 
@@ -422,10 +517,10 @@ def _write_payouts(rows: list[dict], lake: LakePaths, source: str, race_id: str,
         "race_id": race_id, "pool": pool, "combo": combo, "payout_yen": payout,
         "popularity": popularity, "source_name": source, "source_record_id": f"{source}:{combo}",
         "raw_uri": f"{source}://raw", "content_hash": f"{source}hash",
-        "ingested_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
+        "ingested_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
         "published_time": None,
-        "available_at": datetime(2026, 6, 20, tzinfo=timezone.utc),
-        "year": 2026, "venue": "09",
+        "available_at": datetime(2026, 6, 21, tzinfo=timezone.utc),
+        "year": 2026, "venue": "05",
     })
 
 
@@ -500,7 +595,7 @@ def test_archive_raw_is_idempotent_on_identical_payload(tmp_path: Path) -> None:
     lake = LakePaths(root=tmp_path / "data")
     lake.ensure()
     payload = '{"data": {}}'
-    cap = datetime(2026, 6, 20, 12, 0, tzinfo=timezone.utc)
+    cap = datetime(2026, 6, 21, 12, 0, tzinfo=timezone.utc)
     p1 = netkeiba_http.archive_raw(lake, "netkeiba_payouts", NK_RACE_ID, "payouts", payload, cap)
     p2 = netkeiba_http.archive_raw(lake, "netkeiba_payouts", NK_RACE_ID, "payouts", payload, cap)
     assert p1 == p2
@@ -511,6 +606,5 @@ def test_archive_raw_is_idempotent_on_identical_payload(tmp_path: Path) -> None:
 
 def test_crosswalk_roundtrip_canonical_id_passthrough() -> None:
     """crosswalk_race_id passes canonical jra- ids through untouched and maps
-    netkeiba synthetic r- ids correctly (Hanshin = jyo 09 per project mapping)."""
-    assert crosswalk_race_id("jra-20260620-09-11") == "jra-20260620-09-11"
-    assert crosswalk_race_id(NK_RACE_ID) == RACE_ID
+    netkeiba synthetic r- ids correctly (Tokyo = jyo 05 per project mapping)."""
+    assert crosswalk_race_id("jra-20260621-05-11") == "jra-20260621-05-11"
