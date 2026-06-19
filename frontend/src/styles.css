@@ -524,9 +524,72 @@ select:focus {
   border: 1px solid var(--line);
 }
 
+/* ADR-0005: single plain mood label on the default ticket card. */
+.badge.mood-safer {
+  color: var(--turf);
+  background: rgba(57, 192, 122, 0.13);
+  border: 1px solid rgba(57, 192, 122, 0.34);
+}
+
+.badge.mood-balanced {
+  color: var(--aqua);
+  background: rgba(122, 215, 207, 0.13);
+  border: 1px solid rgba(122, 215, 207, 0.32);
+}
+
+.badge.mood-spicier {
+  color: var(--warn);
+  background: rgba(224, 122, 85, 0.13);
+  border: 1px solid rgba(224, 122, 85, 0.32);
+}
+
+/* Advanced disclosure: the raw knobs personality sets for you. */
+.advanced {
+  margin-top: 10px;
+  border-top: 1px solid var(--line);
+  padding-top: 8px;
+}
+
+.advanced > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font: 700 11px/1.4 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  list-style: none;
+}
+
+.advanced > summary::-webkit-details-marker {
+  display: none;
+}
+
+.advanced > summary::before {
+  content: "+ ";
+  color: var(--turf);
+}
+
+.advanced[open] > summary::before {
+  content: "− ";
+}
+
+/* Explain: plain sentence first, details below. */
+.explain-lead {
+  margin: 0 0 14px;
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.details-heading {
+  margin: 0 0 4px;
+  color: var(--muted);
+  font: 700 11px/1 ui-monospace, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
   gap: 6px;
   margin-top: 8px;
 }

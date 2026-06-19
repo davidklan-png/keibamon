@@ -71,3 +71,44 @@ export const DEFAULT_STYLE: StyleState = {
   complexity: "auto",
   flavor: "mixed",
 };
+
+/**
+ * ADR-0005 Phase 2: personality is the single "how you want to play" control on
+ * the default path. Flavor and complexity are DERIVED from it via this preset so
+ * a casual user never reconciles two knobs that can contradict. The raw knobs
+ * still exist behind an Advanced disclosure (power users can override after).
+ * The engine (`recommender.ts`) is unchanged — it still reads style.flavor /
+ * style.complexity; we just stop asking the user to set them directly.
+ */
+export const PERSONALITY_PRESET: Record<
+  PersonalityId,
+  { flavor: Flavor; complexity: Complexity }
+> = {
+  safe: { flavor: "chalk", complexity: "two" },
+  balanced: { flavor: "mixed", complexity: "auto" },
+  longshot: { flavor: "value", complexity: "three" },
+  fan: { flavor: "mixed", complexity: "auto" },
+  antiChalk: { flavor: "value", complexity: "two" },
+};
+
+/** Select a personality and apply its derived flavor/complexity preset. */
+export function applyPersonality(
+  style: StyleState,
+  id: PersonalityId,
+): StyleState {
+  return { ...style, personality: id, ...PERSONALITY_PRESET[id] };
+}
+
+/**
+ * ADR-0005 Phase 3: the default ticket card carries ONE plain mood label instead
+ * of the variance + value-tag badges. Derived from the ticket's own properties
+ * so it stays honest (no fixed Safe/Balanced/Spicy buckets the engine can't
+ * guarantee).
+ */
+export type MoodKey = "safer" | "balanced" | "spicier";
+
+export function moodKey(t: Ticket): MoodKey {
+  if (t.variance === "low") return "safer";
+  if (t.variance === "high" && t.tag === "value") return "spicier";
+  return "balanced";
+}

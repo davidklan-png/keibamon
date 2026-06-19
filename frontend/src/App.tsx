@@ -15,7 +15,7 @@ import type {
   Flavor,
   Ticket,
 } from "./lib/types";
-import { DEFAULT_STYLE } from "./lib/types";
+import { DEFAULT_STYLE, applyPersonality, moodKey } from "./lib/types";
 import {
   fetchLiveSnapshot,
   seedManualRunners,
@@ -275,6 +275,7 @@ function App() {
           onChange={setStyle}
           onBack={() => setStep("race")}
           onNext={() => setStep("intuition")}
+          onSeeTickets={goToTickets}
         />
       )}
 
@@ -508,11 +509,12 @@ interface StyleScreenProps {
   onChange: (s: StyleState) => void;
   onBack: () => void;
   onNext: () => void;
+  onSeeTickets: () => void;
 }
 
 function StyleScreen(props: StyleScreenProps) {
   const { t } = useI18n();
-  const { style, onChange, onBack, onNext } = props;
+  const { style, onChange, onBack, onNext, onSeeTickets } = props;
   return (
     <>
       <section className="section">
@@ -520,12 +522,14 @@ function StyleScreen(props: StyleScreenProps) {
           <h2>{t("style.title")}</h2>
           <small>{t("style.hint")}</small>
         </div>
+        {/* ADR-0005: personality is the ONE "how you play" control. Picking it
+            derives flavor + complexity (Advanced lets power users override). */}
         <div className="persona-grid">
           {PERSONALITIES.map((id) => (
             <button
               key={id}
               className={`persona ${style.personality === id ? "on" : ""}`}
-              onClick={() => onChange({ ...style, personality: id })}
+              onClick={() => onChange(applyPersonality(style, id))}
             >
               <div className="pname">{t(`personality.${id}.name`)}</div>
               <div className="pdesc">{t(`personality.${id}.desc`)}</div>
@@ -560,45 +564,59 @@ function StyleScreen(props: StyleScreenProps) {
               }
             />
           </div>
-          <div className="field">
-            <label>{t("style.complexity")}</label>
-            <select
-              value={style.complexity}
-              onChange={(e) =>
-                onChange({ ...style, complexity: e.target.value as Complexity })
-              }
-            >
-              {COMPLEXITIES.map((c) => (
-                <option key={c} value={c}>
-                  {t(`style.complexity${cap(c)}`)}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="field">
-            <label>{t("style.flavor")}</label>
-            <select
-              value={style.flavor}
-              onChange={(e) =>
-                onChange({ ...style, flavor: e.target.value as Flavor })
-              }
-            >
-              {FLAVORS.map((f) => (
-                <option key={f} value={f}>
-                  {t(`style.flavor${cap(f)}`)}
-                </option>
-              ))}
-            </select>
-          </div>
         </div>
+        {/* Advanced: the raw knobs personality now sets for you. Kept, not deleted. */}
+        <details className="advanced">
+          <summary>{t("style.advanced")}</summary>
+          <div className="grid-2" style={{ marginTop: 10 }}>
+            <div className="field">
+              <label>{t("style.complexity")}</label>
+              <select
+                value={style.complexity}
+                onChange={(e) =>
+                  onChange({ ...style, complexity: e.target.value as Complexity })
+                }
+              >
+                {COMPLEXITIES.map((c) => (
+                  <option key={c} value={c}>
+                    {t(`style.complexity${cap(c)}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="field">
+              <label>{t("style.flavor")}</label>
+              <select
+                value={style.flavor}
+                onChange={(e) =>
+                  onChange({ ...style, flavor: e.target.value as Flavor })
+                }
+              >
+                {FLAVORS.map((f) => (
+                  <option key={f} value={f}>
+                    {t(`style.flavor${cap(f)}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </details>
       </section>
 
-      <div className="btn-row">
+      {/* Tickets are reachable straight from here — intuition is optional. */}
+      <button
+        className="btn primary"
+        style={{ width: "100%" }}
+        onClick={onSeeTickets}
+      >
+        {t("tickets.title")} →
+      </button>
+      <div className="btn-row" style={{ marginTop: 8 }}>
         <button className="btn ghost" onClick={onBack}>
           ← {t("nav.race")}
         </button>
-        <button className="btn primary" onClick={onNext}>
-          {t("nav.intuition")} →
+        <button className="btn ghost" onClick={onNext}>
+          + {t("nav.intuition")}
         </button>
       </div>
     </>
@@ -722,7 +740,7 @@ interface TicketsScreenProps {
 }
 
 function TicketsScreen(props: TicketsScreenProps) {
-  const { t, tFmt } = useI18n();
+  const { t } = useI18n();
   const { tickets, onRemix, onReset, onBackStyle, onBackIntuition, onExplain } = props;
   if (tickets.length === 0) {
     // Only reachable when a real regenerate() returned 0 tickets — i.e. the
@@ -757,59 +775,30 @@ function TicketsScreen(props: TicketsScreenProps) {
         {tickets.map((tk, i) => {
           const sep = tk.type === "exacta" || tk.type === "trifecta" ? " > " : " - ";
           const shownLines = tk.lines.slice(0, 9);
-          const ev = tk.expectedReturn;
-          const edgePct = ((ev / Math.max(1, tk.cost) - 1) * 100).toFixed(0);
+          const mood = moodKey(tk);
           return (
             <article
               key={tk.id}
               className={`ticket ${i === 0 ? "top-pick" : ""}`}
             >
+              {/* ADR-0005 Phase 3: default card carries two numbers + one mood
+                  label. Hit %, variance, value tag and the house-edge line all
+                  move to "Why" (one tap away). */}
               <div className="ticket-head">
                 <div>
-                  <h3>
-                    {i === 0 ? `${t("tickets.topMix")}: ` : ""}
-                    {t(`betType.${tk.type}`)}
-                  </h3>
-                  <p className="tpdesc">
-                    {shownLines.length} {t("tickets.lines")} ·{" "}
-                    {t(`valueTag.${tk.tag}`)}
-                  </p>
+                  <h3>{t(`betType.${tk.type}`)}</h3>
                 </div>
-                <div style={{ display: "grid", gap: 4, justifyItems: "end" }}>
-                  <span className={`badge ${tk.tag}`}>{t(`valueTag.${tk.tag}`)}</span>
-                  <span className={`badge ${tk.variance}`}>
-                    {tk.variance === "high"
-                      ? t("tickets.variance")
-                      : t("tickets.lowVariance")}
-                  </span>
-                </div>
+                <span className={`badge mood-${mood}`}>{t(`mood.${mood}`)}</span>
               </div>
               <div className="metrics">
-                <div className="metric">
-                  <span>{t("tickets.lines")}</span>
-                  <b>{tk.lines.length}</b>
-                </div>
                 <div className="metric cost-metric">
                   <span>{t("tickets.cost")}</span>
                   <b>{yen(tk.cost)}</b>
                 </div>
                 <div className="metric">
-                  <span>{t("tickets.hitEst")}</span>
-                  <b>
-                    {(tk.hitProb * 100).toFixed(tk.hitProb < 0.1 ? 1 : 0)}%
-                  </b>
-                </div>
-                <div className="metric">
-                  <span>{t("tickets.avgPayout")}</span>
+                  <span>{t("tickets.ifHits")}</span>
                   <b>{yen(tk.avgPayout)}</b>
                 </div>
-              </div>
-              <div className="ev-line">
-                {tFmt("tickets.estReturnLine", {
-                  ret: ev.toFixed(0),
-                  edge: `${edgePct}%`,
-                })}{" "}
-                {t("tickets.houseEdgeNote")}
               </div>
               <div className="combos">
                 {shownLines.map((ln, j) => (
@@ -888,6 +877,15 @@ function ExplainScreen(props: ExplainScreenProps) {
             {t(`betType.${ticket.type}`)} · {t(`valueTag.${ticket.tag}`)}
           </small>
         </div>
+        {/* ADR-0005 Phase 3: plain sentence first, the math below it. */}
+        <p className="explain-lead">
+          {tFmt("explain.lead", {
+            mood: t(`mood.${moodKey(ticket)}`),
+            cost: yen(ticket.cost),
+            hit: coveragePct,
+          })}
+        </p>
+        <h3 className="details-heading">{t("explain.detailsHeading")}</h3>
         <dl className="explain">
           <dt>{t("explain.coverage")}</dt>
           <dd>
