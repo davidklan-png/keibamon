@@ -102,6 +102,11 @@ def parse_entries_payload(
             "trainer_id": _extract_trainer_id(row_html),
             "carried_weight_kg": _extract_carried_weight(row_html),
             "body_weight_kg": _extract_body_weight(row_html),
+            # ADR-0006: opportunistic estimated odds for the live registration
+            # feed. ADDITIVE -- _entry_record ignores it, so the jravan_*
+            # silver shape and the cross-validation gate are untouched. None
+            # when netkeiba has only rendered the JS placeholder (``---.-``).
+            "est_odds": _extract_est_odds(row_html),
             "published_time": None,  # PIT compromise -- see module docstring
             "source_race_id": nk_race_id,
         }
@@ -343,3 +348,24 @@ def _extract_body_weight(row: str) -> int | None:
         return int(m.group(1))
     except ValueError:
         return None
+
+
+def _extract_est_odds(row: str) -> float | None:
+    """``<span id="odds-...">VALUE</span>`` -- netkeiba's win-odds cell.
+
+    ADR-0006 (registration feed). Before betting opens this span is the JS
+    placeholder ``---.-`` (and ninki is ``**``); once netkeiba renders a
+    forecast/early number we capture it as the *estimated* odds shown on the
+    grayed pre-market card. Returns ``None`` for the placeholder, a non-numeric
+    cell, or odds < 1.0 (impossible -- treat as not-yet-priced). We never
+    fabricate an estimate; absence stays ``None`` and the app grays the runner.
+    """
+    m = re.search(r'<span id="odds-[^"]*"[^>]*>\s*([^<]*?)\s*</span>', row)
+    if not m:
+        return None
+    raw = m.group(1).strip()
+    try:
+        val = float(raw)
+    except ValueError:
+        return None  # '---.-', '**', empty, etc.
+    return val if val >= 1.0 else None

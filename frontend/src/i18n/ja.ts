@@ -30,6 +30,9 @@ export const ja = {
     standardCta: "おまかせ3点 · スタンダード",
     standardHint: "スタイルと直感は、あとで自由に調整できます。",
     refine: "スタイル・直感で絞り込む →",
+    pendingTag: "オッズ未確定",
+    pendingBanner: "登録済み — まだオッズは発売前です。想定オッズを表示中。発売開始でライブ更新されます。",
+    estOdds: "想定",
   },
   style: {
     title: "スタイルを選ぶ",

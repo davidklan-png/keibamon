@@ -543,6 +543,27 @@ select:focus {
   border: 1px solid rgba(224, 122, 85, 0.32);
 }
 
+/* ADR-0006: registered-but-no-odds race — grayed, estimated odds shown. */
+.pending-banner {
+  margin: 0 0 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(122, 215, 207, 0.08);
+  border-left: 3px solid var(--aqua);
+  color: var(--soft);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.section.is-pending .runners {
+  opacity: 0.62;
+  filter: saturate(0.7);
+}
+
+.section.is-pending .pc {
+  color: var(--aqua);
+}
+
 /* Advanced disclosure: the raw knobs personality sets for you. */
 .advanced {
   margin-top: 10px;

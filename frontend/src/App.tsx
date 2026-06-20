@@ -56,6 +56,12 @@ function fmt(n: number | undefined, d = 1): string {
   return Number(n).toFixed(d);
 }
 
+/** ADR-0006: a race is "open" once any runner carries a live (non-estimated) price. */
+function raceHasLiveOdds(race: LiveRace): boolean {
+  if (race.status) return race.status === "open" || race.status === "result";
+  return (race.runners || []).some((r) => (r.win_odds || 0) > 0);
+}
+
 function App() {
   const i18n = useI18n();
   const { t, tFmt, lang, setLang } = i18n;
@@ -66,6 +72,9 @@ function App() {
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
   const [snapLoading, setSnapLoading] = useState(false);
   const [snapError, setSnapError] = useState<string>("");
+  // ADR-0006: lifecycle of the selected race — "registered" (grayed, est odds),
+  // "open" (live), "result", or "manual" (hand-entered).
+  const [raceStatus, setRaceStatus] = useState<string>("manual");
 
   const [style, setStyle] = useState<StyleState>(DEFAULT_STYLE);
   const [intuition, setIntuition] = useState<Record<string, IntuitionState>>(
@@ -77,8 +86,26 @@ function App() {
   // ---------- Live snapshot ----------
   useEffect(() => {
     loadLive(true);
+    // ADR-0006: poll in the background so newly REGISTERED races (and odds
+    // going live) surface within ~45s without a reload. This only refreshes
+    // the snapshot (race list + odds in the picker); it never re-applies a
+    // race, so a user's current selection or manual entry is left intact.
+    const id = setInterval(() => {
+      void refreshSnap();
+    }, 45000);
+    return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  async function refreshSnap() {
+    try {
+      const s = await fetchLiveSnapshot();
+      setSnap(s);
+      setSnapError("");
+    } catch {
+      /* keep the last good snapshot; surfaced errors only on explicit reload */
+    }
+  }
 
   async function loadLive(silent: boolean) {
     if (!silent) setSnapLoading(true);
@@ -86,13 +113,18 @@ function App() {
       const s = await fetchLiveSnapshot();
       setSnap(s);
       setSnapError("");
-      const races = (s.races || []).filter((r) =>
-        (r.runners || []).some((x) => (x.win_odds || 0) > 0),
+      // ADR-0006: a race is shown as soon as it is REGISTERED (has runners),
+      // not only once odds open. Prefer an open race; otherwise surface a
+      // registered one (grayed, estimated odds).
+      const races = (s.races || []).filter(
+        (r) => (r.runners || []).length > 0,
       );
       if (races.length > 0) {
+        const open = races.filter((r) => raceHasLiveOdds(r));
+        const pool = open.length > 0 ? open : races;
         const feature =
-          races.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
-          races[races.length - 1];
+          pool.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
+          pool[pool.length - 1];
         applyRace(feature);
       } else {
         if (runners.length === 0) seedManual();
@@ -106,15 +138,17 @@ function App() {
   }
 
   function applyRace(race: LiveRace) {
-    const next = (race.runners || [])
-      .filter((r) => (r.win_odds || 0) > 0)
-      .map((r) => ({
-        uma: String(r.umaban),
-        name: r.name ?? null,
-        odds: r.win_odds as number,
-      }));
+    // Fall back to estimated odds when the pool hasn't opened, so a registered
+    // race is playable (grayed + labeled "estimated"). Scratched/odds-less
+    // runners get 0 and winProbs treats them as out.
+    const next = (race.runners || []).map((r) => ({
+      uma: String(r.umaban),
+      name: r.name ?? null,
+      odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
+    }));
     setRunners(next);
     setRaceLabel(race.name || `${t("race.placeholderRace")} ${race.race_no}`);
+    setRaceStatus(race.status ?? (raceHasLiveOdds(race) ? "open" : "registered"));
     setIntuition({});
     // Auto-regen effect (driven by [runners, style, intuition]) will refill
     // tickets; no need to set them here.
@@ -123,6 +157,7 @@ function App() {
   function seedManual(n = 12) {
     setRunners(seedManualRunners(n));
     setRaceLabel(t("race.placeholderRace"));
+    setRaceStatus("manual");
     setIntuition({});
   }
 
@@ -266,6 +301,7 @@ function App() {
           onApplyRace={applyRace}
           onStandard={standardTickets}
           onRefine={() => setStep("style")}
+          raceStatus={raceStatus}
         />
       )}
 
@@ -343,6 +379,7 @@ interface RaceScreenProps {
   onApplyRace: (r: LiveRace) => void;
   onStandard: () => void;
   onRefine: () => void;
+  raceStatus: string;
 }
 
 function RaceScreen(props: RaceScreenProps) {
@@ -363,11 +400,14 @@ function RaceScreen(props: RaceScreenProps) {
     onApplyRace,
     onStandard,
     onRefine,
+    raceStatus,
   } = props;
 
-  const liveRaces = (snap?.races || []).filter((r) =>
-    (r.runners || []).some((x) => (x.win_odds || 0) > 0),
+  // ADR-0006: list every registered race, not just ones with live odds.
+  const cardRaces = (snap?.races || []).filter(
+    (r) => (r.runners || []).length > 0,
   );
+  const pending = raceStatus === "registered";
   const taken = overround > 0 ? ((1 - 1 / overround) * 100).toFixed(0) : "-";
 
   return (
@@ -382,22 +422,23 @@ function RaceScreen(props: RaceScreenProps) {
             aria-label={t("race.live")}
             value={raceLabel}
             onChange={(e) => {
-              const r = liveRaces.find(
+              const r = cardRaces.find(
                 (x) => (x.name || `${t("race.placeholderRace")} ${x.race_no}`) ===
                   e.target.value,
               );
               if (r) onApplyRace(r);
             }}
           >
-            {liveRaces.length === 0 ? (
+            {cardRaces.length === 0 ? (
               <option value="">{t("race.noLive")}</option>
             ) : (
-              liveRaces.map((r) => (
+              cardRaces.map((r) => (
                 <option
                   key={r.race_no}
                   value={r.name || `${t("race.placeholderRace")} ${r.race_no}`}
                 >
                   R{r.race_no} · {r.name || `Race ${r.race_no}`}
+                  {raceHasLiveOdds(r) ? "" : ` · ${t("race.pendingTag")}`}
                 </option>
               ))
             )}
@@ -429,7 +470,11 @@ function RaceScreen(props: RaceScreenProps) {
         </p>
       </section>
 
-      <section className="section">
+      {pending && (
+        <p className="pending-banner">{t("race.pendingBanner")}</p>
+      )}
+
+      <section className={`section ${pending ? "is-pending" : ""}`}>
         <div className="section-title">
           <h2>{t("race.runners")}</h2>
           <button className="btn ghost" onClick={onAddRunner}>
@@ -462,6 +507,7 @@ function RaceScreen(props: RaceScreenProps) {
                         }
                       />
                       <span className="pc">
+                        {pending ? t("race.estOdds") + " · " : ""}
                         {t("race.winProb")} {pc}
                       </span>
                     </span>

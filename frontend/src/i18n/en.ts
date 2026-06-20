@@ -31,6 +31,9 @@ export const en = {
     standardCta: "Standard tickets · 3 picks",
     standardHint: "Style and intuition are optional refinements — adjust later.",
     refine: "Refine by style / intuition →",
+    pendingTag: "odds pending",
+    pendingBanner: "Registered — odds aren't open yet. Showing estimated odds; they'll update live when the pool opens.",
+    estOdds: "est.",
   },
   style: {
     title: "Choose your style",

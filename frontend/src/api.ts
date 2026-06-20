@@ -3,13 +3,23 @@
 export interface LiveRunner {
   umaban: number;
   name?: string | null;
-  win_odds?: number;
+  /** Live pari-mutuel win odds; null/absent until the pool opens. */
+  win_odds?: number | null;
+  /** Estimated odds shown while there is no live price (ADR-0006). */
+  win_odds_est?: number | null;
+  /** True iff win_odds is a real live price (not an estimate). */
+  odds_is_live?: boolean;
 }
+
+/** Race lifecycle the app renders against (ADR-0006). */
+export type RaceStatus = "registered" | "open" | "result";
 
 export interface LiveRace {
   race_no: number;
   name?: string | null;
   post_time?: string | null;
+  venue?: string | null;
+  status?: RaceStatus;
   runners?: LiveRunner[];
 }
 

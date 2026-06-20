@@ -27,9 +27,19 @@ export default {
         "access-control-allow-origin": "*",
       };
       try {
-        const row = await env.DB
-          .prepare("SELECT payload FROM live_snapshot WHERE key = 'hanshin'")
-          .first();
+        // ADR-0006: the registration feed publishes under key='current' (all
+        // registered races across venues for the active day). Fall back to the
+        // legacy single-card key='hanshin' so an old publisher still works.
+        const requested = url.searchParams.get("key");
+        const keys = requested ? [requested] : ["current", "hanshin"];
+        let row = null;
+        for (const k of keys) {
+          row = await env.DB
+            .prepare("SELECT payload FROM live_snapshot WHERE key = ?")
+            .bind(k)
+            .first();
+          if (row && row.payload) break;
+        }
         if (row && row.payload) {
           return new Response(row.payload, { headers });
         }

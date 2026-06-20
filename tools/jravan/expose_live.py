@@ -1,0 +1,158 @@
+"""expose_live.py -- publish registered races to the app the moment they exist.
+
+ADR-0006. Near-real-time registration-exposure feed (Mac-only, scrape-sourced).
+
+Each cycle:
+  1. discover the day's registered races (one polite GET of the day index);
+  2. for each, scrape entries (carrying opportunistic estimated odds) and the
+     live win-odds API (empty until the pool opens);
+  3. merge + assemble the live_snapshot document (per-race status: registered ->
+     open -> result);
+  4. upsert it into Cloudflare D1 (key='current') so the app shows the race
+     immediately -- grayed with estimated odds until live odds post.
+
+Run on the Mac (the stationary capture host per ADR-0004); needs CF_* env vars:
+
+    PYTHONPATH=src ./venv64/bin/python tools/jravan/expose_live.py --interval 30
+
+Polite-fetch is enforced inside netkeiba_http (rate floor); --interval is the
+floor between discovery cycles, not a license to hammer. Ctrl-C to stop.
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))  # for publish_d1
+
+from keibamon_core.adapters import netkeiba_http  # noqa: E402
+from keibamon_core.adapters.netkeiba_discovery import discover_card  # noqa: E402
+from keibamon_core.adapters.netkeiba_entries import parse_entries_payload  # noqa: E402
+from keibamon_core.live.snapshot import (  # noqa: E402
+    build_live_snapshot,
+    merge_entries_and_odds,
+)
+from keibamon_core.polling.netkeiba import (  # noqa: E402
+    fetch_odds_payload,
+    parse_odds_payload,
+)
+from publish_d1 import push_to_d1  # noqa: E402
+
+_JST = ZoneInfo("Asia/Tokyo")
+
+# JRA track code (positions 5-6 of the netkeiba id) -> display name.
+VENUE_NAMES = {
+    "01": "Sapporo", "02": "Hakodate", "03": "Fukushima", "04": "Niigata",
+    "05": "Tokyo", "06": "Nakayama", "07": "Chukyo", "08": "Kyoto",
+    "09": "Hanshin", "10": "Kokura",
+}
+
+
+def _today_jst() -> str:
+    return datetime.now(_JST).strftime("%Y%m%d")
+
+
+def _live_odds_by_umaban(nk_id: str, race_id: str) -> dict[int, float]:
+    """Best-effort live win odds keyed by umaban. Empty pre-open (or on error)
+    -- a missing pool must never kill the cycle."""
+    try:
+        payload = fetch_odds_payload(nk_id, "1")
+        recs = parse_odds_payload(
+            payload,
+            race_id=race_id,
+            raw_uri=f"netkeiba:{nk_id}",
+            captured_at=datetime.now(timezone.utc),
+        )
+    except Exception as exc:  # noqa: BLE001 - one race must not kill the loop
+        print(f"  {race_id}: odds fetch skipped ({exc!r})")
+        return {}
+    out: dict[int, float] = {}
+    for r in recs:
+        uma, win = r.get("horse_number"), r.get("win_odds")
+        if uma is not None and win:
+            out[uma] = win
+    return out
+
+
+def _entries_for(nk_id: str) -> list[dict]:
+    """Scrape one shutuba page -> entry runner dicts (carry est_odds)."""
+    try:
+        url = f"https://race.netkeiba.com/race/shutuba.html?race_id={nk_id}"
+        body, _ = netkeiba_http.fetch_payload(url)
+        return parse_entries_payload(body, nk_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  {nk_id}: entries fetch skipped ({exc!r})")
+        return []
+
+
+def build_once(date_yyyymmdd: str) -> dict:
+    """Discover + scrape + assemble one snapshot document for the date."""
+    discovered = discover_card(date_yyyymmdd)
+    races = []
+    for d in discovered:
+        entries = _entries_for(d.numeric_id)
+        odds = _live_odds_by_umaban(d.numeric_id, d.canonical_race_id) if entries else {}
+        runners = merge_entries_and_odds(entries, odds)
+        races.append(
+            {
+                "race_no": d.race_no,
+                "race_id": d.canonical_race_id,
+                "name": d.race_name or f"Race {d.race_no}",
+                "post_time_jst": d.post_time_jst,
+                "venue": VENUE_NAMES.get(d.venue_code, d.venue_code),
+                "runners": runners,
+            }
+        )
+    return build_live_snapshot(races, date=date_yyyymmdd, source="netkeiba-live")
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser(description=__doc__)
+    ap.add_argument("--date", default=None, help="YYYYMMDD (default: today JST)")
+    ap.add_argument("--interval", type=int, default=30, help="seconds between cycles")
+    ap.add_argument("--key", default="current", help="D1 live_snapshot key")
+    ap.add_argument("--once", action="store_true", help="one cycle then exit")
+    ap.add_argument(
+        "--skip-empty",
+        action="store_true",
+        help="don't publish (or overwrite) when no races are registered yet -- "
+        "use for scheduled fires that may land outside a race window",
+    )
+    args = ap.parse_args()
+
+    # Fail fast if creds are missing -- push_to_d1 reads CF_* via os.environ and
+    # would otherwise fail silently every cycle (the cross-shell trap in CLAUDE.md).
+    import os
+
+    missing = [k for k in ("CF_ACCOUNT_ID", "CF_D1_DATABASE_ID", "CF_API_TOKEN") if not os.environ.get(k)]
+    if missing:
+        sys.exit(f"missing required env vars: {', '.join(missing)}")
+
+    print(f"expose_live: publishing registered races every {args.interval}s (Ctrl-C to stop)")
+    while True:
+        date = args.date or _today_jst()
+        try:
+            snap = build_once(date)
+            c = snap["meta"]["counts"]
+            if args.skip_empty and c["total"] == 0:
+                print(f"[{datetime.now(timezone.utc):%H:%M:%S}Z] no races registered — skip")
+            else:
+                push_to_d1(snap, key=args.key)
+                print(
+                    f"[{datetime.now(timezone.utc):%H:%M:%S}Z] published {c['total']} races "
+                    f"({c['registered']} registered, {c['open']} open)"
+                )
+        except Exception as exc:  # noqa: BLE001 - loud, but keep the loop alive
+            print(f"cycle failed: {exc!r}")
+        if args.once:
+            break
+        time.sleep(max(5, args.interval))
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,25 @@
+# Keibamon registration-exposure schedule (ADR-0006) -- install on the Mac with:
+#     crontab tools/jravan/crontab.example
+# then verify with `crontab -l`. Each line fires expose_live_once.sh, which runs
+# ONE fetch+publish cycle and exits (no daemon).
+#
+# TIMES ARE JST. macOS Vixie cron honors CRON_TZ on recent versions; if yours
+# does not, either set the Mac's timezone to Asia/Tokyo (the capture host is
+# JST-aligned anyway) or shift the hour ranges to local time.
+CRON_TZ=Asia/Tokyo
+
+# --- Registration: numbered entries + estimated odds become available ---------
+# Friday is when the weekend's numbered 出馬表 (馬番/枠番) and estimated odds
+# land for the bulk of the card. Sweep every 30 min, 10:00-21:59 JST.
+*/30 10-21 * * 5  $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
+
+# A few special G1s get numbered entries Thursday ~14:00 JST. Hourly Thu 14-17.
+0 14-17 * * 4     $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
+
+# --- Race day: near-real-time odds -------------------------------------------
+# Sat & Sun, every 2 min, 09:00-16:59 JST. 2 min == JRA's own current-race odds
+# update interval (~120s); polling faster gains nothing but load.
+*/2 9-16 * * 6,0  $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
+
+# Catch the last race + just-closed settle on race days at 17:0x.
+0,2,4,6 17 * * 6,0  $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
