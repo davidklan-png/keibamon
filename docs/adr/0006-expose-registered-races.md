@@ -96,10 +96,15 @@ schedule that matches when JRA publishes/updates data (all times JST):
   (09:00–17:00). Polling faster than the source updates buys nothing but load —
   this is the load-bearing constraint that makes a daemon unnecessary.
 
-Implemented as `tools/jravan/crontab.example` (one-shot `expose_live_once.sh`
-per fire, creds sourced from `~/.keibamon/cf.env`, `--skip-empty` so off-window
-fires never clobber a good snapshot). launchd agents are an equivalent
-reboot-surviving alternative if preferred over cron.
+Delivered as **launchd agents** (`deploy/launchd/com.keibamon.expose-{race,
+register}.plist`) — the reboot-surviving, macOS-native choice. Each agent fires a
+short-lived `expose_live_once.sh` on a coarse `StartInterval` (race 120s,
+register 1800s); the tool's **JST window guard** (`--window race|register`, a
+pure tested function) makes every off-window fire a millisecond no-op, so we
+avoid both a 24/7 polling loop in our own process and timezone games in the
+scheduler. Creds come from `~/.keibamon/cf.env`; `--skip-empty` ensures an
+empty discovery never clobbers a good snapshot. (`tools/jravan/crontab.example`
+is kept as a cron equivalent for non-macOS hosts.)
 
 ## Open item — estimated-odds source calibration (Mac)
 
@@ -124,9 +129,10 @@ Sandbox does edits + tests; the feed runs on the Mac and commits land on the Mac
       background refresh.
 - [x] 9 new Python tests pass; 23 frontend tests pass; `tsc` clean; bundle
       builds; `node --check worker.js` clean.
-- [x] One-shot scheduling wired (`expose_live_once.sh` + `crontab.example`):
-      Friday entries sweep + Sat/Sun 2-min race-day odds, matched to JRA's
-      publish/update cadence.
+- [x] One-shot scheduling wired as launchd agents (`deploy/launchd/*.plist` +
+      `expose_live_once.sh`) with a tested JST `--window` guard: Friday entries
+      sweep + Sat/Sun 2-min race-day odds, matched to JRA's publish/update
+      cadence. 10 Python tests (incl. the window guard) pass; plists lint clean.
 - [ ] Estimated-odds source calibrated against a live pre-open capture (Mac).
-- [ ] `crontab.example` installed on the Mac with `~/.keibamon/cf.env` set;
-      confirm a registered race appears on the app Friday, before odds open.
+- [ ] launchd agents loaded on the Mac with `~/.keibamon/cf.env` set; confirm a
+      registered race appears on the app Friday, before odds open.

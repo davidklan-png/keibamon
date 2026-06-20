@@ -23,7 +23,7 @@ import {
   type LiveRace,
 } from "./api";
 
-type Step = "race" | "style" | "intuition" | "tickets" | "explain";
+type Step = "race" | "style" | "tickets" | "explain";
 
 const PERSONALITIES: PersonalityId[] = [
   "safe",
@@ -69,6 +69,8 @@ function App() {
   const [step, setStep] = useState<Step>("race");
   const [runners, setRunners] = useState<Runner[]>([]);
   const [raceLabel, setRaceLabel] = useState<string>("");
+  const [selectedRaceDate, setSelectedRaceDate] = useState<string>("");
+  const [selectedRaceKey, setSelectedRaceKey] = useState<string>("");
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
   const [snapLoading, setSnapLoading] = useState(false);
   const [snapError, setSnapError] = useState<string>("");
@@ -125,7 +127,7 @@ function App() {
         const feature =
           pool.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
           pool[pool.length - 1];
-        applyRace(feature);
+        applyRace(feature, s.meta?.date);
       } else {
         if (runners.length === 0) seedManual();
       }
@@ -137,10 +139,19 @@ function App() {
     }
   }
 
-  function applyRace(race: LiveRace) {
+  function raceDate(race: LiveRace, fallbackDate?: string): string {
+    return race.date ?? fallbackDate ?? snap?.meta?.date ?? "";
+  }
+
+  function raceKey(race: LiveRace, fallbackDate?: string): string {
+    return `${raceDate(race, fallbackDate)}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
+  }
+
+  function applyRace(race: LiveRace, fallbackDate?: string) {
     // Fall back to estimated odds when the pool hasn't opened, so a registered
     // race is playable (grayed + labeled "estimated"). Scratched/odds-less
     // runners get 0 and winProbs treats them as out.
+    const date = raceDate(race, fallbackDate);
     const next = (race.runners || []).map((r) => ({
       uma: String(r.umaban),
       name: r.name ?? null,
@@ -148,6 +159,8 @@ function App() {
     }));
     setRunners(next);
     setRaceLabel(race.name || `${t("race.placeholderRace")} ${race.race_no}`);
+    setSelectedRaceDate(date);
+    setSelectedRaceKey(raceKey(race, date));
     setRaceStatus(race.status ?? (raceHasLiveOdds(race) ? "open" : "registered"));
     setIntuition({});
     // Auto-regen effect (driven by [runners, style, intuition]) will refill
@@ -157,32 +170,21 @@ function App() {
   function seedManual(n = 12) {
     setRunners(seedManualRunners(n));
     setRaceLabel(t("race.placeholderRace"));
+    setSelectedRaceDate("");
+    setSelectedRaceKey("");
     setRaceStatus("manual");
     setIntuition({});
   }
 
-  function addRunner() {
-    setRunners((prev) => [
-      ...prev,
-      { uma: String(prev.length + 1), name: null, odds: 10.0 },
-    ]);
-  }
-
-  function setOdds(uma: string, odds: number) {
-    setRunners((prev) =>
-      prev.map((r) => (r.uma === uma ? { ...r, odds } : r)),
-    );
-  }
-
   // ---------- Derived: de-vigged probs ----------
-  const { p, overround } = useMemo(() => winProbs(runners), [runners]);
+  const { p } = useMemo(() => winProbs(runners), [runners]);
   const allUmas = useMemo(() => runners.map((r) => r.uma), [runners]);
 
   // ---------- Generate recommendations ----------
   //
   // Fix 3: tickets auto-regenerate as soon as a race has >=2 runners, and
-  // again whenever style/intuition change. The TICKETS tab is never a dead
-  // end. Style/Intuition are reframed as optional refinement; the
+  // again whenever style changes. The TICKETS tab is never a dead
+  // end. Style is framed as optional refinement; the
   // "Standard tickets" CTA on the Race screen jumps straight to results.
   function regenerate(overrideStyle?: StyleState, overrideIntuition?: Record<string, IntuitionState>) {
     const s = overrideStyle ?? style;
@@ -216,7 +218,7 @@ function App() {
     setStep("tickets");
   }
 
-  /** Explicit "I want to see tickets now" — used by Intuition Generate + Remix. */
+  /** Explicit "I want to see tickets now" — used by Style + Remix. */
   function goToTickets() {
     regenerate();
     setStep("tickets");
@@ -233,11 +235,6 @@ function App() {
   const steps: { id: Step; label: string; enabled: boolean }[] = [
     { id: "race", label: t("nav.race"), enabled: true },
     { id: "style", label: t("nav.style"), enabled: runners.length >= 2 },
-    {
-      id: "intuition",
-      label: t("nav.intuition"),
-      enabled: runners.length >= 2,
-    },
     {
       id: "tickets",
       label: t("nav.tickets"),
@@ -291,13 +288,10 @@ function App() {
           snap={snap}
           snapLoading={snapLoading}
           snapError={snapError}
-          p={p}
-          overround={overround}
-          intuition={intuition}
+          selectedRaceDate={selectedRaceDate}
+          selectedRaceKey={selectedRaceKey}
           onReload={() => loadLive(false)}
           onSeedManual={() => seedManual()}
-          onAddRunner={addRunner}
-          onSetOdds={setOdds}
           onApplyRace={applyRace}
           onStandard={standardTickets}
           onRefine={() => setStep("style")}
@@ -310,26 +304,7 @@ function App() {
           style={style}
           onChange={setStyle}
           onBack={() => setStep("race")}
-          onNext={() => setStep("intuition")}
           onSeeTickets={goToTickets}
-        />
-      )}
-
-      {step === "intuition" && (
-        <IntuitionScreen
-          runners={runners}
-          p={p}
-          intuition={intuition}
-          onChange={(uma, v) =>
-            setIntuition((prev) => {
-              const next = { ...prev };
-              if (v === null) delete next[uma];
-              else next[uma] = v;
-              return next;
-            })
-          }
-          onBack={() => setStep("style")}
-          onGenerate={goToTickets}
         />
       )}
 
@@ -339,7 +314,6 @@ function App() {
           onRemix={goToTickets}
           onReset={resetToStandard}
           onBackStyle={() => setStep("style")}
-          onBackIntuition={() => setStep("intuition")}
           onExplain={(id) => {
             setActiveTicketId(id);
             setStep("explain");
@@ -369,34 +343,28 @@ interface RaceScreenProps {
   snap: LiveSnapshot | null;
   snapLoading: boolean;
   snapError: string;
-  p: Record<string, number>;
-  overround: number;
-  intuition: Record<string, IntuitionState>;
+  selectedRaceDate: string;
+  selectedRaceKey: string;
   onReload: () => void;
   onSeedManual: () => void;
-  onAddRunner: () => void;
-  onSetOdds: (uma: string, odds: number) => void;
-  onApplyRace: (r: LiveRace) => void;
+  onApplyRace: (r: LiveRace, fallbackDate?: string) => void;
   onStandard: () => void;
   onRefine: () => void;
   raceStatus: string;
 }
 
 function RaceScreen(props: RaceScreenProps) {
-  const { t, tFmt } = useI18n();
+  const { t } = useI18n();
   const {
     runners,
     raceLabel,
     snap,
     snapLoading,
     snapError,
-    p,
-    overround,
-    intuition,
+    selectedRaceDate,
+    selectedRaceKey,
     onReload,
     onSeedManual,
-    onAddRunner,
-    onSetOdds,
     onApplyRace,
     onStandard,
     onRefine,
@@ -407,8 +375,23 @@ function RaceScreen(props: RaceScreenProps) {
   const cardRaces = (snap?.races || []).filter(
     (r) => (r.runners || []).length > 0,
   );
+  const fallbackDate = snap?.meta?.date ?? "";
+  const dateFor = (race: LiveRace) => race.date ?? fallbackDate;
+  const keyFor = (race: LiveRace) =>
+    `${dateFor(race)}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
+  const dateOptions = Array.from(
+    new Set(cardRaces.map(dateFor).filter((date) => date.length > 0)),
+  );
+  const activeDate = dateOptions.includes(selectedRaceDate)
+    ? selectedRaceDate
+    : dateOptions[0] || "";
+  const racesForDate = cardRaces.filter((r) => dateFor(r) === activeDate);
+  const activeRaceKey = racesForDate.some((r) => keyFor(r) === selectedRaceKey)
+    ? selectedRaceKey
+    : racesForDate.length > 0
+      ? keyFor(racesForDate[0])
+      : "";
   const pending = raceStatus === "registered";
-  const taken = overround > 0 ? ((1 - 1 / overround) * 100).toFixed(0) : "-";
 
   return (
     <>
@@ -419,30 +402,50 @@ function RaceScreen(props: RaceScreenProps) {
         </div>
         <div className="grid-2" style={{ marginBottom: 10 }}>
           <select
-            aria-label={t("race.live")}
-            value={raceLabel}
+            aria-label={t("race.date")}
+            value={activeDate}
             onChange={(e) => {
-              const r = cardRaces.find(
-                (x) => (x.name || `${t("race.placeholderRace")} ${x.race_no}`) ===
-                  e.target.value,
-              );
-              if (r) onApplyRace(r);
+              const nextDate = e.target.value;
+              const nextRace = cardRaces.find((r) => dateFor(r) === nextDate);
+              if (nextRace) onApplyRace(nextRace, fallbackDate);
             }}
           >
-            {cardRaces.length === 0 ? (
+            {dateOptions.length === 0 ? (
               <option value="">{t("race.noLive")}</option>
             ) : (
-              cardRaces.map((r) => (
+              dateOptions.map((date) => (
+                <option key={date} value={date}>
+                  {date}
+                </option>
+              ))
+            )}
+          </select>
+          <select
+            aria-label={t("race.live")}
+            value={activeRaceKey}
+            onChange={(e) => {
+              const r = racesForDate.find((x) => keyFor(x) === e.target.value);
+              if (r) onApplyRace(r, fallbackDate);
+            }}
+          >
+            {racesForDate.length === 0 ? (
+              <option value="">{t("race.noLive")}</option>
+            ) : (
+              racesForDate.map((r) => (
                 <option
-                  key={r.race_no}
-                  value={r.name || `${t("race.placeholderRace")} ${r.race_no}`}
+                  key={keyFor(r)}
+                  value={keyFor(r)}
                 >
-                  R{r.race_no} · {r.name || `Race ${r.race_no}`}
+                  R{r.race_no} · {r.name || `Race ${r.race_no}`} ·{" "}
+                  {r.venue || "-"}
                   {raceHasLiveOdds(r) ? "" : ` · ${t("race.pendingTag")}`}
                 </option>
               ))
             )}
           </select>
+        </div>
+        <div className="grid-2" style={{ marginBottom: 10 }}>
+          <div className="hint selected-race">{raceLabel}</div>
           <div className="btn-row">
             <button
               className="btn"
@@ -461,13 +464,6 @@ function RaceScreen(props: RaceScreenProps) {
             {snapError}
           </p>
         )}
-        <p className="hint">
-          {overround > 0 &&
-            tFmt("race.overroundMsg", {
-              taken,
-              sum: overround.toFixed(3),
-            })}
-        </p>
       </section>
 
       {pending && (
@@ -477,45 +473,23 @@ function RaceScreen(props: RaceScreenProps) {
       <section className={`section ${pending ? "is-pending" : ""}`}>
         <div className="section-title">
           <h2>{t("race.runners")}</h2>
-          <button className="btn ghost" onClick={onAddRunner}>
-            + {t("race.addRunner")}
-          </button>
         </div>
         {runners.length === 0 ? (
           <p className="empty">{t("tickets.noRunners")}</p>
         ) : (
           <div className="runners">
             {runners.map((r) => {
-              const pc = p[r.uma] ? (p[r.uma]! * 100).toFixed(1) + "%" : "-";
-              const tag = intuition[r.uma];
               return (
-                <div
-                  key={r.uma}
-                  className={`runner ${tag ? "has-intuition" : ""}`}
-                >
+                <div key={r.uma} className="runner">
                   <span className="uma">{r.uma}</span>
                   <span>
                     <span className="nm">{r.name || `#${r.uma}`}</span>
                     <span className="odds-line">
-                      <input
-                        type="number"
-                        value={r.odds}
-                        min={1}
-                        step={0.1}
-                        onChange={(e) =>
-                          onSetOdds(r.uma, +e.target.value || 0)
-                        }
-                      />
-                      <span className="pc">
-                        {pending ? t("race.estOdds") + " · " : ""}
-                        {t("race.winProb")} {pc}
+                      <span className="odds-value">
+                        {fmt(r.odds, 1)}
                       </span>
+                      {pending && <span className="pc">{t("race.estOdds")}</span>}
                     </span>
-                    {tag && (
-                      <span className={`itag itag--${tag}`}>
-                        {t(`intuition.${tag === "priceHorse" ? "priceHorse" : tag}`)}
-                      </span>
-                    )}
                   </span>
                 </div>
               );
@@ -554,13 +528,12 @@ interface StyleScreenProps {
   style: StyleState;
   onChange: (s: StyleState) => void;
   onBack: () => void;
-  onNext: () => void;
   onSeeTickets: () => void;
 }
 
 function StyleScreen(props: StyleScreenProps) {
   const { t } = useI18n();
-  const { style, onChange, onBack, onNext, onSeeTickets } = props;
+  const { style, onChange, onBack, onSeeTickets } = props;
   return (
     <>
       <section className="section">
@@ -649,7 +622,6 @@ function StyleScreen(props: StyleScreenProps) {
         </details>
       </section>
 
-      {/* Tickets are reachable straight from here — intuition is optional. */}
       <button
         className="btn primary"
         style={{ width: "100%" }}
@@ -661,9 +633,6 @@ function StyleScreen(props: StyleScreenProps) {
         <button className="btn ghost" onClick={onBack}>
           ← {t("nav.race")}
         </button>
-        <button className="btn ghost" onClick={onNext}>
-          + {t("nav.intuition")}
-        </button>
       </div>
     </>
   );
@@ -674,106 +643,6 @@ function cap(s: string) {
 }
 
 // ============================================================================
-// Intuition Screen
-// ============================================================================
-const INTUITION_BUTTONS: { kind: IntuitionState; key: string }[] = [
-  { kind: "like", key: "like" },
-  { kind: "distrust", key: "distrust" },
-  { kind: "priceHorse", key: "priceHorse" },
-  { kind: "anchor", key: "anchor" },
-  { kind: "avoid", key: "avoid" },
-];
-
-interface IntuitionScreenProps {
-  runners: Runner[];
-  p: Record<string, number>;
-  intuition: Record<string, IntuitionState>;
-  onChange: (uma: string, v: IntuitionState) => void;
-  onBack: () => void;
-  onGenerate: () => void;
-}
-
-function IntuitionScreen(props: IntuitionScreenProps) {
-  const { t } = useI18n();
-  const { runners, p, intuition, onChange, onBack, onGenerate } = props;
-  return (
-    <>
-      <section className="section">
-        <div className="section-title">
-          <h2>{t("intuition.title")}</h2>
-          <small>{t("intuition.hint")}</small>
-        </div>
-        {runners.map((r) => {
-          const cur = intuition[r.uma] ?? null;
-          const pc = p[r.uma] ? (p[r.uma]! * 100).toFixed(1) + "%" : "-";
-          return (
-            <div
-              key={r.uma}
-              style={{
-                marginBottom: 12,
-                paddingBottom: 12,
-                borderBottom: "1px solid var(--line)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  marginBottom: 6,
-                }}
-              >
-                <span className="uma" style={{ width: 30, height: 30 }}>
-                  {r.uma}
-                </span>
-                <strong style={{ flex: 1, minWidth: 0 }}>
-                  {r.name || `#${r.uma}`}
-                </strong>
-                <span className="pc">
-                  {t("race.winProb")} {pc}
-                </span>
-              </div>
-              <div className="intuition-picker">
-                {INTUITION_BUTTONS.map((b) => (
-                  <button
-                    key={b.kind}
-                    className={cur === b.kind ? "on" : ""}
-                    onClick={() =>
-                      onChange(r.uma, cur === b.kind ? null : b.kind)
-                    }
-                  >
-                    {t(`intuition.${b.key}`)}
-                  </button>
-                ))}
-                {cur && (
-                  <button className="clear" onClick={() => onChange(r.uma, null)}>
-                    ✕
-                  </button>
-                )}
-              </div>
-              {cur && (
-                <p className="hint" style={{ marginTop: 6 }}>
-                  {t(`intuition.explanation.${cur}`)}
-                </p>
-              )}
-            </div>
-          );
-        })}
-      </section>
-
-      <div className="btn-row">
-        <button className="btn ghost" onClick={onBack}>
-          ← {t("nav.style")}
-        </button>
-        <button className="btn primary" onClick={onGenerate}>
-          {t("tickets.title")} →
-        </button>
-      </div>
-    </>
-  );
-}
-
-// ============================================================================
 // Tickets Screen
 // ============================================================================
 interface TicketsScreenProps {
@@ -781,13 +650,12 @@ interface TicketsScreenProps {
   onRemix: () => void;
   onReset: () => void;
   onBackStyle: () => void;
-  onBackIntuition: () => void;
   onExplain: (id: string) => void;
 }
 
 function TicketsScreen(props: TicketsScreenProps) {
   const { t } = useI18n();
-  const { tickets, onRemix, onReset, onBackStyle, onBackIntuition, onExplain } = props;
+  const { tickets, onRemix, onReset, onBackStyle, onExplain } = props;
   if (tickets.length === 0) {
     // Only reachable when a real regenerate() returned 0 tickets — i.e. the
     // current constraints (typically too many "avoid" tags) are unsolvable.
@@ -807,9 +675,6 @@ function TicketsScreen(props: TicketsScreenProps) {
         <div className="btn-row">
           <button className="btn ghost" onClick={onBackStyle}>
             ← {t("tickets.backToStyle")}
-          </button>
-          <button className="btn ghost" onClick={onBackIntuition}>
-            ← {t("tickets.backToIntuition")}
           </button>
         </div>
       </>
@@ -876,9 +741,6 @@ function TicketsScreen(props: TicketsScreenProps) {
       <div className="btn-row" style={{ marginTop: 12 }}>
         <button className="btn ghost" onClick={onBackStyle}>
           ← {t("tickets.backToStyle")}
-        </button>
-        <button className="btn ghost" onClick={onBackIntuition}>
-          ← {t("tickets.backToIntuition")}
         </button>
       </div>
     </>

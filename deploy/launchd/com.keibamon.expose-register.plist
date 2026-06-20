@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keibamon registration agent (ADR-0006).
+
+  Fires every 1800s (30 min); the tool's JST window guard (window=register)
+  makes every fire a no-op except Thu 14:00-17:59 JST (special-G1 numbered
+  entries) and Fri 10:00-21:59 JST (weekend numbered entries + estimated odds),
+  when it discovers registered races and publishes them grayed with estimates.
+  Not a long-lived poller; each fire is a short-lived process that exits.
+
+  Install (adjust paths if your home/repo differ):
+    cp deploy/launchd/com.keibamon.expose-register.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.keibamon.expose-register.plist
+  Remove:
+    launchctl unload -w ~/Library/LaunchAgents/com.keibamon.expose-register.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.keibamon.expose-register</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dklan/projects/personal/Keibamon/tools/jravan/expose_live_once.sh</string>
+    <string>--window</string>
+    <string>register</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>1800</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/dklan/.keibamon/expose_live.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dklan/.keibamon/expose_live.log</string>
+</dict>
+</plist>

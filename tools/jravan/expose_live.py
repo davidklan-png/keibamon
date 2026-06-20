@@ -57,6 +57,29 @@ def _today_jst() -> str:
     return datetime.now(_JST).strftime("%Y%m%d")
 
 
+def in_window(now_jst: datetime, window: str) -> bool:
+    """Is ``now`` (JST) inside the named publish window? (ADR-0006 scheduling.)
+
+    Pure + testable so the launchd agents can fire on a coarse StartInterval and
+    this gate decides whether there is actually anything to do — off-window fires
+    exit in milliseconds, and a stray manual/launchd run can't publish at the
+    wrong time. Weekday(): Mon=0 .. Sun=6.
+
+      register : Thu 14:00-17:59 (special-G1 numbered entries) OR
+                 Fri 10:00-21:59 (weekend numbered entries + estimated odds)
+      race     : Sat/Sun 09:00-16:59 (race-day odds; JRA updates ~every 120s)
+      any      : always (no gate)
+    """
+    if window in ("", "any"):
+        return True
+    wd, h = now_jst.weekday(), now_jst.hour
+    if window == "race":
+        return wd in (5, 6) and 9 <= h < 17
+    if window == "register":
+        return (wd == 3 and 14 <= h < 18) or (wd == 4 and 10 <= h < 22)
+    return True  # unknown window name -> don't block
+
+
 def _live_odds_by_umaban(nk_id: str, race_id: str) -> dict[int, float]:
     """Best-effort live win odds keyed by umaban. Empty pre-open (or on error)
     -- a missing pool must never kill the cycle."""
@@ -123,6 +146,12 @@ def main() -> None:
         help="don't publish (or overwrite) when no races are registered yet -- "
         "use for scheduled fires that may land outside a race window",
     )
+    ap.add_argument(
+        "--window",
+        default="any",
+        choices=["any", "race", "register"],
+        help="only act inside this JST publish window; exit fast otherwise",
+    )
     args = ap.parse_args()
 
     # Fail fast if creds are missing -- push_to_d1 reads CF_* via os.environ and
@@ -135,6 +164,13 @@ def main() -> None:
 
     print(f"expose_live: publishing registered races every {args.interval}s (Ctrl-C to stop)")
     while True:
+        now_jst = datetime.now(_JST)
+        if not in_window(now_jst, args.window):
+            print(f"[{now_jst:%a %H:%M} JST] outside {args.window} window — skip")
+            if args.once:
+                break
+            time.sleep(max(5, args.interval))
+            continue
         date = args.date or _today_jst()
         try:
             snap = build_once(date)

@@ -15,6 +15,7 @@ export interface LiveRunner {
 export type RaceStatus = "registered" | "open" | "result";
 
 export interface LiveRace {
+  date?: string;
   race_no: number;
   name?: string | null;
   post_time?: string | null;
@@ -24,7 +25,7 @@ export interface LiveRace {
 }
 
 export interface LiveSnapshot {
-  meta?: { status?: string; message?: string; updated_at?: string };
+  meta?: { status?: string; message?: string; updated_at?: string; date?: string };
   races?: LiveRace[];
 }
 

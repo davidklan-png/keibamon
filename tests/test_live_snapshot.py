@@ -24,6 +24,22 @@ from keibamon_core.live.snapshot import (
 FIXTURES = Path(__file__).parent / "fixtures" / "netkeiba"
 
 
+def _load_expose_live():
+    """tools/ is not a package -- load expose_live by path (same pattern as
+    test_publish_d1)."""
+    import importlib.util
+    import sys
+
+    root = Path(__file__).resolve().parent.parent
+    sys.path.insert(0, str(root / "tools" / "jravan"))  # for publish_d1
+    spec = importlib.util.spec_from_file_location(
+        "expose_live", root / "tools" / "jravan" / "expose_live.py"
+    )
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_runner_registered_keeps_estimate_only():
     r = build_runner({"umaban": 3, "name": "X", "est_odds": 4.2})
     assert r["win_odds"] is None
@@ -94,6 +110,31 @@ def test_est_odds_parser_returns_none_for_placeholder():
     runners = parse_entries_payload(html, "202605030611")
     assert len(runners) >= 8  # real card parsed
     assert all(r["est_odds"] is None for r in runners)  # all placeholders
+
+
+def test_publish_window_guard():
+    """ADR-0006 scheduling: launchd fires coarsely; the guard decides if there's
+    anything to do, so off-window fires are no-ops."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    jst = ZoneInfo("Asia/Tokyo")
+    win = _load_expose_live().in_window
+
+    def at(y, mo, d, h):
+        return datetime(y, mo, d, h, 0, tzinfo=jst)
+
+    # register: Fri 10:00-21:59 and Thu 14:00-17:59
+    assert win(at(2026, 6, 19, 11), "register") is True   # Fri
+    assert win(at(2026, 6, 19, 9), "register") is False   # Fri too early
+    assert win(at(2026, 6, 18, 15), "register") is True   # Thu
+    assert win(at(2026, 6, 18, 12), "register") is False  # Thu too early
+    # race: Sat/Sun 09:00-16:59
+    assert win(at(2026, 6, 20, 10), "race") is True        # Sat
+    assert win(at(2026, 6, 20, 17), "race") is False       # Sat post-window
+    assert win(at(2026, 6, 19, 12), "race") is False       # Fri not a race day
+    # any: never gated
+    assert win(at(2026, 6, 17, 3), "any") is True
 
 
 def test_est_odds_parser_captures_rendered_number():

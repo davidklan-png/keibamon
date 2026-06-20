@@ -325,11 +325,6 @@ select:focus {
   background: #0d1b15;
 }
 
-.runner.has-intuition {
-  border-color: var(--gold);
-  background: rgba(224, 179, 65, 0.08);
-}
-
 .uma {
   min-height: 30px;
   display: flex;
@@ -358,91 +353,14 @@ select:focus {
   margin-top: 4px;
 }
 
-.odds-line input {
-  width: 70px;
-  min-height: 28px;
-  padding: 2px 5px;
+.odds-value {
   color: var(--gold);
   font: 800 12px/1 ui-monospace, monospace;
-  text-align: right;
-  background: #0d1b15;
-  border: 1px solid var(--line);
-  border-radius: 6px;
 }
 
 .pc {
   color: var(--muted);
   font: 700 10px/1 ui-monospace, monospace;
-}
-
-.itag {
-  display: inline-flex;
-  align-items: center;
-  margin-top: 4px;
-  padding: 3px 7px;
-  border-radius: 999px;
-  font: 800 10px/1 ui-monospace, monospace;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-}
-
-.itag--like {
-  color: var(--turf);
-  background: rgba(57, 192, 122, 0.12);
-  border: 1px solid rgba(57, 192, 122, 0.34);
-}
-
-.itag--distrust {
-  color: var(--warn);
-  background: rgba(224, 122, 85, 0.12);
-  border: 1px solid rgba(224, 122, 85, 0.32);
-}
-
-.itag--priceHorse {
-  color: var(--aqua);
-  background: rgba(122, 215, 207, 0.12);
-  border: 1px solid rgba(122, 215, 207, 0.32);
-}
-
-.itag--avoid {
-  color: var(--danger);
-  background: rgba(239, 118, 122, 0.12);
-  border: 1px solid rgba(239, 118, 122, 0.32);
-}
-
-.itag--anchor {
-  color: var(--gold);
-  background: rgba(224, 179, 65, 0.12);
-  border: 1px solid rgba(224, 179, 65, 0.32);
-}
-
-/* ---------- Intuition picker ---------- */
-.intuition-picker {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.intuition-picker button {
-  min-height: 36px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: #0d1b15;
-  color: var(--muted);
-  font: 800 10.5px/1 ui-monospace, monospace;
-  letter-spacing: 0.04em;
-}
-
-.intuition-picker button.on {
-  background: var(--gold);
-  color: #2a1f00;
-  border-color: transparent;
-}
-
-.intuition-picker button.clear {
-  color: var(--danger);
 }
 
 /* ---------- Ticket cards ---------- */

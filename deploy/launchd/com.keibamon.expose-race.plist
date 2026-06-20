@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keibamon race-day odds agent (ADR-0006).
+
+  Fires every 120s; the tool's JST window guard (window=race) makes every fire
+  a no-op except Sat/Sun 09:00-16:59 JST, when it scrapes live odds and republishes.
+  120s matches JRA's own current-race odds update interval, so this is as
+  "near-real-time" as the source allows. Not a long-lived poller; each fire is a
+  short-lived process that exits.
+
+  Install (adjust paths if your home/repo differ):
+    cp deploy/launchd/com.keibamon.expose-race.plist ~/Library/LaunchAgents/
+    launchctl load -w ~/Library/LaunchAgents/com.keibamon.expose-race.plist
+  Remove:
+    launchctl unload -w ~/Library/LaunchAgents/com.keibamon.expose-race.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.keibamon.expose-race</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dklan/projects/personal/Keibamon/tools/jravan/expose_live_once.sh</string>
+    <string>--window</string>
+    <string>race</string>
+  </array>
+
+  <key>StartInterval</key>
+  <integer>120</integer>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/dklan/.keibamon/expose_live.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dklan/.keibamon/expose_live.log</string>
+</dict>
+</plist>
