@@ -1,6 +1,6 @@
 # ADR-0007: "My Tickets" — committed-bet log + social surface
 
-- **Status:** Accepted (2026-06-21); **Phase 3 IN REVIEW** (2026-06-21)
+- **Status:** Accepted (2026-06-21); **Phase 4 IN REVIEW** (2026-06-21)
 - **Date:** 2026-06-21
 - **Deciders:** David Klan
 - **Builds on:** the `/api/live` D1 projection from [[ADR-0003]]; the
@@ -15,9 +15,9 @@
 |-------|-------|-------|
 | 0 — UI on localStorage | Shipped (commit on main) | `frontend/src/App.tsx` `Step="mine"` |
 | 1 — Clerk auth + identity skeleton | Merged | `frontend/src/auth/*`, `workers/social/` |
-| **2 — Per-user persistence (social D1)** | **In review** (`feat/adr-0007-phase2-persistence`) | `workers/social/migrations/0002_tickets.sql`, `frontend/src/lib/settle.ts`, `frontend/src/auth/{socialClient,ticketQueue}.ts` |
-| **3 — Social (follows, cheers, profiles, feed, share)** | **In review** (`feat/adr-0007-phase3-social`) | `workers/social/migrations/0003_social.sql`, `frontend/src/lib/share.ts`, `frontend/src/auth/socialClient.ts`, `frontend/src/App.tsx` |
-| 4 — Hardening (rate limits, ToS) | Pending | ADR-0007 §Phase 4 |
+| 2 — Per-user persistence (social D1) | Merged | `workers/social/migrations/0002_tickets.sql`, `frontend/src/lib/settle.ts`, `frontend/src/auth/{socialClient,ticketQueue}.ts` |
+| 3 — Social (follows, cheers, profiles, feed, share) | Merged | `workers/social/migrations/0003_social.sql`, `frontend/src/lib/share.ts`, `frontend/src/auth/socialClient.ts`, `frontend/src/App.tsx` |
+| **4 — Hardening (settle sweep, dead-heat/scratch, block/report, fonts, snapshots)** | **In review** (`feat/adr-0007-phase4-hardening`) | `workers/social/{migrations/0004_blocks_reports.sql,src/{settle,sweep}.ts,wrangler.jsonc}`, `frontend/{public/fonts/,src/app.snapshot.test.tsx,src/styles.css}` |
 
 ## Context
 
@@ -449,3 +449,101 @@ for Phase 4).
   follow-up #1) — still the critical-path dependency for the whole social
   loop; without it, no ticket settles in prod and the cheer→share moment
   never fires for real users.
+
+## Phase 4 — Decisions made in implementation (2026-06-21)
+
+Phase 4 closes reliability, correctness, and privacy/safety gaps. **No new
+product surface.** Scope cuts decided up front: D1 rate limits stay (no KV
+token bucket), HTML-string snapshots only (no Playwright CSS-pixel), server-
+side card renderer deferred. The 11 architecture decisions are documented in
+`docs/runbooks/phase4-hardening.md` and summarized here:
+
+1. **Settle resolver's canonical home is the Worker; frontend re-exports
+   via shim.** Worker owns the sweep (server-side authority); no fork.
+   Vite + tsc resolve the cross-dir relative import; frontend's richer
+   `Ticket` is structurally compatible with the minimal resolver input.
+2. **Dead-heat via `placings?:{pos,umabans[]}[]`; resolver enumerates
+   orderings.** `finishers: number[]` cannot express 同着 (two horses at
+   pos=2). Placings-as-sets is the JRA semantics; `expandPlacings` yields
+   the cartesian product across tied positions and a line hits if it
+   matches ANY expanded ordering.
+3. **Scratch via `scratched?:number[]`; refunded variant.** JRA refunds
+   all lines containing a scratched horse (返還). Today a scratch silently
+   mis-settles as MISS. New `{state:"refunded", reason:"scratched"}`
+   surfaces the refund path without polluting `won`/`miss`.
+4. **Cron Trigger every 5 min UTC.** Client `/api/live` poll is the fast
+   path; sweep is the offline-backstop. CF Cron Triggers are the lightest
+   mechanism — no DO, no Queue.
+5. **Sweep → `/api/live` via `LIVE_BASE` secret + `fetch()`.** Worker has
+   no service binding to the racing Worker today; adding one would require
+   editing root `wrangler.jsonc` (forbidden). A secret is in-bounds — only
+   the social Worker is touched.
+6. **Rate limits: extend D1 coverage, skip KV.** D1 minute-bucket counter
+   works; KV token bucket deferred (Phase 5 backlog).
+7. **Asymmetric one-way block (Twitter model).** `INSERT` = blocked;
+   `DELETE` = unblock. Block severs existing follows in both directions
+   and prevents future follow/cheer either direction. Feed filter is
+   one-way (only hides B from A's feed); B can still see A's tickets.
+8. **Reports are write-only.** `reports(reporter_id, target_type,
+   target_id, reason, created_at)`. No moderation review UI — store for
+   later. Surfacing a queue is Phase 5 scope.
+9. **Self-host fonts as woff2 subsets.** Removes the only runtime
+   third-party request. ~7 files, ~460 KB uncompressed, ~140 KB after
+   brotli. Subsetting to ~660 codepoints (ASCII + hiragana + katakana +
+   app kanji + half-width kana) keeps each weight small. OFL 1.1 license
+   bundled.
+10. **Server-side card renderer: DEFER.** Client `html-to-image` works;
+    no data justifying the work. Phase 5 backlog.
+11. **Visual regression via HTML-string snapshots, not Playwright.**
+    Cheaper; catches DOM + i18n regressions. CSS-pixel drift deferred
+    (acknowledged gap). Scope reduced to 4 baselines (auth surface)
+    because the 8 legacy screens live inside App.tsx as inline functions
+    — pulling them out is a Phase 5 refactor.
+
+### Phase 4 diff scope
+
+`git diff main...feat/adr-0007-phase4-hardening --stat` shows only
+`frontend/`, `workers/social/`, `docs/`. Highlights:
+
+- `workers/social/migrations/0004_blocks_reports.sql` (new) — `blocks` +
+  `reports` tables.
+- `workers/social/src/settle.ts` (new) — extracted from
+  `frontend/src/lib/settle.ts`; dead-heat + scratch + refunded variant.
+- `workers/social/src/sweep.ts` (new) — cron settle sweep, idempotent +
+  bounded at 200 tickets/run.
+- `workers/social/src/index.ts` (extended) — `{ fetch, scheduled }`
+  default export; block/report routes; `RATE_LIMITS` extended; feed
+  filter gains `NOT EXISTS blocks`; follow/cheer block guards.
+- `workers/social/wrangler.jsonc` — `triggers.crons = ["*/5 * * * *"]`.
+- `workers/social/test/{settle,sweep}.test.ts` (new) — port + new
+  fixtures (dead-heat, scratch, refund, sweep cases).
+- `workers/social/test/social.test.ts` (extended) — block/report
+  branches + 14 new Phase 4 tests.
+- `frontend/src/lib/settle.ts` (becomes shim) + `settle.test.ts`
+  (extended with dead-heat/scratch/refund fixtures).
+- `frontend/src/auth/socialClient.ts` (extended) — `block`, `unblock`,
+  `report`.
+- `frontend/src/App.tsx` — Block/Report buttons + report modal.
+- `frontend/src/i18n/{en,ja}.ts` — `profile.{block,unblock,blocked,
+  report,reportReason,reportSent,cannotBlockSelf}`.
+- `frontend/public/fonts/*.woff2` (7 new) + `LICENSE.txt`.
+- `frontend/src/styles.css` — 7 `@font-face` rules replace `@import`.
+- `frontend/src/app.snapshot.test.tsx` (new) + `__snapshots__/` (4 files).
+- `docs/runbooks/phase4-hardening.md` (new); this ADR updated.
+
+NOT touched: root `wrangler.jsonc`, `src/worker.js`, `/api/live`,
+`tools/jravan/`, `ingestion/`, `src/keibamon_core/`, the racing D1.
+
+### Phase 5 backlog (carried forward)
+
+- **KV token bucket rate limits** (Phase 4 backlog #1 — partially closed:
+  extended D1 coverage to `block`/`report`; KV deferred).
+- **Server-side card renderer** for share image (Phase 4 backlog #4 —
+  deferred, no data justifying the work).
+- **CSS-pixel visual regression** with Playwright (Phase 4 used HTML-string
+  snapshots; covers DOM regressions but not pixel drift, and only the auth
+  surface — the 8 legacy screens need extraction from App.tsx first).
+- **Moderation review queue UI** (Phase 4 stores reports but doesn't
+  surface them for review).
+- **Drive `/api/live` to emit result** (Phase 2 follow-up #1 — racing-tier
+  dependency; the sweep has nothing to settle against without this).
