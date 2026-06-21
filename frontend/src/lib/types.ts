@@ -145,6 +145,43 @@ export interface TicketOwner {
   initialJa: string;
 }
 
+/**
+ * Phase 3: the server-side flat user shape returned alongside tickets in the
+ * feed and on the profile endpoint. NEVER carries clerk_user_id / email /
+ * age_verified — those stay on the Worker.
+ */
+export interface PublicUser {
+  id: string;
+  handle: string | null;
+  display_name: string | null;
+  avatar: string | null;
+}
+
+/** Phase 3 palette used by ownerFromUser — stable per user.id hash. */
+const OWNER_COLORS = ["#FF6A6A", "#2D8CF0", "#E59A14", "#15A862", "#9B59B6", "#1ABC9C"];
+
+/**
+ * Phase 3 (Decision 9): client-side derivation of a TicketOwner from a flat
+ * PublicUser. Keeps the owner shape compatible with Phase 0/2 hardcoded owners
+ * (`Rin/リン`) and avoids duplicating i18n-aware fields in the DB.
+ *
+ * The color is picked by a deterministic hash of `user.id` so a given user
+ * always renders with the same swatch (stable across feeds/devices).
+ */
+export function ownerFromUser(user: PublicUser): TicketOwner {
+  const display = user.display_name || user.handle || "player";
+  const initial = display.charAt(0).toUpperCase() || "?";
+  // Latin / kana are both single-codepoint at char(0); for CJK we fall back
+  // to the same char (it renders fine in the avatar circle).
+  const initialJa = initial;
+  let hash = 0;
+  for (let i = 0; i < user.id.length; i++) {
+    hash = (hash * 31 + user.id.charCodeAt(i)) | 0;
+  }
+  const color = OWNER_COLORS[Math.abs(hash) % OWNER_COLORS.length];
+  return { en: display, ja: display, color, initial, initialJa };
+}
+
 export interface CommittedTicket {
   id: string; // "kb-" + base36 timestamp
   serial: string; // "KB-XXXXXX" (display only)
@@ -157,5 +194,11 @@ export interface CommittedTicket {
   race: RaceSnapshot;
   owner: "you" | TicketOwner;
   claps: number;
+  /** Phase 3: server-side cheers count (authoritative when present). */
+  cheers?: number;
+  /** Phase 3: did the signed-in viewer cheer this ticket? */
+  cheeredByMe?: boolean;
+  /** Phase 3: flat owner object from the social Worker (feed/profile path). */
+  ownerUser?: PublicUser;
   createdAt: number;
 }

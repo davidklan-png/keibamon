@@ -31,9 +31,19 @@ import { AgeGate } from "./auth/AgeGate";
 import { useAuth } from "./auth/AuthProvider";
 import {
   postMe,
+  postMeTyped,
   listTickets,
   postTicket,
   patchTicket,
+  follow as socialFollow,
+  unfollow as socialUnfollow,
+  cheer as socialCheer,
+  uncheer as socialUncheer,
+  getProfile,
+  getFriendsOnRace,
+  getFriendsOnCard,
+  type PublicProfile,
+  type FriendsAvatar,
 } from "./auth/socialClient";
 import {
   loadPending,
@@ -42,6 +52,7 @@ import {
 } from "./auth/ticketQueue";
 import { resolveTicket, type RaceResult } from "./lib/settle";
 import { storageKeyFor } from "./auth/storageKey";
+import { exportTicketCard, type ShareOutcome } from "./lib/share";
 
 type Step = "mine" | "race" | "style" | "tickets" | "explain";
 
@@ -996,7 +1007,7 @@ function ExplainScreen(props: ExplainScreenProps) {
 // /api/live poll (NOT the prototype's 3s timer), and committed tickets persist
 // to localStorage as a stand-in until the Clerk + social-D1 backend lands.
 // ============================================================================
-type MtView = "feed" | "new" | "detail";
+type MtView = "feed" | "new" | "detail" | "profile";
 type DriftDir = "firm" | "drift" | "steady";
 
 const MT_MOOD_COLOR: Record<MoodKey, string> = {
@@ -1017,6 +1028,14 @@ function mtStateColor(s: CommittedState): string {
     : s === "won"
       ? "var(--gold-amber)"
       : "var(--miss)";
+}
+
+/** Phase 3 — deterministic avatar color from a string (handle/display name). */
+const AVATAR_COLORS = ["#FF6A6A", "#2D8CF0", "#E59A14", "#15A862", "#9B59B6", "#1ABC9C"];
+function avatarColor(seed: string): string {
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
 }
 
 function mtSep(type: BetType): string {
@@ -1136,6 +1155,20 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
 
   const [view, setView] = useState<MtView>("feed");
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Phase 3 — social state.
+  const [selectedProfileHandle, setSelectedProfileHandle] = useState<string | null>(null);
+  const [profile, setProfile] = useState<PublicProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [friendsOnCard, setFriendsOnCard] = useState<{ count: number; avatars: FriendsAvatar[] }>({ count: 0, avatars: [] });
+  const [friendsOnRace, setFriendsOnRace] = useState<Record<string, { count: number; avatars: FriendsAvatar[] }>>({});
+  const [handlePromptOpen, setHandlePromptOpen] = useState(false);
+  const [handleDraft, setHandleDraft] = useState("");
+  const [handleError, setHandleError] = useState<string | null>(null);
+  const [handleSetting, setHandleSetting] = useState(false);
+  // The signed-in viewer's handle (null = hasn't set one yet → prompt on social action).
+  const [viewerHandle, setViewerHandle] = useState<string | null>(null);
+  // Ref to the detail-card root so the share button can raster it.
+  const detailCardRef = useRef<HTMLDivElement | null>(null);
   // Initial state is the localStorage CACHE so the feed renders instantly on
   // signed-in load (read-through). The first server GET below replaces it.
   const [tickets, setTickets] = useState<CommittedTicket[]>(() =>
@@ -1363,6 +1396,53 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     );
   }
 
+  // ---- Phase 3 — refresh friends counts on the existing /api/live poll
+  // cycle. NO new timer (Decision 7): this effect fires when `snap` mutates,
+  // which it does every 45s via the App-level refreshSnap interval.
+  useEffect(() => {
+    if (!userId) return;
+    let cancelled = false;
+    void (async () => {
+      const token = await getToken();
+      if (cancelled || !token) return;
+      // Today's-card strip: union of every raceKey in the current snapshot.
+      const raceKeys = (snap?.races || [])
+        .filter((r) => (r.runners || []).length > 0)
+        .map((r) => mtRaceKey(r, fallbackDate));
+      const card = await getFriendsOnCard(token, raceKeys);
+      if (!cancelled && card.ok) setFriendsOnCard(card.data);
+      // Per-race counts: fetch for each raceKey with tickets we care about.
+      // Cheap upper bound — the snapshot rarely has >12 races.
+      const perRace: Record<string, { count: number; avatars: FriendsAvatar[] }> = {};
+      for (const rk of raceKeys.slice(0, 12)) {
+        const r = await getFriendsOnRace(token, rk);
+        if (r.ok) perRace[rk] = r.data;
+      }
+      if (!cancelled) setFriendsOnRace(perRace);
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, userId]);
+
+  // ---- Phase 3 — read the viewer's handle on sign-in. If null, the first
+  // social action will trip the set-handle prompt.
+  useEffect(() => {
+    if (!userId) {
+      setViewerHandle(null);
+      return;
+    }
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      // postMe with no body upserts + returns the row (Phase 1 contract).
+      const p = await postMe(token);
+      if (p?.handle) setViewerHandle(p.handle);
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userId]);
+
   // ---- AUTO-SETTLE (Phase 2): driven by the /api/live poll, not a button.
   // For each OPEN ticket, find its race; when that race reports
   // status:'result', resolve win/miss via lib/settle and PATCH the ticket
@@ -1461,26 +1541,174 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     setToast(text);
     window.setTimeout(() => setToast(""), 1900);
   }
+
+  /**
+   * Phase 3 — cheer toggle. Optimistic flip; reconcile to server-authoritative
+   * count on response. Second tap while already cheering = uncheer.
+   *
+   * Won-only + self-cheer are enforced at the server; a 409 surfaces a friendly
+   * message and rolls back the optimistic update.
+   */
   function cheer(id: string) {
-    // Phase 2: claps stay local-only (Phase 3 will sync them across users).
-    // The new value is PATCHed to the server best-effort so the cache
-    // survives a reload, but never blocks the UI.
-    const next = tickets.map((tk) =>
-      tk.id === id ? { ...tk, claps: tk.claps + 1 } : tk,
+    const tk = tickets.find((x) => x.id === id);
+    if (!tk) return;
+    // Gate: prompt for handle on first social action.
+    if (!viewerHandle) {
+      setHandlePromptOpen(true);
+      return;
+    }
+    const wasCheering = !!tk.cheeredByMe;
+    const next = tickets.map((x) =>
+      x.id === id
+        ? {
+            ...x,
+            cheeredByMe: !wasCheering,
+            cheers: Math.max(0, (x.cheers ?? x.claps ?? 0) + (wasCheering ? -1 : 1)),
+          }
+        : x,
     );
     setTickets(next);
     mirrorToCache(next);
-    setBurstId(id);
-    window.setTimeout(() => setBurstId(null), 1100);
-    if (userId) {
-      void (async () => {
-        const tk = next.find((x) => x.id === id);
-        if (!tk) return;
-        const token = await getToken();
-        if (!token) return;
-        await patchTicket(token, id, { claps: tk.claps });
-      })();
+    if (!wasCheering) {
+      setBurstId(id);
+      window.setTimeout(() => setBurstId(null), 1100);
     }
+    if (!userId) return;
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      const r = !wasCheering
+        ? await socialCheer(token, id)
+        : await socialUncheer(token, id);
+      if (r.ok) {
+        const settled = tickets.map((x) =>
+          x.id === id
+            ? { ...x, cheers: r.data.count, cheeredByMe: r.data.cheeredByMe }
+            : x,
+        );
+        setTickets(settled);
+        mirrorToCache(settled);
+      } else if (r.err.kind === "http" && r.err.status === 409) {
+        // likely self-cheer or won-only; re-fetch to learn which.
+        flash(t("mine.cannotCheerOwn"));
+        // Roll back.
+        const rolled = tickets.map((x) =>
+          x.id === id ? { ...x, cheeredByMe: wasCheering } : x,
+        );
+        setTickets(rolled);
+        mirrorToCache(rolled);
+      } else if (r.err.kind === "http" && r.err.status === 429) {
+        flash(t("mine.rateLimited"));
+      }
+    })();
+  }
+
+  /** Phase 3 — follow/unfollow a user by id. Used by ProfileView. */
+  function doFollow(targetUserId: string, targetHandle: string | null) {
+    if (!viewerHandle && targetHandle) {
+      // Following doesn't strictly need the caller's handle, but the prompt
+      // gives a better UX (the followee sees a real handle in their follower list).
+      setHandlePromptOpen(true);
+      return;
+    }
+    // Optimistic: we'll flip from the current profile.is_following.
+    setProfile((p) =>
+      p ? { ...p, is_following: true, follower_count: p.follower_count + 1 } : p,
+    );
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      const r = await socialFollow(token, targetUserId);
+      if (!r.ok && r.err.kind === "http" && r.err.status === 403) {
+        flash(t("profile.blockedSelfFollow"));
+      }
+      // Reconcile by re-reading the profile (server-authoritative).
+      if (targetHandle) void loadProfile(targetHandle, true);
+    })();
+  }
+  function doUnfollow(targetUserId: string, targetHandle: string | null) {
+    setProfile((p) =>
+      p
+        ? {
+            ...p,
+            is_following: false,
+            follower_count: Math.max(0, p.follower_count - 1),
+          }
+        : p,
+    );
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      await socialUnfollow(token, targetUserId);
+      if (targetHandle) void loadProfile(targetHandle, true);
+    })();
+  }
+
+  /**
+   * Phase 3 — fetch a public profile by handle. `force` re-fetches even if the
+   * handle matches the currently-loaded profile (used after a follow/unfollow).
+   */
+  async function loadProfile(handle: string, force = false): Promise<void> {
+    if (!force && profile?.handle === handle && profile) return;
+    setProfileLoading(true);
+    const token = await getToken();
+    const r = await getProfile(token, handle);
+    if (r.ok) {
+      setProfile(r.data);
+    } else {
+      setProfile(null);
+    }
+    setProfileLoading(false);
+  }
+
+  function openProfile(handle: string) {
+    setSelectedProfileHandle(handle);
+    setView("profile");
+    void loadProfile(handle);
+  }
+
+  /**
+   * Phase 3 — save a handle for the signed-in viewer. On 409 (taken) surface
+   * inline; on success close the prompt and proceed with whatever social
+   * action triggered it.
+   */
+  async function saveHandle() {
+    const h = handleDraft.trim();
+    if (!h || !/^[a-zA-Z0-9_]+$/.test(h)) {
+      setHandleError(t("mine.setHandlePlaceholder"));
+      return;
+    }
+    setHandleSetting(true);
+    setHandleError(null);
+    const token = await getToken();
+    const r = await postMeTyped(token, { handle: h });
+    setHandleSetting(false);
+    if (r.ok) {
+      setViewerHandle(r.data.handle ?? null);
+      setHandlePromptOpen(false);
+      setHandleDraft("");
+    } else if (r.err.kind === "http" && r.err.status === 409) {
+      setHandleError(t("mine.setHandlePlaceholder") + " — taken");
+    } else {
+      setHandleError(t("mine.shareFailed"));
+    }
+  }
+
+  /** Phase 3 — export the detail card as a PNG (share or download). */
+  async function doShare() {
+    if (!detailCardRef.current) return;
+    let outcome: ShareOutcome;
+    try {
+      outcome = await exportTicketCard(detailCardRef.current);
+    } catch {
+      flash(t("mine.shareFailed"));
+      return;
+    }
+    if (outcome.kind === "none") {
+      flash(t("mine.shareFailed"));
+    }
+    // 'shared' / 'downloaded' are silent successes — the OS already showed
+    // the share sheet or saved the file.
   }
   // DEV-ONLY manual trigger. In production, settlement is driven by the
   // /api/live poll (see the auto-settle effect above). Gated behind
@@ -1601,22 +1829,29 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         </header>
 
         <div className="mt-feed">
-          <div className="mt-community">
-            <div className="mt-avatars">
-              {community.map((f, i) => (
-                <div
-                  key={i}
-                  className="mt-avatar"
-                  style={{ background: f.color }}
-                >
-                  {f.initial}
-                </div>
-              ))}
+          {friendsOnCard.count > 0 && (
+            <div className="mt-community">
+              <div className="mt-avatars">
+                {friendsOnCard.avatars.slice(0, 8).map((f, i) => (
+                  <div
+                    key={i}
+                    className="mt-avatar"
+                    style={{ background: avatarColor(f.handle ?? f.display_name ?? "") }}
+                    onClick={() =>
+                      f.handle && openProfile(f.handle)
+                    }
+                    role={f.handle ? "button" : undefined}
+                    tabIndex={f.handle ? 0 : undefined}
+                  >
+                    {(f.handle ?? f.display_name ?? "?").charAt(0).toUpperCase()}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-community-text">
+                {tFmt("mine.communityCard", { n: friendsOnCard.count })}
+              </div>
             </div>
-            <div className="mt-community-text">
-              {tFmt("mine.communityCard", { n: 12 })}
-            </div>
-          </div>
+          )}
 
           {feature && (
             <div className="mt-banner">
@@ -1790,7 +2025,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                           }}
                         >
                           <span style={{ fontSize: 13 }}>👏</span>
-                          {tk.claps}
+                          {tk.cheers ?? tk.claps}
                           {burstId === tk.id && burstSpans}
                         </button>
                       )}
@@ -1936,6 +2171,152 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     );
   }
 
+  // ====================== PROFILE (Phase 3) ======================
+  function renderProfile() {
+    const p = profile;
+    return (
+      <>
+        <div className="mt-back-head">
+          <button className="mt-back" onClick={() => setView("feed")}>
+            ‹
+          </button>
+          <div className="mt-back-title">{t("profile.title")}</div>
+        </div>
+        <div className="mt-profile">
+          {profileLoading && !p && <p className="empty">…</p>}
+          {!profileLoading && !p && <p className="empty">404</p>}
+          {p && (
+            <>
+              <div className="mt-profile-head">
+                <div
+                  className="mt-profile-avatar"
+                  style={{ background: avatarColor(p.handle ?? p.display_name ?? "") }}
+                >
+                  {(p.handle ?? p.display_name ?? "?").charAt(0).toUpperCase()}
+                </div>
+                <div className="mt-profile-meta">
+                  <div className="mt-profile-handle">@{p.handle}</div>
+                  <div className="mt-profile-counts">
+                    <span>{tFmt("profile.followers", { n: p.follower_count })}</span>
+                    <span>{tFmt("profile.following", { n: p.followee_count })}</span>
+                  </div>
+                </div>
+                {userId && selectedProfileHandle && p.id !== "__self__" && (
+                  <button
+                    className={`mt-follow-btn ${p.is_following ? "on" : ""}`}
+                    onClick={() =>
+                      p.is_following
+                        ? doUnfollow(p.id, p.handle)
+                        : doFollow(p.id, p.handle)
+                    }
+                  >
+                    {p.is_following ? t("profile.unfollow") : t("profile.follow")}
+                  </button>
+                )}
+              </div>
+              <div className="mt-profile-tickets">
+                {(!p.tickets || p.tickets.length === 0) && (
+                  <p className="empty">{t("profile.noTickets")}</p>
+                )}
+                {(p.tickets ?? []).map((tk) => {
+                  const sep = mtSep(tk.ticket.type);
+                  const payLabel =
+                    tk.state === "won" ? t("mine.returned") : t("mine.ifHits");
+                  const payValue =
+                    tk.state === "won" ? tk.returned ?? 0 : tk.payoutBase;
+                  return (
+                    <div
+                      key={tk.id}
+                      className="mt-card"
+                      onClick={() => openDetail(tk.id)}
+                      role="button"
+                      tabIndex={0}
+                    >
+                      <div
+                        className="mt-stripe"
+                        style={{ background: mtStateColor(tk.state) }}
+                      />
+                      <div className="mt-card-body">
+                        <div className="mt-card-top">
+                          <div className="mt-badges">
+                            <span
+                              className="mt-state-badge"
+                              style={{ background: mtStateColor(tk.state) }}
+                            >
+                              {tk.state === "open"
+                                ? t("mine.live")
+                                : t("mine.result")}
+                            </span>
+                            {tk.race.grade && (
+                              <span className="mt-grade-badge">{tk.race.grade}</span>
+                            )}
+                          </div>
+                          <div className="mt-card-race">{runnerRaceName(tk)}</div>
+                        </div>
+                        <div className="mt-chips">
+                          {tk.ticket.lines.slice(0, 4).map((ln, j) => (
+                            <span key={j} className="mt-chip">
+                              {ln.combo.join(sep)}
+                            </span>
+                          ))}
+                        </div>
+                        <div className="mt-metrics">
+                          <div>
+                            <div className="mt-metric-label">{t("mine.cost")}</div>
+                            <div className="mt-metric-cost">
+                              {yen(tk.ticket.cost)}
+                            </div>
+                          </div>
+                          <div>
+                            <div className="mt-metric-label">{payLabel}</div>
+                            <div className="mt-metric-pay">{yen(payValue)}</div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+      </>
+    );
+  }
+
+  // ====================== HANDLE PROMPT (Phase 3) ======================
+  function renderHandlePrompt() {
+    if (!handlePromptOpen) return null;
+    return (
+      <div className="mt-modal-overlay" onClick={() => setHandlePromptOpen(false)}>
+        <div className="mt-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="mt-modal-title">{t("mine.setHandleTitle")}</div>
+          <p className="mt-modal-hint">{t("mine.setHandleHint")}</p>
+          <input
+            className="mt-modal-input"
+            type="text"
+            value={handleDraft}
+            placeholder={t("mine.setHandlePlaceholder")}
+            onChange={(e) => {
+              setHandleDraft(e.target.value);
+              setHandleError(null);
+            }}
+            autoFocus
+            maxLength={32}
+          />
+          {handleError && <div className="mt-modal-error">{handleError}</div>}
+          <button
+            className="mt-modal-cta"
+            onClick={() => void saveHandle()}
+            disabled={handleSetting || !handleDraft.trim()}
+          >
+            {handleSetting ? "…" : t("mine.setHandleCta")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   // ====================== DETAIL ======================
   function renderDetail() {
     const tk = detailTk;
@@ -1970,7 +2351,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         </div>
 
         <div className="mt-detail">
-          <div className="mt-ticket">
+          <div className="mt-ticket" ref={detailCardRef}>
             {justSettled && (
               <div className="mt-confetti">
                 {[
@@ -2150,7 +2531,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                 <div className="mt-card-foot-mark">競</div>
                 <div style={{ lineHeight: 1.2 }}>
                   <div className="mt-handle">{t("mine.handle")}</div>
-                  <div className="mt-card-foot-micro">{t("mine.notAdvice")}</div>
+                  <div className="mt-card-foot-micro" data-not-advice="">{t("mine.notAdvice")}</div>
                 </div>
                 <div className="mt-barcode" />
               </div>
@@ -2167,7 +2548,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
           <div className="mt-actions">
             <button
               className="mt-share"
-              onClick={() => flash(t("mine.shareToast"))}
+              onClick={() => void doShare()}
             >
               <span style={{ fontSize: 16 }}>⇪</span>
               {t("mine.tapShare")}
@@ -2175,7 +2556,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             {tk.state === "won" && (
               <button className="mt-cheer-lg" onClick={() => cheer(tk.id)}>
                 <span style={{ fontSize: 16 }}>👏</span>
-                {tk.claps}
+                {tk.cheers ?? tk.claps}
                 {burstId === tk.id && burstSpans}
               </button>
             )}
@@ -2183,14 +2564,30 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
 
           <div className="mt-friends">
             <div className="mt-avatars">
-              {community.map((f, i) => (
-                <div key={i} className="mt-avatar" style={{ background: f.color }}>
-                  {f.initial}
-                </div>
-              ))}
+              {(friendsOnRace[tk.race.raceKey]?.avatars ?? [])
+                .slice(0, 8)
+                .map((f, i) => (
+                  <div
+                    key={i}
+                    className="mt-avatar"
+                    style={{ background: avatarColor(f.handle ?? f.display_name ?? "") }}
+                    onClick={(e) => {
+                      if (f.handle) {
+                        e.stopPropagation();
+                        openProfile(f.handle);
+                      }
+                    }}
+                    role={f.handle ? "button" : undefined}
+                    tabIndex={f.handle ? 0 : undefined}
+                  >
+                    {(f.handle ?? f.display_name ?? "?").charAt(0).toUpperCase()}
+                  </div>
+                ))}
             </div>
             <div className="mt-friends-text">
-              {tFmt("mine.friendsOnRace", { n: 8 })}
+              {tFmt("mine.friendsOnRace", {
+                n: friendsOnRace[tk.race.raceKey]?.count ?? 0,
+              })}
             </div>
           </div>
         </div>
@@ -2203,6 +2600,8 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       {view === "feed" && renderFeed()}
       {view === "new" && renderNew()}
       {view === "detail" && renderDetail()}
+      {view === "profile" && renderProfile()}
+      {renderHandlePrompt()}
       {toast && <div className="mt-toast">{toast}</div>}
     </div>
   );

@@ -156,10 +156,20 @@ export const en = {
     settledToast: "You hit it! 🎉",
     tapShare: "Save & share",
     shareToast: "Ticket card copied — share away",
+    share: "Share",
+    shareFailed: "Couldn't export the card — try again.",
     cheer: "Cheer",
+    cheering: "Cheered!",
+    uncheered: "Un-cheered",
+    cannotCheerOwn: "You can't cheer your own ticket.",
+    rateLimited: "Too many actions — wait a moment and retry.",
     notAdvice: "For fun — not betting advice.",
     count: "{n} total",
     handle: "@you",
+    setHandleTitle: "Pick your handle",
+    setHandleHint: "This is how other players see you. You can change it later.",
+    setHandlePlaceholder: "e.g. alyssa",
+    setHandleCta: "Save handle",
     // ADR-0007 Phase 2 — server-first persistence + auto-settle strings.
     estimate: "estimate",
     empty: "No tickets yet — pick New bet to commit one.",
@@ -167,6 +177,17 @@ export const en = {
     you: "You",
     communityCard: "{n} friends are on today’s card",
     friendsOnRace: "{n} friends on this race",
+  },
+  // ADR-0007 Phase 3 — public profiles + follow graph.
+  profile: {
+    title: "Player",
+    followers: "{n} followers",
+    following: "{n} following",
+    follow: "Follow",
+    unfollow: "Following",
+    blockedSelfFollow: "You can't follow yourself.",
+    noTickets: "No shared tickets yet.",
+    back: "Back",
   },
   // ADR-0007 Phase 1 — Clerk auth + age self-attestation.
   auth: {

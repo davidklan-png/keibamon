@@ -29,6 +29,26 @@ export interface SocialProfile {
   created_at: number;
 }
 
+/** Phase 3: public profile shape (server never sends clerk_user_id/email/age_verified). */
+export interface PublicProfile {
+  id: string;
+  handle: string | null;
+  display_name: string | null;
+  avatar: string | null;
+  created_at: number;
+  follower_count: number;
+  followee_count: number;
+  is_following?: boolean;
+  tickets?: CommittedTicket[];
+}
+
+/** Phase 3: a followed user with at least one ticket on a race/card. */
+export interface FriendsAvatar {
+  handle: string | null;
+  display_name: string | null;
+  avatar: string | null;
+}
+
 /** Fetch failure tagged so callers can distinguish offline from auth. */
 export type SocialError =
   | { kind: "no_token" }
@@ -70,10 +90,12 @@ async function readJson(res: Response): Promise<unknown> {
  * Resolves to null on any failure — callers MUST tolerate null.
  *
  * (Phase 1 surface — kept here alongside the Phase 2 ticket calls.)
+ *
+ * Phase 3: body extended to accept handle / display_name / avatar.
  */
 export async function postMe(
   token: string | null,
-  body?: { age_verified?: number },
+  body?: { age_verified?: number; handle?: string | null; display_name?: string | null; avatar?: string | null },
 ): Promise<SocialProfile | null> {
   if (!token) return null;
   const r = await authedFetch(token, "/api/social/me", {
@@ -82,6 +104,159 @@ export async function postMe(
   });
   if (!r.ok || !r.res.ok) return null;
   return (await r.res.json()) as SocialProfile;
+}
+
+/** Result shape for the social actions below. */
+export type SocialResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; err: SocialError };
+
+/** Phase 3: POST /api/social/me returning a typed result (so callers can
+ * distinguish a handle collision from network failure). */
+export async function postMeTyped(
+  token: string | null,
+  body: { age_verified?: number; handle?: string | null; display_name?: string | null; avatar?: string | null },
+): Promise<SocialResult<SocialProfile>> {
+  if (!token) return { ok: false, err: { kind: "no_token" } };
+  const r = await authedFetch(token, "/api/social/me", {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (r.res.status === 409) return { ok: false, err: { kind: "http", status: 409 } };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: (await r.res.json()) as SocialProfile };
+}
+
+/** Phase 3: POST /api/social/follow/:userId (idempotent). */
+export async function follow(
+  token: string | null,
+  userId: string,
+): Promise<SocialResult<{ ok: true }>> {
+  const r = await authedFetch(token, `/api/social/follow/${encodeURIComponent(userId)}`, {
+    method: "POST",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: { ok: true } };
+}
+
+/** Phase 3: DELETE /api/social/follow/:userId (idempotent). */
+export async function unfollow(
+  token: string | null,
+  userId: string,
+): Promise<SocialResult<{ ok: true }>> {
+  const r = await authedFetch(token, `/api/social/follow/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: { ok: true } };
+}
+
+/** Phase 3: POST /api/social/tickets/:id/cheer. Returns authoritative count. */
+export async function cheer(
+  token: string | null,
+  ticketId: string,
+): Promise<SocialResult<{ count: number; cheeredByMe: true }>> {
+  const r = await authedFetch(token, `/api/social/tickets/${encodeURIComponent(ticketId)}/cheer`, {
+    method: "POST",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { count?: number };
+  return { ok: true, data: { count: body.count ?? 0, cheeredByMe: true } };
+}
+
+/** Phase 3: DELETE /api/social/tickets/:id/cheer (toggle off). */
+export async function uncheer(
+  token: string | null,
+  ticketId: string,
+): Promise<SocialResult<{ count: number; cheeredByMe: false }>> {
+  const r = await authedFetch(token, `/api/social/tickets/${encodeURIComponent(ticketId)}/cheer`, {
+    method: "DELETE",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { count?: number };
+  return { ok: true, data: { count: body.count ?? 0, cheeredByMe: false } };
+}
+
+/** Phase 3: public profile. token OPTIONAL — signed-out viewers can read. */
+export async function getProfile(
+  token: string | null,
+  handle: string,
+): Promise<SocialResult<PublicProfile>> {
+  const headers: Record<string, string> = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+  try {
+    const res = await fetch(`${base()}/api/social/users/${encodeURIComponent(handle)}`, {
+      headers,
+      cache: "no-store",
+    });
+    if (!res.ok) return { ok: false, err: { kind: "http", status: res.status } };
+    const body = (await readJson(res)) as PublicProfile;
+    return { ok: true, data: body };
+  } catch {
+    return { ok: false, err: { kind: "network" } };
+  }
+}
+
+/** Phase 3: GET /api/social/feed — caller's own + followees' tickets. */
+export async function getFeed(
+  token: string | null,
+): Promise<SocialResult<{ tickets: CommittedTicket[] }>> {
+  const r = await authedFetch(token, "/api/social/feed", { method: "GET" });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { tickets?: CommittedTicket[] } | null;
+  const tickets = body?.tickets;
+  if (!Array.isArray(tickets)) return { ok: false, err: { kind: "http", status: 200 } };
+  return { ok: true, data: { tickets } };
+}
+
+/** Phase 3: GET /api/social/races/:raceKey/friends — count + cap-8 avatars. */
+export async function getFriendsOnRace(
+  token: string | null,
+  raceKey: string,
+): Promise<SocialResult<{ count: number; avatars: FriendsAvatar[] }>> {
+  const r = await authedFetch(
+    token,
+    `/api/social/races/${encodeURIComponent(raceKey)}/friends`,
+    { method: "GET" },
+  );
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { count?: number; avatars?: FriendsAvatar[] } | null;
+  return {
+    ok: true,
+    data: {
+      count: body?.count ?? 0,
+      avatars: Array.isArray(body?.avatars) ? body!.avatars : [],
+    },
+  };
+}
+
+/** Phase 3: GET /api/social/friends/on-card?race=k1&race=k2... — today's-card strip. */
+export async function getFriendsOnCard(
+  token: string | null,
+  raceKeys: string[],
+): Promise<SocialResult<{ count: number; avatars: FriendsAvatar[] }>> {
+  if (!token) return { ok: false, err: { kind: "no_token" } };
+  const qs = raceKeys.map((k) => `race=${encodeURIComponent(k)}`).join("&");
+  const r = await authedFetch(token, `/api/social/friends/on-card${qs ? `?${qs}` : ""}`, {
+    method: "GET",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { count?: number; avatars?: FriendsAvatar[] } | null;
+  return {
+    ok: true,
+    data: {
+      count: body?.count ?? 0,
+      avatars: Array.isArray(body?.avatars) ? body!.avatars : [],
+    },
+  };
 }
 
 /**
@@ -128,13 +303,15 @@ export async function postTicket(
 }
 
 /**
- * PATCH /api/social/tickets/:id — settle (state + returned) and/or claps.
- * Only the owner may PATCH; the Worker returns 403 otherwise (caller drops).
+ * PATCH /api/social/tickets/:id — settle (state + returned).
+ *
+ * Phase 3: claps are no longer a PATCH field. Cheers are now server
+ * COUNT(*) from the cheers table; the client toggles them via cheer()/uncheer().
  */
 export async function patchTicket(
   token: string | null,
   id: string,
-  patch: { state?: "won" | "miss" | "open"; returned?: number | null; claps?: number },
+  patch: { state?: "won" | "miss" | "open"; returned?: number | null },
 ): Promise<
   | { ok: true; ticket: CommittedTicket }
   | { ok: false; err: SocialError }

@@ -154,10 +154,20 @@ export const ja = {
     settledToast: "的中しました！🎉",
     tapShare: "保存してシェア",
     shareToast: "馬券カードをコピーしました",
+    share: "シェア",
+    shareFailed: "カードの出力に失敗しました — もう一度お試しください。",
     cheer: "応援",
+    cheering: "応援しました",
+    uncheered: "応援を取り消しました",
+    cannotCheerOwn: "自分の馬券は応援できません。",
+    rateLimited: "操作が多すぎます — しばらくしてから再試行してください。",
     notAdvice: "遊びです — 投票助言ではありません。",
     count: "{n}件",
     handle: "@あなた",
+    setHandleTitle: "ハンドルを決める",
+    setHandleHint: "他のプレイヤーに見つかる名前です。あとで変えられます。",
+    setHandlePlaceholder: "例: alyssa",
+    setHandleCta: "ハンドルを保存",
     // ADR-0007 Phase 2 — サーバ優先の永続化 + 自動精算。
     estimate: "見積もり",
     empty: "まだ馬券がありません。「新規」から登録できます。",
@@ -165,6 +175,17 @@ export const ja = {
     you: "あなた",
     communityCard: "今日のカードに友だち{n}人が参戦中",
     friendsOnRace: "このレースに友だち{n}人",
+  },
+  // ADR-0007 Phase 3 — 公開プロフィール + フォローグラフ。
+  profile: {
+    title: "プレイヤー",
+    followers: "フォロワー {n}人",
+    following: "{n}人をフォロー中",
+    follow: "フォロー",
+    unfollow: "フォロー中",
+    blockedSelfFollow: "自分自身はフォローできません。",
+    noTickets: "まだ公開された馬券がありません。",
+    back: "戻る",
   },
   // ADR-0007 Phase 1 — Clerk auth + age self-attestation.
   auth: {

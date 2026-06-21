@@ -1,6 +1,6 @@
 # ADR-0007: "My Tickets" — committed-bet log + social surface
 
-- **Status:** Accepted (2026-06-21); **Phase 2 IN REVIEW** (2026-06-21)
+- **Status:** Accepted (2026-06-21); **Phase 3 IN REVIEW** (2026-06-21)
 - **Date:** 2026-06-21
 - **Deciders:** David Klan
 - **Builds on:** the `/api/live` D1 projection from [[ADR-0003]]; the
@@ -16,7 +16,7 @@
 | 0 — UI on localStorage | Shipped (commit on main) | `frontend/src/App.tsx` `Step="mine"` |
 | 1 — Clerk auth + identity skeleton | Merged | `frontend/src/auth/*`, `workers/social/` |
 | **2 — Per-user persistence (social D1)** | **In review** (`feat/adr-0007-phase2-persistence`) | `workers/social/migrations/0002_tickets.sql`, `frontend/src/lib/settle.ts`, `frontend/src/auth/{socialClient,ticketQueue}.ts` |
-| 3 — Social (follows, cheers) | Pending | ADR-0007 §Phase 3 |
+| **3 — Social (follows, cheers, profiles, feed, share)** | **In review** (`feat/adr-0007-phase3-social`) | `workers/social/migrations/0003_social.sql`, `frontend/src/lib/share.ts`, `frontend/src/auth/socialClient.ts`, `frontend/src/App.tsx` |
 | 4 — Hardening (rate limits, ToS) | Pending | ADR-0007 §Phase 4 |
 
 ## Context
@@ -348,5 +348,104 @@ NOT touched: root `wrangler.jsonc`, `src/worker.js`, `backend/`, `splash/`,
 3. **Dead-heat & scratch handling in `settle.ts`.** Table-driven tests for 同着
    ties (multiple winning combos) and scratch refunds, landed together with
    follow-up #1's result contract. Must be green before settlement goes GA.
-4. **`cheers` table + cross-user sync.** Phase 3.
-5. **Rate limits on POST /tickets.** Phase 4 hardening.
+4. **`cheers` table + cross-user sync.** Phase 3. ✓ Landed.
+5. **Rate limits on POST /tickets.** Phase 3 landed a minute-bucket counter
+   in D1 (covers follow/unfollow/cheer/uncheer/ticket). Phase 4 will replace
+   it with a real token bucket / sliding window in KV.
+
+## Phase 3 — Decisions made in implementation (2026-06-21)
+
+Phase 3 turns the cosmetic social proof — hardcoded counts, local-only
+claps, a share-toast stub — into real multi-user state on the existing
+`keibamon_social` D1. No new datastore, no websockets. Counts refresh on
+the existing 45s `/api/live` poll. The 9 architecture decisions are
+documented in `docs/runbooks/phase3-social.md` and summarized here:
+
+1. **`COUNT(*)` from `cheers`, not denormalized.** Correctness over speed —
+   `idx_cheers_ticket` makes the count O(log n); the 45s poll hides any
+   read latency. A denormalized `claps` column would introduce a count-drift
+   bug class (race between concurrent cheers, lost updates).
+2. **Self-cheer forbidden** (409 `cannot_cheer_own_ticket`). Removes an
+   inflation vector; matches JRA social norm.
+3. **Uncheer (DELETE) included; idempotent.** Symmetric with follow/unfollow.
+4. **Handle is explicit user-set, with uniqueness.** Auto-deriving from
+   Clerk email leaks PII; generated `player-abc123` is impersonal. Partial
+   unique index `idx_users_handle_unique` (NULLs exempt) enforces collisions.
+   Bootstrap UX: first social action with `handle === null` pops a set-handle
+   modal.
+5. **Asymmetric (Twitter-style) follow.** No acceptance step.
+6. **Profile routing = new `MtView` value `"profile"`, not a router.**
+   App.tsx has no router today; the state-machine already switches on `MtView`.
+7. **`html-to-image` for share PNG.** ~12 KB gzipped, pure JS. The export
+   is gated on the presence of `[data-not-advice]` — fails loudly rather
+   than silently shipping an advice-less card.
+8. **Per-user per-minute rate limits in D1.** follow/unfollow 30/min,
+   cheer/uncheer 60/min, ticket 20/min. 429 + `Retry-After`. Phase 4
+   will replace with a token bucket in KV.
+9. **Owner object is client-derived.** `ownerFromUser(user)` maps the flat
+   server shape `{id, handle, display_name, avatar}` to the existing
+   `TicketOwner` (`{en, ja, color, initial, initialJa}`) via a deterministic
+   color from `user.id` hash. Keeps the DB lean and avoids duplicating
+   i18n-aware fields.
+
+### Public-safe profile projection
+
+The Worker's `publicUser()` helper is the ONLY shape that leaves the server
+on profile/feed/friends routes: `{id, handle, display_name, avatar,
+created_at, follower_count, followee_count, is_following?}`. `clerk_user_id`,
+`email`, and `age_verified` NEVER leave the Worker. A test (`public profile
+response omits clerk_user_id, email, age_verified`) pins this contract.
+
+### Phase 3 diff scope
+
+`git diff main...feat/adr-0007-phase3-social --stat` will show:
+
+- `workers/social/migrations/0003_social.sql` (new) — `follows`, `cheers`,
+  `rate_limits` tables + `idx_users_handle_unique` partial index.
+- `workers/social/src/index.ts` (extended) — new routes (follow/unfollow,
+  cheer/uncheer, profile, feed, friends) + extended `postMe` (handle/dn/
+  avatar) + extended `decodeTicket` (owner overlay + cheers count + strip
+  legacy `claps`) + D1-backed rate limiter + CORS Allow-Methods += DELETE.
+- `workers/social/test/social.test.ts` (extended) — new fake D1 branches
+  for follows/cheers/rate_limits + the JOIN queries; 14 new tests.
+- `frontend/src/auth/socialClient.ts` (extended) — `postMeTyped`,
+  `follow`, `unfollow`, `cheer`, `uncheer`, `getProfile`, `getFeed`,
+  `getFriendsOnRace`, `getFriendsOnCard`; `patchTicket` no longer takes
+  `claps` (Phase 3 hoisted claps to `COUNT(*)` from cheers).
+- `frontend/src/auth/socialClient.test.ts` (new) — path/method/auth
+  contract assertions on the new helpers.
+- `frontend/src/lib/share.ts` + `share.test.ts` (new) — PNG export with
+  the `[data-not-advice]` hard gate.
+- `frontend/src/lib/types.ts` (extended) — `PublicUser`, `ownerFromUser`,
+  `cheers`/`cheeredByMe`/`ownerUser` on `CommittedTicket`.
+- `frontend/src/App.tsx` — `MtView` adds `"profile"`; new state (profile,
+  friendsOnCard/Race, viewerHandle, handlePrompt); `cheer()` rewritten as
+  a toggle with optimistic + reconcile; `patchTicket({claps})` removed;
+  real counts replace hardcoded `n:12`/`n:8`; `ProfileView` + set-handle
+  modal; share button wired to `exportTicketCard`; `data-not-advice`
+  attribute on the detail-card micro-line.
+- `frontend/src/i18n/{en,ja}.ts` — `profile.*`, `mine.{cheering,uncheered,
+  cannotCheerOwn,rateLimited,share,shareFailed,setHandle*}`.
+- `frontend/package.json` — `+html-to-image`, `+jsdom` (devDep, for the
+  share test).
+- `docs/adr/0007-*.md`, `docs/runbooks/phase3-social.md` (new).
+
+NOT touched: root `wrangler.jsonc`, `src/worker.js`, `backend/`, `splash/`
+(as a Worker — only the rebuilt frontend bundle lands there),
+`tools/jravan/`, `ingestion/`, `src/keibamon_core/`, the racing D1,
+`/api/live`, `expose_live.py`, `styles.css` (fonts stay on Google Fonts
+for Phase 4).
+
+### Phase 4 backlog (carried forward + new)
+
+- **Full rate limiting** — token bucket / sliding window in KV (replaces
+  the minute-bucket counter landed here).
+- **Block + report** — moderation primitives for the public social graph.
+- **Self-host fonts** — replace Google Fonts `@import` in `styles.css`.
+- **Server-side card renderer** — consistent cross-platform share output.
+- **Visual-regression snapshots** — across all screens × both languages.
+- **Server-side settle sweep** (Phase 2 follow-up #2).
+- **Drive `/api/live` to emit `result`** with ties + scratches (Phase 2
+  follow-up #1) — still the critical-path dependency for the whole social
+  loop; without it, no ticket settles in prod and the cheer→share moment
+  never fires for real users.

@@ -1,11 +1,12 @@
-// ADR-0007 Phase 2 — keibamon-social Worker.
+// ADR-0007 Phase 3 — keibamon-social Worker.
 //
-// Identity (Phase 1) + per-user ticket persistence (Phase 2). ISOLATED from
-// the racing Worker:
+// Identity (Phase 1) + per-user ticket persistence (Phase 2) + social graph
+// (Phase 3: follows, cheers, public profiles, feed, friends-on-race). ISOLATED
+// from the racing Worker:
 //   - separate D1 (keibamon_social) — NEVER references keibamon-live
 //   - separate origin (Phase 1: *.workers.dev subdomain; custom domain later)
-//   - routes are /api/social/me + /api/social/tickets (+ /:id). /api/live
-//     stays on the racing Worker; this Worker returns 404 for everything else.
+//   - routes live under /api/social/*. /api/live stays on the racing Worker;
+//     this Worker returns 404 for everything else.
 //
 // Auth: Clerk JWT in `Authorization: Bearer <jwt>`, verified with jose against
 // Clerk's JWKS. Missing/invalid → 401. CORS is handled here (racing Worker
@@ -15,6 +16,19 @@
 // columns (state, returned, race_key, payout_base) are the resolver / query
 // surface. Ownership is enforced on every write: a row's user_id is fixed at
 // INSERT and PATCH checks it before any update.
+//
+// Phase 3 social model:
+//   - follows: asymmetric Twitter-style graph. INSERT ... DO NOTHING makes a
+//     repeat follow idempotent. self-follow blocked at the handler level
+//     (CHECK constraint is the backstop).
+//   - cheers: 1 row per (ticket_id, user_id). Count is COUNT(*) from the
+//     cheers table — never a denormalized counter (Decision 1: correctness
+//     over speed; the 45s client poll hides any read latency). Self-cheer
+//     forbidden (Decision 2); uncheer supported (Decision 3).
+//   - profiles: public fields only (handle, display_name, avatar, counts).
+//     clerk_user_id / email / age_verified NEVER leave the Worker.
+//   - rate limits: per-user per-minute bucket in D1 (Decision 8). Phase 4
+//     replaces with a real token bucket in KV.
 
 import { jwtVerify, createRemoteJWKSet } from "jose";
 
@@ -52,11 +66,27 @@ interface TicketRow {
   created_at: number;
 }
 
+/** A ticket row joined with its owner + cheer aggregate, for feed/profile. */
+interface TicketWithSocial extends TicketRow {
+  owner_handle: string | null;
+  owner_display_name: string | null;
+  owner_avatar: string | null;
+  cheers_count: number;
+}
+
 const TOKEN_RE = /^Bearer\s+(.+)$/i;
 const NOW = () => Math.floor(Date.now() / 1000);
 
 /** Allowed state values on insert/update. Keep in sync with frontend CommittedState. */
 const TICKET_STATES = new Set(["open", "won", "miss"]);
+
+/** Rate-limit ceilings per action per minute. Decision 8. */
+const RATE_LIMITS: Record<string, number> = {
+  follow: 30,
+  cheer: 60,
+  ticket: 20,
+};
+const RATE_WINDOW = 60; // seconds
 
 function allowedOrigins(env: Env): string[] {
   return (env.ALLOWED_ORIGINS || "")
@@ -69,19 +99,20 @@ function corsHeaders(env: Env, origin: string | null): Record<string, string> {
   const allow = origin && allowedOrigins(env).includes(origin) ? origin : "";
   return {
     "Access-Control-Allow-Origin": allow,
-    "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
     "Access-Control-Allow-Headers": "Authorization, Content-Type",
     "Access-Control-Max-Age": "86400",
     Vary: "Origin",
   };
 }
 
-function json(body: unknown, status: number, cors: Record<string, string>): Response {
+function json(body: unknown, status: number, cors: Record<string, string>, extraHeaders: Record<string, string> = {}): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
       "Content-Type": "application/json",
       "Cache-Control": "no-store",
+      ...extraHeaders,
       ...cors,
     },
   });
@@ -122,27 +153,84 @@ async function verifyToken(
 }
 
 /**
- * Insert-or-update by clerk_user_id. On POST with age_verified, set it; on GET
- * (or POST without body), upsert with no metadata change. id is generated
- * client-side per the migration spec.
+ * Insert-or-update by clerk_user_id. On POST with age_verified / handle /
+ * display_name / avatar, set them; on GET (or POST without body), upsert with
+ * no metadata change. id is generated client-side per the migration spec.
+ *
+ * Phase 3 additions: handle / display_name / avatar are mutable. Handle
+ * collisions surface as a 409 from the caller (the unique partial index
+ * rejects the INSERT); we detect that here and return null with a flag.
  */
 async function upsertUser(
   db: D1Database,
   clerkUserId: string,
-  ageVerified: number | null,
-): Promise<UserRow | null> {
+  patch: {
+    age_verified?: number | null;
+    handle?: string | null;
+    display_name?: string | null;
+    avatar?: string | null;
+  },
+): Promise<{ ok: true; row: UserRow } | { ok: false; code: "handle_taken" | "server_error" }> {
   const id = crypto.randomUUID();
   const createdAt = NOW();
-  if (ageVerified !== null) {
-    const stmt = db.prepare(
-      `INSERT INTO users (id, clerk_user_id, age_verified, created_at)
-       VALUES (?, ?, ?, ?)
-       ON CONFLICT(clerk_user_id) DO UPDATE SET age_verified = excluded.age_verified
-       RETURNING *`,
-    );
-    return stmt.bind(id, clerkUserId, ageVerified, createdAt).first<UserRow>();
+  const hasPatch =
+    patch.age_verified !== null && patch.age_verified !== undefined
+      ? true
+      : patch.handle !== null && patch.handle !== undefined
+        ? true
+        : patch.display_name !== null && patch.display_name !== undefined
+          ? true
+          : patch.avatar !== null && patch.avatar !== undefined;
+  if (hasPatch) {
+    // Build a single UPDATE that touches only the fields supplied. The unique
+    // partial index on (handle WHERE handle IS NOT NULL) will reject a
+    // duplicate handle with SQLITE_CONSTRAINT_UNIQUE — surface that as
+    // {ok:false, code:"handle_taken"}.
+    const sets: string[] = [];
+    const binds: unknown[] = [];
+    if (patch.age_verified !== null && patch.age_verified !== undefined) {
+      sets.push("age_verified = ?");
+      binds.push(patch.age_verified);
+    }
+    if (patch.handle !== null && patch.handle !== undefined) {
+      sets.push("handle = ?");
+      binds.push(patch.handle);
+    }
+    if (patch.display_name !== null && patch.display_name !== undefined) {
+      sets.push("display_name = ?");
+      binds.push(patch.display_name);
+    }
+    if (patch.avatar !== null && patch.avatar !== undefined) {
+      sets.push("avatar = ?");
+      binds.push(patch.avatar);
+    }
+    try {
+      const row = await db
+        .prepare(
+          `INSERT INTO users (id, clerk_user_id, age_verified, created_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(clerk_user_id) DO UPDATE SET ${sets.join(", ")}
+           RETURNING *`,
+        )
+        .bind(id, clerkUserId, patch.age_verified ?? 0, createdAt, ...binds)
+        .first<UserRow>();
+      if (!row) return { ok: false, code: "server_error" };
+      return { ok: true, row };
+    } catch (e) {
+      const msg = (e as Error)?.message ?? "";
+      if (/UNIQUE/i.test(msg) && /handle/i.test(msg)) {
+        return { ok: false, code: "handle_taken" };
+      }
+      // Re-check: the unique constraint may also manifest as a plain
+      // CONSTRAINT_UNIQUE without the column name. D1 error strings vary by
+      // SQLite build — be permissive.
+      if (/UNIQUE/i.test(msg)) {
+        return { ok: false, code: "handle_taken" };
+      }
+      return { ok: false, code: "server_error" };
+    }
   }
-  // GET (or POST without age_verified): create-if-missing, then read.
+  // GET (or POST without body): create-if-missing, then read.
   await db
     .prepare(
       `INSERT INTO users (id, clerk_user_id, age_verified, created_at)
@@ -151,10 +239,12 @@ async function upsertUser(
     )
     .bind(id, clerkUserId, createdAt)
     .run();
-  return db
+  const row = await db
     .prepare(`SELECT * FROM users WHERE clerk_user_id = ?`)
     .bind(clerkUserId)
     .first<UserRow>();
+  if (!row) return { ok: false, code: "server_error" };
+  return { ok: true, row };
 }
 
 // ---------------------------------------------------------------------------
@@ -184,7 +274,6 @@ interface CommittedTicketBody {
 interface PatchBody {
   state?: unknown;
   returned?: unknown;
-  claps?: unknown;
 }
 
 interface ParsedTicketBody {
@@ -268,8 +357,15 @@ async function insertTicket(
  * Decode a TicketRow into the client's CommittedTicket shape by parsing the
  * verbatim payload, then overlaying the flat columns (state, returned) so the
  * client sees the resolver's latest state, not the stale snapshot in payload.
+ *
+ * Phase 3: also overlays `cheers` (count) and `cheeredByMe` if supplied, and
+ * strips any stale `claps` payload field so cached Phase 2 tickets don't carry
+ * a value the client would otherwise render alongside the new server count.
  */
-function decodeTicket(row: TicketRow): Record<string, unknown> | null {
+function decodeTicket(
+  row: TicketRow,
+  social?: { owner?: Record<string, unknown> | null; cheers?: number; cheeredByMe?: boolean },
+): Record<string, unknown> | null {
   let body: Record<string, unknown>;
   try {
     body = JSON.parse(row.payload) as Record<string, unknown>;
@@ -278,6 +374,18 @@ function decodeTicket(row: TicketRow): Record<string, unknown> | null {
   }
   body.state = row.state;
   body.returned = row.returned;
+  // Phase 3: claps are now server COUNT(*) from cheers. Strip the legacy
+  // Phase 2 payload field so the client never renders a stale value.
+  delete body.claps;
+  if (social?.owner !== undefined) {
+    body.owner = social.owner;
+  }
+  if (social?.cheers !== undefined) {
+    body.cheers = social.cheers;
+  }
+  if (social?.cheeredByMe !== undefined) {
+    body.cheeredByMe = social.cheeredByMe;
+  }
   return body;
 }
 
@@ -316,8 +424,8 @@ async function findTicket(db: D1Database, id: string): Promise<TicketRow | null>
  *   - {status:403} when the row exists but belongs to another user
  *   - {status:200, row} on success
  *
- * Only `state`, `returned`, and `claps` are mutable; `claps` lives in payload
- * (Phase 3 will hoist it into its own table — for now we patch the JSON).
+ * Only `state` and `returned` are mutable. Phase 3 removed `claps` from this
+ * surface — claps are now server COUNT(*) from cheers.
  */
 async function patchTicket(
   db: D1Database,
@@ -348,11 +456,8 @@ async function patchTicket(
     newReturned = null;
   }
 
-  // claps (still local-only Phase 2; persisted inside payload so the cache
-  // survives a reload, NOT shared across users yet).
-  if (typeof patch.claps === "number" && Number.isFinite(patch.claps)) {
-    body.claps = Math.max(0, Math.floor(patch.claps));
-  }
+  // Phase 3: strip any cached claps on write too, so the next read stays clean.
+  delete body.claps;
 
   const newPayload = JSON.stringify(body);
   await db
@@ -374,10 +479,345 @@ async function patchTicket(
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3 — social primitives (follows, cheers, rate limits, profile, feed).
+// ---------------------------------------------------------------------------
+
+/** Public-safe user projection. NEVER include clerk_user_id, email, age_verified. */
+function publicUser(u: UserRow, extra?: { follower_count?: number; followee_count?: number; is_following?: boolean }): Record<string, unknown> {
+  return {
+    id: u.id,
+    handle: u.handle,
+    display_name: u.display_name,
+    avatar: u.avatar,
+    created_at: u.created_at,
+    ...(extra ?? {}),
+  };
+}
+
+/** Rate-limit check; returns true if the action is allowed (and records it). */
+async function rateLimitCheck(
+  db: D1Database,
+  userId: string,
+  action: string,
+): Promise<boolean> {
+  const limit = RATE_LIMITS[action];
+  if (!limit) return true; // unknown action: don't block
+  const bucket = Math.floor(NOW() / RATE_WINDOW);
+  const row = await db
+    .prepare(
+      `INSERT INTO rate_limits (user_id, action, bucket, count)
+       VALUES (?, ?, ?, 1)
+       ON CONFLICT(user_id, action, bucket) DO UPDATE SET count = count + 1
+       RETURNING count`,
+    )
+    .bind(userId, action, bucket)
+    .first<{ count: number }>();
+  // row.count is the post-increment value; allow iff it's within the limit.
+  return (row?.count ?? 0) <= limit;
+}
+
+async function userById(db: D1Database, id: string): Promise<UserRow | null> {
+  return db.prepare(`SELECT * FROM users WHERE id = ?`).bind(id).first<UserRow>();
+}
+
+async function userByHandle(db: D1Database, handle: string): Promise<UserRow | null> {
+  return db.prepare(`SELECT * FROM users WHERE handle = ?`).bind(handle).first<UserRow>();
+}
+
+/** Insert-or-nothing follow. Idempotent — a repeat follow is a no-op 200. */
+async function followUser(
+  db: D1Database,
+  followerId: string,
+  followeeId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO follows (follower_id, followee_id, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(follower_id, followee_id) DO NOTHING`,
+    )
+    .bind(followerId, followeeId, NOW())
+    .run();
+}
+
+async function unfollowUser(
+  db: D1Database,
+  followerId: string,
+  followeeId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `DELETE FROM follows WHERE follower_id = ? AND followee_id = ?`,
+    )
+    .bind(followerId, followeeId)
+    .run();
+}
+
+async function isFollowing(
+  db: D1Database,
+  followerId: string,
+  followeeId: string,
+): Promise<boolean> {
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM follows WHERE follower_id = ? AND followee_id = ?`,
+    )
+    .bind(followerId, followeeId)
+    .first<{ "1": number }>();
+  return !!row;
+}
+
+async function followerCount(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM follows WHERE followee_id = ?`)
+    .bind(userId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+async function followeeCount(db: D1Database, userId: string): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM follows WHERE follower_id = ?`)
+    .bind(userId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+/** Count of cheers on a ticket (Decision 1: COUNT(*), never a denormalized column). */
+async function cheerCount(db: D1Database, ticketId: string): Promise<number> {
+  const row = await db
+    .prepare(`SELECT COUNT(*) AS n FROM cheers WHERE ticket_id = ?`)
+    .bind(ticketId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+async function hasCheered(
+  db: D1Database,
+  ticketId: string,
+  userId: string,
+): Promise<boolean> {
+  const row = await db
+    .prepare(`SELECT 1 FROM cheers WHERE ticket_id = ? AND user_id = ?`)
+    .bind(ticketId, userId)
+    .first<{ "1": number }>();
+  return !!row;
+}
+
+/**
+ * Insert-or-nothing cheer. Returns the post-call count + cheeredByMe state.
+ * Caller enforces won-only + self-cheer rules before calling.
+ */
+async function addCheer(
+  db: D1Database,
+  ticketId: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO cheers (ticket_id, user_id, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(ticket_id, user_id) DO NOTHING`,
+    )
+    .bind(ticketId, userId, NOW())
+    .run();
+}
+
+async function removeCheer(
+  db: D1Database,
+  ticketId: string,
+  userId: string,
+): Promise<void> {
+  await db
+    .prepare(`DELETE FROM cheers WHERE ticket_id = ? AND user_id = ?`)
+    .bind(ticketId, userId)
+    .run();
+}
+
+/** Decode a TicketWithSocial into the client's CommittedTicket shape. */
+function decodeSocialTicket(
+  row: TicketWithSocial,
+  cheeredByMe: boolean,
+): Record<string, unknown> | null {
+  // owner per Decision 9: client derives TicketOwner; server sends flat fields.
+  const owner =
+    row.owner_handle || row.owner_display_name
+      ? {
+          id: row.user_id,
+          handle: row.owner_handle,
+          display_name: row.owner_display_name,
+          avatar: row.owner_avatar,
+        }
+      : null;
+  return decodeTicket(row, {
+    owner,
+    cheers: row.cheers_count ?? 0,
+    cheeredByMe,
+  });
+}
+
+/**
+ * Feed: caller's own tickets + followees' tickets, newest first, cap 100.
+ * Each ticket carries owner + cheers count + cheeredByMe.
+ */
+async function buildFeed(
+  db: D1Database,
+  userId: string,
+): Promise<Record<string, unknown>[]> {
+  const { results } = await db
+    .prepare(
+      `SELECT t.id, t.user_id, t.serial, t.race_key, t.payload, t.state,
+              t.payout_base, t.returned, t.created_at,
+              u.handle AS owner_handle,
+              u.display_name AS owner_display_name,
+              u.avatar AS owner_avatar,
+              COALESCE(c.n, 0) AS cheers_count
+         FROM tickets t
+         JOIN users u ON u.id = t.user_id
+         LEFT JOIN (SELECT ticket_id, COUNT(*) AS n FROM cheers GROUP BY ticket_id) c
+           ON c.ticket_id = t.id
+        WHERE t.user_id = ?
+           OR t.user_id IN (SELECT followee_id FROM follows WHERE follower_id = ?)
+        ORDER BY t.created_at DESC
+        LIMIT 100`,
+    )
+    .bind(userId, userId)
+    .all<TicketWithSocial>();
+  const out: Record<string, unknown>[] = [];
+  for (const row of results) {
+    // Single-row cheeredByMe lookup — N+1 is fine at cap 100 with an index.
+    const byMe = await hasCheered(db, row.id, userId);
+    const decoded = decodeSocialTicket(row, byMe);
+    if (decoded) out.push(decoded);
+  }
+  return out;
+}
+
+/** Public profile: a user's public-safe fields + their tickets (newest first). */
+async function buildProfile(
+  db: D1Database,
+  profileUser: UserRow,
+  viewerUserId: string | null,
+): Promise<Record<string, unknown>> {
+  const [folls, follees, ticketsRaw] = await Promise.all([
+    followerCount(db, profileUser.id),
+    followeeCount(db, profileUser.id),
+    db
+      .prepare(
+        `SELECT t.id, t.user_id, t.serial, t.race_key, t.payload, t.state,
+                t.payout_base, t.returned, t.created_at,
+                u.handle AS owner_handle,
+                u.display_name AS owner_display_name,
+                u.avatar AS owner_avatar,
+                COALESCE(c.n, 0) AS cheers_count
+           FROM tickets t
+           JOIN users u ON u.id = t.user_id
+           LEFT JOIN (SELECT ticket_id, COUNT(*) AS n FROM cheers GROUP BY ticket_id) c
+             ON c.ticket_id = t.id
+          WHERE t.user_id = ?
+          ORDER BY t.created_at DESC
+          LIMIT 50`,
+      )
+      .bind(profileUser.id)
+      .all<TicketWithSocial>(),
+  ]);
+  const isFollowing = viewerUserId
+    ? await isFollowingCheck(db, viewerUserId, profileUser.id)
+    : false;
+  const tickets: Record<string, unknown>[] = [];
+  for (const row of ticketsRaw.results) {
+    const byMe = viewerUserId ? await hasCheered(db, row.id, viewerUserId) : false;
+    const decoded = decodeSocialTicket(row, byMe);
+    if (decoded) tickets.push(decoded);
+  }
+  return {
+    ...publicUser(profileUser, {
+      follower_count: folls,
+      followee_count: follees,
+      is_following: isFollowing,
+    }),
+    tickets,
+  };
+}
+
+async function isFollowingCheck(
+  db: D1Database,
+  followerId: string,
+  followeeId: string,
+): Promise<boolean> {
+  if (followerId === followeeId) return false;
+  return isFollowing(db, followerId, followeeId);
+}
+
+interface FriendsAvatars {
+  count: number;
+  avatars: { handle: string | null; display_name: string | null; avatar: string | null }[];
+}
+
+/** Friends-on-race: followed users with ≥1 ticket on this raceKey. */
+async function friendsOnRace(
+  db: D1Database,
+  userId: string,
+  raceKey: string,
+): Promise<FriendsAvatars> {
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT u.handle, u.display_name, u.avatar
+         FROM follows f
+         JOIN users u ON u.id = f.followee_id
+        WHERE f.follower_id = ?
+          AND EXISTS (
+            SELECT 1 FROM tickets t
+             WHERE t.user_id = f.followee_id AND t.race_key = ?
+          )`,
+    )
+    .bind(userId, raceKey)
+    .all<{ handle: string | null; display_name: string | null; avatar: string | null }>();
+  return {
+    count: results.length,
+    avatars: results.slice(0, 8),
+  };
+}
+
+/** Friends-on-card: followed users with ≥1 ticket on ANY race in the snapshot. */
+async function friendsOnCard(
+  db: D1Database,
+  userId: string,
+  raceKeys: string[],
+): Promise<FriendsAvatars> {
+  if (raceKeys.length === 0) return { count: 0, avatars: [] };
+  // D1 prepared bindings cap at a conservative number; chunk with an IN list.
+  const placeholders = raceKeys.map(() => "?").join(",");
+  const { results } = await db
+    .prepare(
+      `SELECT DISTINCT u.handle, u.display_name, u.avatar
+         FROM follows f
+         JOIN users u ON u.id = f.followee_id
+        WHERE f.follower_id = ?
+          AND EXISTS (
+            SELECT 1 FROM tickets t
+             WHERE t.user_id = f.followee_id AND t.race_key IN (${placeholders})
+          )`,
+    )
+    .bind(userId, ...raceKeys)
+    .all<{ handle: string | null; display_name: string | null; avatar: string | null }>();
+  return {
+    count: results.length,
+    avatars: results.slice(0, 8),
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Router.
 // ---------------------------------------------------------------------------
 
 const TICKET_PATH = /^\/api\/social\/tickets(\/([^/]+))?$/;
+const TICKET_CHEER_PATH = /^\/api\/social\/tickets\/([^/]+)\/cheer$/;
+const FOLLOW_PATH = /^\/api\/social\/follow\/([^/]+)$/;
+const PROFILE_PATH = /^\/api\/social\/users\/([^/]+)$/;
+const RACE_FRIENDS_PATH = /^\/api\/social\/races\/([^/]+)\/friends$/;
+const FEED_PATH = "/api/social/feed";
+const FRIENDS_ON_CARD_PATH = "/api/social/friends/on-card";
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -391,18 +831,52 @@ export default {
     const url = new URL(request.url);
     const pathname = url.pathname;
 
-    // /api/social/me — Phase 1 identity.
+    // /api/social/me — Phase 1 identity (+ Phase 3 handle/dn/avatar patch).
     if (pathname === "/api/social/me") {
       return handleMe(request, env, cors);
     }
 
+    // /api/social/follow/:userId — Phase 3 follow graph.
+    const followMatch = FOLLOW_PATH.exec(pathname);
+    if (followMatch) {
+      return handleFollow(request, env, cors, decodeURIComponent(followMatch[1]));
+    }
+
+    // /api/social/tickets/:id/cheer — Phase 3 cheers.
+    const cheerMatch = TICKET_CHEER_PATH.exec(pathname);
+    if (cheerMatch) {
+      return handleCheer(request, env, cors, decodeURIComponent(cheerMatch[1]));
+    }
+
     // /api/social/tickets and /api/social/tickets/:id — Phase 2 persistence.
     const ticketMatch = TICKET_PATH.exec(pathname);
-    if (ticketMatch) {
+    if (ticketMatch && !TICKET_CHEER_PATH.exec(pathname)) {
       return handleTickets(request, env, cors, ticketMatch[2] ?? null);
     }
 
-    // Only the two route prefixes above are served here. /api/live stays on
+    // /api/social/feed — Phase 3 feed.
+    if (pathname === FEED_PATH) {
+      return handleFeed(request, env, cors);
+    }
+
+    // /api/social/friends/on-card — Phase 3 today's-card strip.
+    if (pathname === FRIENDS_ON_CARD_PATH) {
+      return handleFriendsOnCard(request, env, cors, url);
+    }
+
+    // /api/social/races/:raceKey/friends — Phase 3 friends-on-race.
+    const raceFriendsMatch = RACE_FRIENDS_PATH.exec(pathname);
+    if (raceFriendsMatch) {
+      return handleRaceFriends(request, env, cors, decodeURIComponent(raceFriendsMatch[1]));
+    }
+
+    // /api/social/users/:handle — Phase 3 public profile.
+    const profileMatch = PROFILE_PATH.exec(pathname);
+    if (profileMatch) {
+      return handleProfile(request, env, cors, decodeURIComponent(profileMatch[1]));
+    }
+
+    // Only the route prefixes above are served here. /api/live stays on
     // the racing Worker; everything else is 404 (no collision with racing origin).
     return json({ error: "not_found" }, 404, cors);
   },
@@ -420,22 +894,76 @@ async function handleMe(
   if (!verified) {
     return json({ error: "unauthorized" }, 401, cors);
   }
-  let ageVerified: number | null = null;
+  const patch: {
+    age_verified?: number | null;
+    handle?: string | null;
+    display_name?: string | null;
+    avatar?: string | null;
+  } = {};
   if (request.method === "POST") {
     try {
-      const body = (await request.json()) as { age_verified?: unknown };
-      if (typeof body.age_verified === "number") {
-        ageVerified = body.age_verified;
+      const body = (await request.json()) as {
+        age_verified?: unknown;
+        handle?: unknown;
+        display_name?: unknown;
+        avatar?: unknown;
+      };
+      if (typeof body.age_verified === "number") patch.age_verified = body.age_verified;
+      // Phase 3: handle/dn/avatar. Empty string clears; null also accepted.
+      if (typeof body.handle === "string") {
+        const h = body.handle.trim();
+        if (h.length === 0 || h.length > 32) {
+          return json({ error: "bad_handle" }, 400, cors);
+        }
+        if (!/^[a-zA-Z0-9_]+$/.test(h)) {
+          return json({ error: "bad_handle" }, 400, cors);
+        }
+        patch.handle = h;
+      } else if (body.handle === null) {
+        patch.handle = null;
+      }
+      if (typeof body.display_name === "string") {
+        const d = body.display_name.trim();
+        if (d.length > 64) return json({ error: "bad_display_name" }, 400, cors);
+        patch.display_name = d;
+      } else if (body.display_name === null) {
+        patch.display_name = null;
+      }
+      if (typeof body.avatar === "string") {
+        if (body.avatar.length > 2048) return json({ error: "bad_avatar" }, 400, cors);
+        patch.avatar = body.avatar;
+      } else if (body.avatar === null) {
+        patch.avatar = null;
       }
     } catch {
       // Empty / non-JSON body is fine — treat as upsert-only.
     }
   }
-  const row = await upsertUser(env.DB, verified.sub, ageVerified);
-  if (!row) {
+  const result = await upsertUser(env.DB, verified.sub, patch);
+  if (!result.ok) {
+    if (result.code === "handle_taken") {
+      return json({ error: "handle_taken" }, 409, cors);
+    }
     return json({ error: "server_error" }, 500, cors);
   }
-  return json(row, 200, cors);
+  return json(result.row, 200, cors);
+}
+
+/**
+ * Phase 3 social handlers call this on every request to guarantee the caller
+ * has a user row (the FK on follows/cheers/rate_limits requires it). Returns
+ * the row on success; on failure, emits the right HTTP error and returns null
+ * so the caller can early-exit.
+ */
+async function ensureCaller(
+  env: Env,
+  cors: Record<string, string>,
+  clerkSub: string,
+): Promise<{ user: UserRow } | { res: Response }> {
+  const result = await upsertUser(env.DB, clerkSub, {});
+  if (result.ok) return { user: result.row };
+  // handle_taken can't happen here (empty patch); surface as 500 regardless.
+  return { res: json({ error: "server_error" }, 500, cors) };
 }
 
 async function handleTickets(
@@ -451,11 +979,9 @@ async function handleTickets(
 
   // Ensure the caller has a user row (Phase 1 upsert on first touch). Cheap
   // and keeps the FK valid even if the client skipped POST /api/social/me.
-  const user = await upsertUser(env.DB, verified.sub, null);
-  if (!user) {
-    return json({ error: "server_error" }, 500, cors);
-  }
-  const userId = user.id;
+  const caller = await ensureCaller(env, cors, verified.sub);
+  if ("res" in caller) return caller.res;
+  const userId = caller.user.id;
 
   if (id === null) {
     // /api/social/tickets
@@ -469,6 +995,16 @@ async function handleTickets(
         body = await request.json();
       } catch {
         return json({ error: "bad_body" }, 400, cors);
+      }
+      // Rate-limit ticket POSTs (Decision 8).
+      const allowed = await rateLimitCheck(env.DB, userId, "ticket");
+      if (!allowed) {
+        return json(
+          { error: "rate_limited" },
+          429,
+          cors,
+          { "Retry-After": String(RATE_WINDOW) },
+        );
       }
       const parsed = parseTicketBody(body);
       if (!parsed.ok) {
@@ -506,4 +1042,180 @@ async function handleTickets(
     );
   }
   return json({ error: "method_not_allowed" }, 405, cors);
+}
+
+async function handleFollow(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  targetId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
+  if (request.method !== "POST" && request.method !== "DELETE") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  if (targetId === caller.id) {
+    return json({ error: "cannot_follow_self" }, 403, cors);
+  }
+  // 404 if the target user doesn't exist (don't leak existence via 200).
+  const target = await userById(env.DB, targetId);
+  if (!target) return json({ error: "not_found" }, 404, cors);
+
+  if (request.method === "POST") {
+    const allowed = await rateLimitCheck(env.DB, caller.id, "follow");
+    if (!allowed) {
+      return json(
+        { error: "rate_limited" },
+        429,
+        cors,
+        { "Retry-After": String(RATE_WINDOW) },
+      );
+    }
+    await followUser(env.DB, caller.id, targetId);
+    return json({ ok: true }, 200, cors);
+  }
+  // DELETE
+  const allowed = await rateLimitCheck(env.DB, caller.id, "follow");
+  if (!allowed) {
+    return json(
+      { error: "rate_limited" },
+      429,
+      cors,
+      { "Retry-After": String(RATE_WINDOW) },
+    );
+  }
+  await unfollowUser(env.DB, caller.id, targetId);
+  return json({ ok: true }, 200, cors);
+}
+
+async function handleCheer(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  ticketId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  if (request.method !== "POST" && request.method !== "DELETE") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
+
+  const ticket = await findTicket(env.DB, ticketId);
+  if (!ticket) return json({ error: "not_found" }, 404, cors);
+
+  // Won-only (Decision table): cheering is a celebration, not pre-race hype.
+  if (ticket.state !== "won") {
+    return json({ error: "not_won" }, 409, cors);
+  }
+  // Self-cheer forbidden (Decision 2).
+  if (ticket.user_id === caller.id) {
+    return json({ error: "cannot_cheer_own_ticket" }, 409, cors);
+  }
+
+  const allowed = await rateLimitCheck(env.DB, caller.id, "cheer");
+  if (!allowed) {
+    return json(
+      { error: "rate_limited" },
+      429,
+      cors,
+      { "Retry-After": String(RATE_WINDOW) },
+    );
+  }
+
+  if (request.method === "POST") {
+    await addCheer(env.DB, ticketId, caller.id);
+  } else {
+    await removeCheer(env.DB, ticketId, caller.id);
+  }
+  const [count, byMe] = await Promise.all([
+    cheerCount(env.DB, ticketId),
+    request.method === "POST"
+      ? Promise.resolve(true)
+      : Promise.resolve(false),
+  ]);
+  // For POST, the PK dedupe guarantees the row exists, so cheeredByMe=true
+  // is correct without a re-read. For DELETE, even if the row didn't exist
+  // (idempotent uncheer), the user is not cheering now.
+  return json({ count, cheeredByMe: byMe }, 200, cors);
+}
+
+async function handleFeed(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
+  const tickets = await buildFeed(env.DB, caller.id);
+  return json({ tickets }, 200, cors);
+}
+
+async function handleProfile(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  handle: string,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  // JWT OPTIONAL — a signed-out viewer can read a public profile.
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  let viewerId: string | null = null;
+  if (verified) {
+    const v = await ensureCaller(env, cors, verified.sub);
+    if ("res" in v) return v.res;
+    viewerId = v.user.id;
+  }
+
+  const profileUser = await userByHandle(env.DB, handle);
+  if (!profileUser || !profileUser.handle) {
+    return json({ error: "not_found" }, 404, cors);
+  }
+  const profile = await buildProfile(env.DB, profileUser, viewerId);
+  return json(profile, 200, cors);
+}
+
+async function handleRaceFriends(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  raceKeyRaw: string,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
+  // raceKey arrives URL-encoded; the regex already captured the raw segment,
+  // and decodeURIComponent was applied by the router. Pipe chars are part of
+  // the key ("date|venue|Rn|name") — they're fine.
+  void raceKeyRaw;
+  return json(await friendsOnRace(env.DB, caller.id, raceKeyRaw), 200, cors);
+}
+
+async function handleFriendsOnCard(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
+  // The client supplies the current snapshot's raceKeys via ?race= query
+  // params (?race=k1&race=k2...). Empty list = empty result.
+  const raceKeys = url.searchParams.getAll("race").filter(Boolean);
+  return json(await friendsOnCard(env.DB, caller.id, raceKeys), 200, cors);
 }
