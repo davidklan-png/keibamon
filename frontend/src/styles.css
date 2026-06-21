@@ -1,6 +1,59 @@
 /* ADR-0007: light theme. M PLUS Rounded 1c (friendly, bilingual) + Space Mono
-   (serials/odds/eyebrows). Self-host for production. */
-@import url("https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;500;700;800;900&family=Space+Mono:wght@400;700&display=swap");
+   (serials/odds/eyebrows).
+   ADR-0007 Phase 4: self-hosted. Eliminates the runtime Google Fonts request
+   (privacy + speed). Files live in /public/fonts/ and are served at
+   /app/fonts/* by the racing Worker's assets binding. Subsetted to the glyphs
+   the app actually uses (~460 KB total uncompressed, ~140 KB brotli'd). The
+   SIL OFL 1.1 license is in /app/fonts/LICENSE.txt. */
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/app/fonts/mplus-rounded-1c-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("/app/fonts/mplus-rounded-1c-500.woff2") format("woff2");
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/app/fonts/mplus-rounded-1c-700.woff2") format("woff2");
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-style: normal;
+  font-weight: 800;
+  font-display: swap;
+  src: url("/app/fonts/mplus-rounded-1c-800.woff2") format("woff2");
+}
+@font-face {
+  font-family: "M PLUS Rounded 1c";
+  font-style: normal;
+  font-weight: 900;
+  font-display: swap;
+  src: url("/app/fonts/mplus-rounded-1c-900.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/app/fonts/space-mono-400.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Space Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("/app/fonts/space-mono-700.woff2") format("woff2");
+}
 
 :root {
   /* Legacy names kept so the existing 4 screens keep working, remapped light. */
