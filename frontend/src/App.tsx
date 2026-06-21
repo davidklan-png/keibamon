@@ -14,6 +14,10 @@ import type {
   Complexity,
   Flavor,
   Ticket,
+  MoodKey,
+  CommittedTicket,
+  CommittedState,
+  RaceSnapshot,
 } from "./lib/types";
 import { DEFAULT_STYLE, applyPersonality, moodKey } from "./lib/types";
 import {
@@ -23,7 +27,7 @@ import {
   type LiveRace,
 } from "./api";
 
-type Step = "race" | "style" | "tickets" | "explain";
+type Step = "mine" | "race" | "style" | "tickets" | "explain";
 
 const PERSONALITIES: PersonalityId[] = [
   "safe",
@@ -66,7 +70,9 @@ function App() {
   const i18n = useI18n();
   const { t, tFmt, lang, setLang } = i18n;
 
-  const [step, setStep] = useState<Step>("race");
+  // ADR-0007: My Tickets is the home/landing; the classic builder is reached
+  // via the New-bet flow (and an "advanced builder" affordance).
+  const [step, setStep] = useState<Step>("mine");
   const [runners, setRunners] = useState<Runner[]>([]);
   const [raceLabel, setRaceLabel] = useState<string>("");
   const [selectedRaceDate, setSelectedRaceDate] = useState<string>("");
@@ -233,6 +239,7 @@ function App() {
 
   // ---------- Step nav ----------
   const steps: { id: Step; label: string; enabled: boolean }[] = [
+    { id: "mine", label: t("mine.home"), enabled: true },
     { id: "race", label: t("nav.race"), enabled: true },
     { id: "style", label: t("nav.style"), enabled: runners.length >= 2 },
     {
@@ -242,6 +249,21 @@ function App() {
     },
     { id: "explain", label: t("nav.explain"), enabled: !!activeTicketId },
   ];
+
+  // ADR-0007: My Tickets surface is its own full-screen home (own header). The
+  // classic 4-step builder remains reachable via onClassic.
+  if (step === "mine") {
+    return (
+      <main className="app">
+        <MyTickets
+          snap={snap}
+          onClassic={() => setStep("race")}
+          onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
+        />
+        <Footer />
+      </main>
+    );
+  }
 
   return (
     <main className="app">
@@ -274,6 +296,7 @@ function App() {
             key={s.id}
             className={step === s.id ? "on" : ""}
             disabled={!s.enabled}
+            aria-current={step === s.id ? "step" : undefined}
             onClick={() => setStep(s.id)}
           >
             {s.label}
@@ -354,7 +377,7 @@ interface RaceScreenProps {
 }
 
 function RaceScreen(props: RaceScreenProps) {
-  const { t } = useI18n();
+  const { t, tFmt, lang } = useI18n();
   const {
     runners,
     raceLabel,
@@ -379,9 +402,7 @@ function RaceScreen(props: RaceScreenProps) {
   const dateFor = (race: LiveRace) => race.date ?? fallbackDate;
   const keyFor = (race: LiveRace) =>
     `${dateFor(race)}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
-  const dateOptions = Array.from(
-    new Set(cardRaces.map(dateFor).filter((date) => date.length > 0)),
-  );
+  const dateOptions = Array.from(new Set(cardRaces.map(dateFor)));
   const activeDate = dateOptions.includes(selectedRaceDate)
     ? selectedRaceDate
     : dateOptions[0] || "";
@@ -391,7 +412,67 @@ function RaceScreen(props: RaceScreenProps) {
     : racesForDate.length > 0
       ? keyFor(racesForDate[0])
       : "";
+  const popularRaces = [...racesForDate]
+    .sort((a, b) => popularScore(b) - popularScore(a))
+    .slice(0, Math.min(4, racesForDate.length));
+  const racesByVenue = racesForDate.reduce<Map<string, LiveRace[]>>((acc, r) => {
+    const venue = r.venue || "-";
+    const list = acc.get(venue) || [];
+    list.push(r);
+    acc.set(venue, list);
+    return acc;
+  }, new Map());
   const pending = raceStatus === "registered";
+
+  function dateLabel(date: string): string {
+    if (!date) return t("race.raceDay");
+    const normalized = /^\d{8}$/.test(date)
+      ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`
+      : date;
+    const parsed = new Date(`${normalized}T00:00:00`);
+    if (Number.isNaN(parsed.getTime())) return date;
+    return new Intl.DateTimeFormat(lang === "ja" ? "ja-JP" : "en-US", {
+      month: "short",
+      day: "numeric",
+      weekday: "short",
+    }).format(parsed);
+  }
+
+  function statusLabel(race: LiveRace): string {
+    const status = race.status ?? (raceHasLiveOdds(race) ? "open" : "registered");
+    if (status === "result") return t("race.statusResult");
+    if (status === "open") return t("race.statusOpen");
+    return t("race.statusRegistered");
+  }
+
+  function popularScore(race: LiveRace): number {
+    const name = race.name || "";
+    const grade = (race.grade_label || "").toUpperCase();
+    const gradeLike =
+      /(g1|g2|g3|gⅠ|gⅡ|gⅢ|gi|gii|giii|ＧⅠ|ＧⅡ|ＧⅢ|重賞|ステークス|カップ|杯|賞|記念|derby|oaks|cup|stakes|kinen|sho|hai|takarazuka|arima|yasuda|tenno|japan cup)/i.test(
+        name,
+      );
+    return (
+      (grade === "G1" ? 300 : grade === "G2" ? 240 : grade === "G3" ? 220 : 0) +
+      (gradeLike ? 100 : 0) +
+      (race.race_no >= 10 ? 30 : 0) +
+      (raceHasLiveOdds(race) ? 10 : 0) +
+      Math.min(race.race_no, 12)
+    );
+  }
+
+  function raceTitle(race: LiveRace): string {
+    return race.name || `Race ${race.race_no}`;
+  }
+
+  function RaceMeta({ race }: { race: LiveRace }) {
+    return (
+      <span className="race-meta">
+        {race.venue || "-"} · R{race.race_no} ·{" "}
+        {tFmt("race.runnersCount", { count: race.runners?.length || 0 })}
+      </span>
+    );
+  }
 
   return (
     <>
@@ -400,52 +481,89 @@ function RaceScreen(props: RaceScreenProps) {
           <h2>{t("race.title")}</h2>
           <small>{t("race.hint")}</small>
         </div>
-        <div className="grid-2" style={{ marginBottom: 10 }}>
-          <select
-            aria-label={t("race.date")}
-            value={activeDate}
-            onChange={(e) => {
-              const nextDate = e.target.value;
-              const nextRace = cardRaces.find((r) => dateFor(r) === nextDate);
-              if (nextRace) onApplyRace(nextRace, fallbackDate);
-            }}
-          >
-            {dateOptions.length === 0 ? (
-              <option value="">{t("race.noLive")}</option>
-            ) : (
-              dateOptions.map((date) => (
-                <option key={date} value={date}>
-                  {date}
-                </option>
-              ))
-            )}
-          </select>
-          <select
-            aria-label={t("race.live")}
-            value={activeRaceKey}
-            onChange={(e) => {
-              const r = racesForDate.find((x) => keyFor(x) === e.target.value);
-              if (r) onApplyRace(r, fallbackDate);
-            }}
-          >
-            {racesForDate.length === 0 ? (
-              <option value="">{t("race.noLive")}</option>
-            ) : (
-              racesForDate.map((r) => (
-                <option
-                  key={keyFor(r)}
-                  value={keyFor(r)}
-                >
-                  R{r.race_no} · {r.name || `Race ${r.race_no}`} ·{" "}
-                  {r.venue || "-"}
-                  {raceHasLiveOdds(r) ? "" : ` · ${t("race.pendingTag")}`}
-                </option>
-              ))
-            )}
-          </select>
-        </div>
-        <div className="grid-2" style={{ marginBottom: 10 }}>
-          <div className="hint selected-race">{raceLabel}</div>
+        {cardRaces.length > 0 ? (
+          <div className="race-selector">
+            <div className="selector-block">
+              <div className="selector-label">{t("race.date")}</div>
+              <div className="date-chips" role="listbox" aria-label={t("race.date")}>
+                {dateOptions.map((date) => {
+                  const firstForDate = [...cardRaces]
+                    .filter((r) => dateFor(r) === date)
+                    .sort((a, b) => popularScore(b) - popularScore(a))[0];
+                  return (
+                    <button
+                      key={date || "race-day"}
+                      className={`date-chip ${activeDate === date ? "on" : ""}`}
+                      onClick={() => {
+                        if (firstForDate) onApplyRace(firstForDate, fallbackDate);
+                      }}
+                      role="option"
+                      aria-selected={activeDate === date}
+                    >
+                      {dateLabel(date)}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="selector-block">
+              <div className="selector-label">{t("race.popular")}</div>
+              <div className="popular-races">
+                {popularRaces.map((r) => {
+                  const selected = keyFor(r) === activeRaceKey;
+                  return (
+                    <button
+                      key={keyFor(r)}
+                      className={`race-card ${selected ? "on" : ""}`}
+                      onClick={() => onApplyRace(r, fallbackDate)}
+                    >
+                      <span className="race-card-top">
+                        <span>R{r.race_no}</span>
+                        <span>{statusLabel(r)}</span>
+                      </span>
+                      <strong>{raceTitle(r)}</strong>
+                      <RaceMeta race={r} />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <details className="all-races">
+              <summary>{t("race.allRaces")}</summary>
+              <div className="venue-groups">
+                {Array.from(racesByVenue.entries()).map(([venue, races]) => (
+                  <div className="venue-group" key={venue}>
+                    <div className="venue-name">{venue}</div>
+                    <div className="race-list">
+                      {[...races]
+                        .sort((a, b) => a.race_no - b.race_no)
+                        .map((r) => (
+                          <button
+                            key={keyFor(r)}
+                            className={`race-row ${keyFor(r) === activeRaceKey ? "on" : ""}`}
+                            onClick={() => onApplyRace(r, fallbackDate)}
+                          >
+                            <span className="race-row-no">R{r.race_no}</span>
+                            <span className="race-row-name">{raceTitle(r)}</span>
+                            <span className="race-row-status">{statusLabel(r)}</span>
+                          </button>
+                        ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </details>
+          </div>
+        ) : (
+          <p className="empty live-empty">{t("race.noLive")}</p>
+        )}
+        <div className="grid-2 race-actions">
+          <div className="selected-race">
+            <span>{t("race.selected")}</span>
+            <strong>{raceLabel}</strong>
+          </div>
           <div className="btn-row">
             <button
               className="btn"
@@ -461,7 +579,7 @@ function RaceScreen(props: RaceScreenProps) {
         </div>
         {snapError && (
           <p className="hint" style={{ color: "var(--warn)" }}>
-            {snapError}
+            {t("race.liveUnavailable")}
           </p>
         )}
       </section>
@@ -473,6 +591,7 @@ function RaceScreen(props: RaceScreenProps) {
       <section className={`section ${pending ? "is-pending" : ""}`}>
         <div className="section-title">
           <h2>{t("race.runners")}</h2>
+          <small>{t("race.oddsLabel")}</small>
         </div>
         {runners.length === 0 ? (
           <p className="empty">{t("tickets.noRunners")}</p>
@@ -819,13 +938,6 @@ function ExplainScreen(props: ExplainScreenProps) {
             {yen(ticket.cost)} ({ticket.lines.length} × {yen(ticket.unit)})
           </dd>
         </dl>
-        <div className="ev-line">
-          {tFmt("tickets.estReturnLine", {
-            ret: ev.toFixed(0),
-            edge: `${edgePct}%`,
-          })}{" "}
-          {t("tickets.houseEdgeNote")}
-        </div>
         <div className="combos">
           {ticket.lines.slice(0, 12).map((ln, j) => (
             <span key={j} className="combo-chip">
@@ -833,23 +945,1051 @@ function ExplainScreen(props: ExplainScreenProps) {
             </span>
           ))}
         </div>
-        <p className="math" style={{ marginTop: 16 }}>
-          <strong>{t("explain.math")}:</strong>
-          <br />
-          {t("explain.mathBody")}
-          <br />
-          <span style={{ color: "var(--muted)" }}>
-            RET[{ticket.type}] = {RET[ticket.type as BetType]} · γ = 0.856
-          </span>
-        </p>
-        <p className="hint" style={{ marginTop: 12 }}>
-          {t("explain.takeoutReminder")}
-        </p>
+        <details className="math-disclosure">
+          <summary>{t("explain.mathSummary")}</summary>
+          <div className="ev-line">
+            {tFmt("tickets.estReturnLine", {
+              ret: ev.toFixed(0),
+              edge: `${edgePct}%`,
+            })}{" "}
+            {t("tickets.houseEdgeNote")}
+          </div>
+          <p className="math">
+            <strong>{t("explain.math")}:</strong>
+            <br />
+            {t("explain.mathBody")}
+            <br />
+            <span style={{ color: "var(--muted)" }}>
+              RET[{ticket.type}] = {RET[ticket.type as BetType]} · γ = 0.856
+            </span>
+          </p>
+          <p className="hint" style={{ marginTop: 12 }}>
+            {t("explain.takeoutReminder")}
+          </p>
+        </details>
       </section>
       <button className="btn primary" style={{ width: "100%" }} onClick={onBack}>
         ← {t("explain.back")}
       </button>
     </>
+  );
+}
+
+// ============================================================================
+// ADR-0007 — "My Tickets" surface (Phase 0)
+// Recreates the design handoff against real data: the three vibe options come
+// from the real recommend() engine, live odds/drift come from the existing 45s
+// /api/live poll (NOT the prototype's 3s timer), and committed tickets persist
+// to localStorage as a stand-in until the Clerk + social-D1 backend lands.
+// ============================================================================
+type MtView = "feed" | "new" | "detail";
+type DriftDir = "firm" | "drift" | "steady";
+
+const MT_MOOD_COLOR: Record<MoodKey, string> = {
+  safer: "var(--turf)",
+  balanced: "var(--sky)",
+  spicier: "var(--coral)",
+};
+
+const MT_VIBES: { mood: MoodKey; pid: PersonalityId }[] = [
+  { mood: "safer", pid: "safe" },
+  { mood: "balanced", pid: "balanced" },
+  { mood: "spicier", pid: "longshot" },
+];
+
+function mtStateColor(s: CommittedState): string {
+  return s === "open"
+    ? "var(--turf)"
+    : s === "won"
+      ? "var(--gold-amber)"
+      : "var(--miss)";
+}
+
+function mtSep(type: BetType): string {
+  return type === "exacta" || type === "trifecta" ? " › " : " – ";
+}
+
+function mtRaceKey(race: LiveRace, fallbackDate?: string): string {
+  const date = race.date ?? fallbackDate ?? "";
+  return `${date}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
+}
+
+function mtFmtDate(date: string, lang: "en" | "ja"): string {
+  if (!date) return "";
+  const normalized = /^\d{8}$/.test(date)
+    ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`
+    : date;
+  const parsed = new Date(`${normalized}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return date;
+  return new Intl.DateTimeFormat(lang === "ja" ? "ja-JP" : "en-US", {
+    month: "short",
+    day: "numeric",
+    weekday: "short",
+  }).format(parsed);
+}
+
+function mtPickFeature(snap: LiveSnapshot | null): LiveRace | null {
+  const races = (snap?.races || []).filter((r) => (r.runners || []).length > 0);
+  if (races.length === 0) return null;
+  const open = races.filter((r) => raceHasLiveOdds(r));
+  const pool = open.length > 0 ? open : races;
+  return (
+    pool.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
+    pool[pool.length - 1]
+  );
+}
+
+function mtRunnersOf(race: LiveRace): Runner[] {
+  return (race.runners || []).map((r) => ({
+    uma: String(r.umaban),
+    name: r.name ?? null,
+    odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
+  }));
+}
+
+function mtLoadStored(lang: string): CommittedTicket[] {
+  try {
+    const raw = localStorage.getItem("kbm.v4." + lang);
+    const parsed = raw ? (JSON.parse(raw) as CommittedTicket[]) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+interface MyTicketsProps {
+  snap: LiveSnapshot | null;
+  onClassic: () => void;
+  onToggleLang: () => void;
+}
+
+function MyTickets({ snap, onClassic, onToggleLang }: MyTicketsProps) {
+  const { t, tFmt, lang } = useI18n();
+  const ja = lang === "ja";
+
+  const [view, setView] = useState<MtView>("feed");
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const [tickets, setTickets] = useState<CommittedTicket[]>(() =>
+    mtLoadStored(lang),
+  );
+  const [selIdx, setSelIdx] = useState(1);
+  const [unit, setUnit] = useState(200);
+  const [burstId, setBurstId] = useState<string | null>(null);
+  const [settleId, setSettleId] = useState<string | null>(null);
+  const [toast, setToast] = useState<string>("");
+  const [now, setNow] = useState(() => Date.now());
+  const [driftMap, setDriftMap] = useState<Record<string, DriftDir>>({});
+
+  const prevOdds = useRef<Map<string, number>>(new Map());
+  const seeded = useRef(tickets.length > 0);
+  const storageEmpty = useRef(tickets.length === 0);
+
+  const feature = useMemo(() => mtPickFeature(snap), [snap]);
+  const fallbackDate = snap?.meta?.date;
+
+  // 1s clock so countdowns tick. The refresh bar itself is CSS-only decoration.
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Reload the per-language log when the language flips (matches prototype key).
+  useEffect(() => {
+    const s = mtLoadStored(lang);
+    setTickets(s);
+    storageEmpty.current = s.length === 0;
+    seeded.current = s.length > 0;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lang]);
+
+  // Drift: compare each runner's live odds to the previous /api/live poll.
+  useEffect(() => {
+    if (!snap) return;
+    const next: Record<string, DriftDir> = {};
+    for (const race of snap.races || []) {
+      const rk = mtRaceKey(race, fallbackDate);
+      for (const ru of race.runners || []) {
+        const odds = ru.win_odds ?? 0;
+        if (!odds) continue;
+        const key = rk + "|" + ru.umaban;
+        const prev = prevOdds.current.get(key);
+        next[key] =
+          prev == null || prev === odds ? "steady" : odds < prev ? "firm" : "drift";
+        prevOdds.current.set(key, odds);
+      }
+    }
+    setDriftMap((d) => ({ ...d, ...next }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap]);
+
+  function persist(list: CommittedTicket[]) {
+    try {
+      localStorage.setItem("kbm.v4." + lang, JSON.stringify(list));
+    } catch {
+      /* offline cache only; Phase 2 persists per-user to the backend */
+    }
+  }
+
+  function snapshotRace(race: LiveRace): RaceSnapshot {
+    const date = race.date ?? fallbackDate ?? "";
+    return {
+      raceKey: mtRaceKey(race, fallbackDate),
+      grade: race.grade_label ?? "",
+      nameEn: race.name ?? "",
+      nameJa: race.name ?? "",
+      venueEn: race.venue ?? "",
+      venueJa: race.venue ?? "",
+      raceNo: race.race_no,
+      dateEn: mtFmtDate(date, "en"),
+      dateJa: mtFmtDate(date, "ja"),
+      post: race.post_time ?? "",
+      runners: (race.runners || []).map((r) => ({
+        num: r.umaban,
+        en: r.name ?? "",
+        ja: r.name ?? "",
+        odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
+      })),
+    };
+  }
+
+  // ---- Vibe options from the REAL recommender (do not hand-author lines) ----
+  const featRunners = useMemo(
+    () => (feature ? mtRunnersOf(feature) : []),
+    [feature],
+  );
+  const { p: featP } = useMemo(() => winProbs(featRunners), [featRunners]);
+  const featUmas = useMemo(() => featRunners.map((r) => r.uma), [featRunners]);
+
+  const options = useMemo(() => {
+    if (featUmas.length < 2) return [] as { mood: MoodKey; ticket: Ticket }[];
+    return MT_VIBES.map((v) => {
+      const style = applyPersonality({ ...DEFAULT_STYLE, unit }, v.pid);
+      const out = recommend({ allUmas: featUmas, p: featP, style, intuition: {} });
+      return out[0] ? { mood: v.mood, ticket: out[0] } : null;
+    }).filter((o): o is { mood: MoodKey; ticket: Ticket } => o != null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featUmas, featP, unit]);
+
+  // ---- Seed a demo log (real runners) the first time storage is empty ----
+  useEffect(() => {
+    if (seeded.current || !storageEmpty.current || !feature) return;
+    if (featUmas.length < 2) return;
+    const rs = snapshotRace(feature);
+    const mk = (pid: PersonalityId) =>
+      recommend({
+        allUmas: featUmas,
+        p: featP,
+        style: applyPersonality({ ...DEFAULT_STYLE, unit: 200 }, pid),
+        intuition: {},
+      })[0];
+    const balanced = mk("balanced");
+    const spicy = mk("longshot");
+    const seeds: CommittedTicket[] = [];
+    if (balanced)
+      seeds.push({
+        id: "kb-seed-open",
+        serial: "KB-7F2A91",
+        ticket: balanced,
+        unit: 200,
+        mood: moodKey(balanced),
+        state: "open",
+        payoutBase: balanced.avgPayout,
+        race: rs,
+        owner: "you",
+        claps: 0,
+        createdAt: Date.now(),
+      });
+    if (spicy)
+      seeds.push({
+        id: "kb-seed-won",
+        serial: "KB-9A15D7",
+        ticket: spicy,
+        unit: 300,
+        mood: moodKey(spicy),
+        state: "won",
+        payoutBase: spicy.avgPayout,
+        returned: Math.round(spicy.avgPayout / 100) * 100,
+        race: rs,
+        owner: { en: "Rin", ja: "リン", color: "#FF6A6A", initial: "R", initialJa: "リ" },
+        claps: 41,
+        createdAt: Date.now() - 86400000,
+      });
+    if (seeds.length) {
+      seeded.current = true;
+      setTickets(seeds);
+      persist(seeds);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feature, featUmas, featP]);
+
+  // ---- Live helpers ----
+  function liveRaceFor(tk: CommittedTicket): LiveRace | null {
+    return (
+      (snap?.races || []).find(
+        (r) => mtRaceKey(r, fallbackDate) === tk.race.raceKey,
+      ) || null
+    );
+  }
+  function liveOdds(tk: CommittedTicket, num: number): number {
+    const lr = liveRaceFor(tk);
+    const lrun = lr?.runners?.find((x) => x.umaban === num);
+    return (
+      lrun?.win_odds ??
+      lrun?.win_odds_est ??
+      tk.race.runners.find((r) => r.num === num)?.odds ??
+      0
+    );
+  }
+  function driftView(num: number, tk: CommittedTicket, open: boolean) {
+    const dir = open ? driftMap[tk.race.raceKey + "|" + num] : undefined;
+    if (!dir || dir === "steady")
+      return { arrow: "–", label: t("mine.steady"), color: "var(--faint)" };
+    if (dir === "firm")
+      return { arrow: "▾", label: t("mine.firming"), color: "var(--turf)" };
+    return { arrow: "▴", label: t("mine.drifting"), color: "var(--coral)" };
+  }
+  function runnerName(r: { en: string; ja: string }): string {
+    return (ja ? r.ja : r.en) || "";
+  }
+  function countdownText(post: string): string {
+    if (!post) return "";
+    let target = NaN;
+    const m = /^(\d{1,2}):(\d{2})$/.exec(post.trim());
+    if (m) {
+      const d = new Date(now);
+      d.setHours(+m[1], +m[2], 0, 0);
+      target = d.getTime();
+    } else {
+      target = new Date(post).getTime();
+    }
+    const diff = target - now;
+    if (!isFinite(diff) || diff <= 0) return "";
+    const total = Math.floor(diff / 1000);
+    const hh = Math.floor(total / 3600);
+    const mm = Math.floor((total % 3600) / 60);
+    const ss = total % 60;
+    const tt =
+      hh > 0
+        ? `${hh}:${String(mm).padStart(2, "0")}:${String(ss).padStart(2, "0")}`
+        : `${mm}:${String(ss).padStart(2, "0")}`;
+    return ja ? `${t("mine.toGo")} ${tt}` : `${tt} ${t("mine.toGo")}`;
+  }
+
+  // ---- Actions ----
+  function flash(text: string) {
+    setToast(text);
+    window.setTimeout(() => setToast(""), 1900);
+  }
+  function cheer(id: string) {
+    const next = tickets.map((tk) =>
+      tk.id === id ? { ...tk, claps: tk.claps + 1 } : tk,
+    );
+    setTickets(next);
+    persist(next);
+    setBurstId(id);
+    window.setTimeout(() => setBurstId(null), 1100);
+  }
+  // Phase 0 demo trigger. In production this is driven by /api/live reporting
+  // race.status==='result' (resolve win/miss against the result payload).
+  function settle(id: string) {
+    const next = tickets.map((tk) => {
+      if (tk.id !== id) return tk;
+      const ret = Math.round(tk.payoutBase / 100) * 100;
+      return { ...tk, state: "won" as CommittedState, returned: ret };
+    });
+    setTickets(next);
+    persist(next);
+    setSettleId(id);
+    setBurstId(id);
+    flash(t("mine.settledToast"));
+    window.setTimeout(() => {
+      setSettleId(null);
+      setBurstId(null);
+    }, 1900);
+  }
+  function commit() {
+    const opt = options[selIdx];
+    if (!opt || !feature) return;
+    const id = "kb-" + Date.now().toString(36);
+    const serial = "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
+    const tk: CommittedTicket = {
+      id,
+      serial,
+      ticket: opt.ticket,
+      unit,
+      mood: opt.mood,
+      state: "open",
+      payoutBase: opt.ticket.avgPayout,
+      race: snapshotRace(feature),
+      owner: "you",
+      claps: 0,
+      createdAt: Date.now(),
+    };
+    const next = [tk, ...tickets];
+    setTickets(next);
+    persist(next);
+    setDetailId(id);
+    setView("detail");
+  }
+  function openDetail(id: string) {
+    setDetailId(id);
+    setView("detail");
+  }
+
+  const burstStyle = (left: number, bx: string, fontSize?: number) =>
+    ({ left, fontSize, "--bx": bx }) as React.CSSProperties;
+  const burstSpans = (
+    <>
+      <span className="mt-burst" style={burstStyle(9, "-14px")}>
+        👏
+      </span>
+      <span className="mt-burst" style={burstStyle(18, "8px", 11)}>
+        🎉
+      </span>
+    </>
+  );
+
+  const detailTk = detailId ? tickets.find((x) => x.id === detailId) : null;
+  const community = ja
+    ? [
+        { initial: "リ", color: "#FF6A6A" },
+        { initial: "ソ", color: "#2D8CF0" },
+        { initial: "ハ", color: "#E59A14" },
+        { initial: "ケ", color: "#15A862" },
+      ]
+    : [
+        { initial: "R", color: "#FF6A6A" },
+        { initial: "S", color: "#2D8CF0" },
+        { initial: "H", color: "#E59A14" },
+        { initial: "K", color: "#15A862" },
+      ];
+
+  // ====================== FEED ======================
+  function renderFeed() {
+    return (
+      <>
+        <header className="mt-head">
+          <div className="mt-brand">競</div>
+          <div className="mt-brand-text">
+            <div className="mt-brand-name">{t("app.title")}</div>
+            <div className="mt-brand-eyebrow">KEIBAMON · 競馬モン</div>
+          </div>
+          <button
+            className="lang-toggle"
+            onClick={onToggleLang}
+            aria-label="toggle language"
+            style={{ marginRight: 8 }}
+          >
+            {t("app.langToggle")}
+          </button>
+          <div className="mt-me">{ja ? "私" : "You"}</div>
+        </header>
+
+        <div className="mt-feed">
+          <div className="mt-community">
+            <div className="mt-avatars">
+              {community.map((f, i) => (
+                <div
+                  key={i}
+                  className="mt-avatar"
+                  style={{ background: f.color }}
+                >
+                  {f.initial}
+                </div>
+              ))}
+            </div>
+            <div className="mt-community-text">
+              {tFmt("mine.communityCard", { n: 12 })}
+            </div>
+          </div>
+
+          {feature && (
+            <div className="mt-banner">
+              <div className="mt-banner-inner">
+                <div className="mt-banner-eyebrow">
+                  <span className="mt-dot mt-dot-gold" />
+                  <span>
+                    {t("mine.live")} · {t("mine.raceDay")}
+                  </span>
+                </div>
+                <div className="mt-banner-name">{feature.name}</div>
+                <div className="mt-banner-foot">
+                  <span className="mt-banner-meta">
+                    {feature.venue} · R{feature.race_no} ·{" "}
+                    {mtFmtDate(feature.date ?? fallbackDate ?? "", lang)}
+                  </span>
+                  {countdownText(feature.post_time ?? "") && (
+                    <span className="mt-chip-countdown">
+                      {countdownText(feature.post_time ?? "")}
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          <div className="mt-section-head">
+            <h2>{t("mine.home")}</h2>
+            <span className="mt-count">
+              {tFmt("mine.count", { n: tickets.length })}
+            </span>
+          </div>
+
+          {tickets.length === 0 && (
+            <p className="empty">{t("tickets.noRunners")}</p>
+          )}
+
+          {tickets.map((tk) => {
+            const open = tk.state === "open";
+            const sep = mtSep(tk.ticket.type);
+            const topNum = Number(tk.ticket.lines[0]?.combo[0] ?? 0);
+            const topR = tk.race.runners.find((r) => r.num === topNum);
+            const d = driftView(topNum, tk, open);
+            const ownerYou = tk.owner === "you";
+            const payLabel =
+              tk.state === "won" ? t("mine.returned") : t("mine.ifHits");
+            const payValue =
+              tk.state === "won" ? tk.returned ?? 0 : tk.payoutBase;
+            const payColor =
+              tk.state === "won"
+                ? "var(--gold-amber)"
+                : tk.state === "miss"
+                  ? "var(--miss)"
+                  : "var(--ink)";
+            return (
+              <div
+                key={tk.id}
+                className="mt-card"
+                onClick={() => openDetail(tk.id)}
+                role="button"
+                tabIndex={0}
+              >
+                <div
+                  className="mt-stripe"
+                  style={{ background: mtStateColor(tk.state) }}
+                />
+                <div className="mt-card-body">
+                  <div className="mt-card-top">
+                    <div className="mt-card-top-main">
+                      <div className="mt-badges">
+                        <span
+                          className="mt-state-badge"
+                          style={{ background: mtStateColor(tk.state) }}
+                        >
+                          {open ? t("mine.live") : t("mine.result")}
+                        </span>
+                        {tk.race.grade && (
+                          <span className="mt-grade-badge">{tk.race.grade}</span>
+                        )}
+                      </div>
+                      <div className="mt-card-race">{runnerRaceName(tk)}</div>
+                    </div>
+                    <span
+                      className="mt-mood-pill"
+                      style={{ background: MT_MOOD_COLOR[tk.mood] }}
+                    >
+                      {t(`mood.${tk.mood}`)}
+                    </span>
+                  </div>
+
+                  <div className="mt-betline">
+                    <span className="mt-bet-label">
+                      {t(`betType.${tk.ticket.type}`)}
+                    </span>
+                    <div className="mt-chips">
+                      {tk.ticket.lines.slice(0, 4).map((ln, j) => (
+                        <span key={j} className="mt-chip">
+                          {ln.combo.join(sep)}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="mt-metrics">
+                    <div>
+                      <div className="mt-metric-label">{t("mine.cost")}</div>
+                      <div className="mt-metric-cost">{yen(tk.ticket.cost)}</div>
+                    </div>
+                    <div>
+                      <div className="mt-metric-label">{payLabel}</div>
+                      <div className="mt-metric-pay" style={{ color: payColor }}>
+                        {yen(payValue)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {open && (
+                    <div className="mt-live-strip">
+                      <div className="mt-live-row">
+                        <span className="mt-dot-sm" />
+                        <span className="mt-live-contender">
+                          #{topNum} {topR ? runnerName(topR) : ""}
+                        </span>
+                        <span className="mt-live-odds">
+                          {liveOdds(tk, topNum).toFixed(1)}
+                        </span>
+                        <span className="mt-drift" style={{ color: d.color }}>
+                          {d.arrow} {d.label}
+                        </span>
+                        <span className="mt-countdown">
+                          {countdownText(tk.race.post)}
+                        </span>
+                      </div>
+                      <div className="mt-refresh">
+                        <i />
+                      </div>
+                    </div>
+                  )}
+
+                  {!open && (
+                    <div className="mt-owner-row">
+                      <div
+                        className="mt-owner-avatar"
+                        style={{
+                          background: ownerYou
+                            ? "var(--turf)"
+                            : (tk.owner as { color: string }).color,
+                        }}
+                      >
+                        {ownerYou
+                          ? ja
+                            ? "私"
+                            : "Y"
+                          : ja
+                            ? (tk.owner as { initialJa: string }).initialJa
+                            : (tk.owner as { initial: string }).initial}
+                      </div>
+                      <span className="mt-owner-line">
+                        {ownerYou
+                          ? tk.state === "won"
+                            ? t("mine.won")
+                            : t("mine.settled")
+                          : `${ja ? (tk.owner as { ja: string }).ja : (tk.owner as { en: string }).en} · ${t("mine.hit")}`}
+                      </span>
+                      {tk.state === "won" && (
+                        <button
+                          className="mt-cheer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            cheer(tk.id);
+                          }}
+                        >
+                          <span style={{ fontSize: 13 }}>👏</span>
+                          {tk.claps}
+                          {burstId === tk.id && burstSpans}
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+
+          <div className="mt-microline">{t("mine.notAdvice")}</div>
+        </div>
+
+        <button className="mt-fab" onClick={() => setView("new")}>
+          <span>+</span>
+          {t("mine.newBet")}
+        </button>
+      </>
+    );
+  }
+
+  function runnerRaceName(tk: CommittedTicket): string {
+    return (ja ? tk.race.nameJa : tk.race.nameEn) || tk.race.nameEn || "";
+  }
+
+  // ====================== NEW BET ======================
+  function renderNew() {
+    const selCost = options[selIdx]?.ticket.cost ?? 0;
+    return (
+      <>
+        <div className="mt-back-head">
+          <button className="mt-back" onClick={() => setView("feed")}>
+            ‹
+          </button>
+          <div className="mt-back-title">{t("mine.newTitle")}</div>
+          <button
+            className="lang-toggle"
+            onClick={onClassic}
+            style={{ marginLeft: "auto" }}
+          >
+            {ja ? "詳細" : "Builder"}
+          </button>
+        </div>
+
+        <div className="mt-new">
+          {feature ? (
+            <>
+              <div className="mt-race-card">
+                <div className="mt-race-card-eyebrow">
+                  {feature.grade_label || "—"} · {t("mine.raceDay")}
+                </div>
+                <div className="mt-race-card-name">{feature.name}</div>
+                <div className="mt-race-card-meta">
+                  {feature.venue} · R{feature.race_no} ·{" "}
+                  {mtFmtDate(feature.date ?? fallbackDate ?? "", lang)}
+                  {feature.post_time ? ` · ${t("mine.post")} ${feature.post_time}` : ""}
+                </div>
+              </div>
+
+              <div className="mt-vibe-label">{t("mine.pickVibe")}</div>
+              {options.map((o, i) => {
+                const sel = selIdx === i;
+                const sep = mtSep(o.ticket.type);
+                const descKey =
+                  o.mood === "safer"
+                    ? "mine.saferDesc"
+                    : o.mood === "spicier"
+                      ? "mine.spicierDesc"
+                      : "mine.balancedDesc";
+                return (
+                  <div
+                    key={o.mood}
+                    className="mt-option"
+                    style={{ borderColor: sel ? MT_MOOD_COLOR[o.mood] : "var(--line)" }}
+                    onClick={() => setSelIdx(i)}
+                  >
+                    <div className="mt-option-head">
+                      <span
+                        className="mt-option-mooddot"
+                        style={{ background: MT_MOOD_COLOR[o.mood] }}
+                      />
+                      <span className="mt-option-mood">{t(`mine.${o.mood}`)}</span>
+                      <span className="mt-option-bet">
+                        {t(`betType.${o.ticket.type}`)}
+                      </span>
+                      {sel && (
+                        <span
+                          className="mt-check"
+                          style={{ background: MT_MOOD_COLOR[o.mood] }}
+                        >
+                          ✓
+                        </span>
+                      )}
+                    </div>
+                    <div className="mt-option-desc">{t(descKey)}</div>
+                    <div className="mt-chips">
+                      {o.ticket.lines.slice(0, 4).map((ln, j) => (
+                        <span key={j} className="mt-chip">
+                          {ln.combo.join(sep)}
+                        </span>
+                      ))}
+                    </div>
+                    <div className="mt-option-figures">
+                      <div>
+                        <span>{t("mine.cost")} </span>
+                        <b>{yen(o.ticket.cost)}</b>
+                      </div>
+                      <div>
+                        <span>{t("mine.ifHits")} </span>
+                        <b className="pay">{yen(o.ticket.avgPayout)}</b>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+
+              <div className="mt-unit-label">{t("mine.unit")}</div>
+              <div className="mt-units">
+                {[100, 200, 300].map((v) => (
+                  <button
+                    key={v}
+                    className={`mt-unit ${unit === v ? "on" : ""}`}
+                    onClick={() => setUnit(v)}
+                  >
+                    ¥{v}
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <p className="empty">{t("race.noLive")}</p>
+          )}
+        </div>
+
+        {feature && options.length > 0 && (
+          <div className="mt-cta-wrap">
+            <button className="mt-cta" onClick={commit}>
+              {t("mine.confirm")} · {yen(selCost)}
+            </button>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  // ====================== DETAIL ======================
+  function renderDetail() {
+    const tk = detailTk;
+    if (!tk) return null;
+    const open = tk.state === "open";
+    const sep = mtSep(tk.ticket.type);
+    const ribbon =
+      open
+        ? "linear-gradient(135deg,#0E7A47,#16AC66)"
+        : tk.state === "won"
+          ? "linear-gradient(135deg,#D98A12,#F2A93B)"
+          : "linear-gradient(135deg,#5E6E63,#8A9A8E)";
+    const payLabel = tk.state === "won" ? t("mine.returned") : t("mine.ifHits");
+    const payValue = tk.state === "won" ? tk.returned ?? 0 : tk.payoutBase;
+    const payColor =
+      tk.state === "won"
+        ? "var(--gold-amber)"
+        : tk.state === "miss"
+          ? "var(--miss)"
+          : "var(--ink)";
+    const topNum = Number(tk.ticket.lines[0]?.combo[0] ?? 0);
+    const board = tk.race.runners.slice(0, 6);
+    const justSettled = settleId === tk.id;
+
+    return (
+      <>
+        <div className="mt-back-head">
+          <button className="mt-back" onClick={() => setView("feed")}>
+            ‹
+          </button>
+          <div className="mt-back-title">{t("mine.ticketTitle")}</div>
+        </div>
+
+        <div className="mt-detail">
+          <div className="mt-ticket">
+            {justSettled && (
+              <div className="mt-confetti">
+                {[
+                  ["8%", "#15A862", 8, 13, "2px", "1.5s", "0s"],
+                  ["20%", "#F2A93B", 7, 10, "2px", "1.7s", ".1s"],
+                  ["33%", "#2D8CF0", 9, 9, "50%", "1.4s", ".05s"],
+                  ["46%", "#FF6A6A", 7, 12, "2px", "1.65s", ".18s"],
+                  ["58%", "#F2A93B", 8, 8, "50%", "1.5s", ".08s"],
+                  ["70%", "#15A862", 7, 11, "2px", "1.75s", ".14s"],
+                  ["82%", "#FF6A6A", 9, 9, "50%", "1.45s", ".03s"],
+                  ["92%", "#2D8CF0", 7, 12, "2px", "1.6s", ".2s"],
+                ].map((c, i) => (
+                  <span
+                    key={i}
+                    style={{
+                      left: c[0] as string,
+                      width: c[2] as number,
+                      height: c[3] as number,
+                      borderRadius: c[4] as string,
+                      background: c[1] as string,
+                      animationDuration: c[5] as string,
+                      animationDelay: c[6] as string,
+                    }}
+                  />
+                ))}
+              </div>
+            )}
+
+            <div className="mt-ribbon" style={{ background: ribbon }}>
+              <div className="mt-ribbon-top">
+                <div className="mt-ribbon-brand">
+                  <div className="mt-ribbon-mark">競</div>
+                  <span className="mt-ribbon-wordmark">KEIBAMON</span>
+                </div>
+                <span className="mt-serial">{tk.serial}</span>
+              </div>
+              <div className="mt-ribbon-pills">
+                {tk.race.grade && (
+                  <span className="mt-ribbon-pill">{tk.race.grade}</span>
+                )}
+                <span className="mt-ribbon-pill">
+                  {open ? t("mine.live") : t("mine.result")}
+                </span>
+              </div>
+              <div className="mt-ribbon-race">{runnerRaceName(tk)}</div>
+              <div className="mt-ribbon-meta">
+                {tk.race.venueEn} · R{tk.race.raceNo} ·{" "}
+                {ja ? tk.race.dateJa : tk.race.dateEn}
+                {tk.race.post ? ` · ${t("mine.post")} ${tk.race.post}` : ""}
+              </div>
+            </div>
+
+            <div className="mt-perf">
+              <i className="l" />
+              <i className="r" />
+            </div>
+
+            <div className="mt-ticket-body">
+              <div className="mt-ticket-bethead">
+                <span className="mt-ticket-betlabel">
+                  {t(`betType.${tk.ticket.type}`)}
+                </span>
+                <span
+                  className="mt-mood-pill"
+                  style={{ background: MT_MOOD_COLOR[tk.mood] }}
+                >
+                  {t(`mood.${tk.mood}`)}
+                </span>
+              </div>
+
+              <div className="mt-chips-lg">
+                {tk.ticket.lines.map((ln, j) => (
+                  <span key={j} className="mt-chip-lg">
+                    {ln.combo.join(sep)}
+                  </span>
+                ))}
+              </div>
+
+              <div className="mt-pay-panel">
+                <div>
+                  <div className="mt-metric-label">{t("mine.cost")}</div>
+                  <div className="mt-pay-cost">{yen(tk.ticket.cost)}</div>
+                  <div className="mt-pay-break">
+                    {tk.ticket.lines.length}
+                    {ja ? "点 × " : " × "}
+                    {yen(tk.unit)}
+                  </div>
+                </div>
+                <div className="mt-pay-right">
+                  <div className="mt-metric-label">{payLabel}</div>
+                  <div className="mt-pay-value" style={{ color: payColor }}>
+                    {yen(payValue)}
+                  </div>
+                </div>
+              </div>
+
+              {open && (
+                <div className="mt-board">
+                  <div className="mt-board-head">
+                    <span className="mt-dot-sm" />
+                    <span className="mt-board-title">{t("mine.liveOdds")}</span>
+                    <span className="mt-board-sub">{t("mine.oddsRefresh")}</span>
+                    <span className="mt-countdown">
+                      {countdownText(tk.race.post)}
+                    </span>
+                  </div>
+                  <div className="mt-refresh" style={{ marginBottom: 10 }}>
+                    <i />
+                  </div>
+                  {board.map((r) => {
+                    const top = r.num === topNum;
+                    const d = driftView(r.num, tk, open);
+                    return (
+                      <div key={r.num} className="mt-board-row">
+                        <span
+                          className="mt-board-num"
+                          style={{
+                            background: top ? "var(--turf)" : "var(--tint-3)",
+                            color: top ? "#fff" : "var(--ink-2)",
+                          }}
+                        >
+                          {r.num}
+                        </span>
+                        <span className="mt-board-name">{runnerName(r)}</span>
+                        <span
+                          className="mt-board-drift"
+                          style={{ color: d.color }}
+                        >
+                          {d.arrow} {d.label}
+                        </span>
+                        <span className="mt-board-odds">
+                          {liveOdds(tk, r.num).toFixed(1)}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {!open && (
+                <div
+                  className="mt-result"
+                  style={{
+                    background:
+                      tk.state === "won" ? "var(--won-bg)" : "var(--miss-bg)",
+                    border: `1px solid ${tk.state === "won" ? "var(--gold-border)" : "var(--line)"}`,
+                  }}
+                >
+                  <div
+                    className="mt-stamp"
+                    style={{
+                      background:
+                        tk.state === "won" ? "var(--gold-amber)" : "#8A9A8E",
+                      animation: justSettled ? "kbmStamp .6s ease-out" : "none",
+                    }}
+                  >
+                    {tk.state === "won" ? t("mine.hit") : t("mine.miss")}
+                  </div>
+                  <div>
+                    <div className="mt-result-caption">
+                      {tk.state === "won" ? t("mine.returned") : t("mine.settled")}
+                    </div>
+                    <div
+                      className="mt-result-value"
+                      style={{
+                        color:
+                          tk.state === "won" ? "var(--gold-amber)" : "#8A9A8E",
+                      }}
+                    >
+                      {yen(payValue)}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-card-foot">
+                <div className="mt-card-foot-mark">競</div>
+                <div style={{ lineHeight: 1.2 }}>
+                  <div className="mt-handle">{t("mine.handle")}</div>
+                  <div className="mt-card-foot-micro">{t("mine.notAdvice")}</div>
+                </div>
+                <div className="mt-barcode" />
+              </div>
+            </div>
+          </div>
+
+          {open && (
+            <button className="mt-watch" onClick={() => settle(tk.id)}>
+              <span className="mt-dot" />
+              {t("mine.watchResult")}
+            </button>
+          )}
+
+          <div className="mt-actions">
+            <button
+              className="mt-share"
+              onClick={() => flash(t("mine.shareToast"))}
+            >
+              <span style={{ fontSize: 16 }}>⇪</span>
+              {t("mine.tapShare")}
+            </button>
+            {tk.state === "won" && (
+              <button className="mt-cheer-lg" onClick={() => cheer(tk.id)}>
+                <span style={{ fontSize: 16 }}>👏</span>
+                {tk.claps}
+                {burstId === tk.id && burstSpans}
+              </button>
+            )}
+          </div>
+
+          <div className="mt-friends">
+            <div className="mt-avatars">
+              {community.map((f, i) => (
+                <div key={i} className="mt-avatar" style={{ background: f.color }}>
+                  {f.initial}
+                </div>
+              ))}
+            </div>
+            <div className="mt-friends-text">
+              {tFmt("mine.friendsOnRace", { n: 8 })}
+            </div>
+          </div>
+        </div>
+      </>
+    );
+  }
+
+  return (
+    <div className="mt">
+      {view === "feed" && renderFeed()}
+      {view === "new" && renderNew()}
+      {view === "detail" && renderDetail()}
+      {toast && <div className="mt-toast">{toast}</div>}
+    </div>
   );
 }
 

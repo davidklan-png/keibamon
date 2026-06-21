@@ -112,3 +112,50 @@ export function moodKey(t: Ticket): MoodKey {
   if (t.variance === "high" && t.tag === "value") return "spicier";
   return "balanced";
 }
+
+// ===========================================================================
+// ADR-0007: "My Tickets" — a committed bet wraps a recommender Ticket with
+// lifecycle + identity. Phase 0 persists to localStorage; Phase 2 moves this
+// server-side (Clerk user + social D1). Live odds/result are re-matched from
+// /api/live by RaceSnapshot.raceKey.
+// ===========================================================================
+export type CommittedState = "open" | "won" | "miss";
+
+/** Frozen at commit time; live fields refreshed by matching raceKey in /api/live. */
+export interface RaceSnapshot {
+  raceKey: string; // date|venue|race_no|name (App.tsx keyFor)
+  grade: string; // "G1" (may be empty)
+  nameEn: string;
+  nameJa: string;
+  venueEn: string;
+  venueJa: string;
+  raceNo: number;
+  dateEn: string; // localized display strings
+  dateJa: string;
+  post: string; // "15:40"
+  runners: { num: number; en: string; ja: string; odds: number }[];
+}
+
+/** A community owner other than the signed-in user (Phase 3: from the social graph). */
+export interface TicketOwner {
+  en: string;
+  ja: string;
+  color: string;
+  initial: string;
+  initialJa: string;
+}
+
+export interface CommittedTicket {
+  id: string; // "kb-" + base36 timestamp
+  serial: string; // "KB-XXXXXX" (display only)
+  ticket: Ticket; // the recommender output (type, lines, cost, avgPayout, unit…)
+  unit: number; // chosen stake per line
+  mood: MoodKey; // snapshot of moodKey(ticket) at commit
+  state: CommittedState;
+  payoutBase: number; // "if it hits" estimate at commit
+  returned?: number; // settled payout (won)
+  race: RaceSnapshot;
+  owner: "you" | TicketOwner;
+  claps: number;
+  createdAt: number;
+}

@@ -77,8 +77,19 @@ def test_race_status_registered_then_open_then_result():
 def test_snapshot_counts_and_sort():
     snap = build_live_snapshot(
         [
-            {"race_no": 2, "venue": "Tokyo", "runners": [{"umaban": 1, "win_odds": 3.0}]},
-            {"race_no": 1, "venue": "Tokyo", "runners": [{"umaban": 1, "est_odds": 9.0}]},
+            {
+                "date": "20260621",
+                "race_no": 2,
+                "venue": "Tokyo",
+                "grade_label": "G3",
+                "runners": [{"umaban": 1, "win_odds": 3.0}],
+            },
+            {
+                "date": "20260621",
+                "race_no": 1,
+                "venue": "Tokyo",
+                "runners": [{"umaban": 1, "est_odds": 9.0}],
+            },
         ],
         date="20260621",
     )
@@ -86,6 +97,8 @@ def test_snapshot_counts_and_sort():
     assert snap["meta"]["status"] == "live"  # at least one open
     # sorted by (venue, race_no): R1 (registered) before R2 (open)
     assert [r["race_no"] for r in snap["races"]] == [1, 2]
+    assert snap["races"][1]["date"] == "20260621"
+    assert snap["races"][1]["grade_label"] == "G3"
 
 
 def test_empty_day_is_standby():
@@ -135,6 +148,28 @@ def test_publish_window_guard():
     assert win(at(2026, 6, 19, 12), "race") is False       # Fri not a race day
     # any: never gated
     assert win(at(2026, 6, 17, 3), "any") is True
+
+
+def test_expose_live_default_dates_include_weekend_cards():
+    """Scheduled register/Saturday race runs publish Sat+Sun, so tomorrow's
+    graded races keep their own date and can be surfaced in the app."""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    jst = ZoneInfo("Asia/Tokyo")
+    mod = _load_expose_live()
+
+    assert mod._default_dates(datetime(2026, 6, 19, 12, tzinfo=jst), "register") == [
+        "20260620",
+        "20260621",
+    ]
+    assert mod._default_dates(datetime(2026, 6, 20, 10, tzinfo=jst), "race") == [
+        "20260620",
+        "20260621",
+    ]
+    assert mod._default_dates(datetime(2026, 6, 21, 10, tzinfo=jst), "race") == [
+        "20260621",
+    ]
 
 
 def test_est_odds_parser_captures_rendered_number():

@@ -23,7 +23,7 @@ from __future__ import annotations
 import argparse
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -113,8 +113,29 @@ def _entries_for(nk_id: str) -> list[dict]:
         return []
 
 
-def build_once(date_yyyymmdd: str) -> dict:
-    """Discover + scrape + assemble one snapshot document for the date."""
+def _upcoming_weekend_dates(now_jst: datetime) -> list[str]:
+    """Return the next Saturday/Sunday card dates from ``now``.
+
+    Friday registration should expose both weekend cards. Saturday race-day
+    should keep tomorrow visible too, so users can select Sunday's G3s without
+    waiting for a separate publish key.
+    """
+    days_until_sat = (5 - now_jst.weekday()) % 7
+    sat = (now_jst + timedelta(days=days_until_sat)).date()
+    sun = sat + timedelta(days=1)
+    return [sat.strftime("%Y%m%d"), sun.strftime("%Y%m%d")]
+
+
+def _default_dates(now_jst: datetime, window: str) -> list[str]:
+    if window == "register":
+        return _upcoming_weekend_dates(now_jst)
+    if window == "race" and now_jst.weekday() == 5:
+        return _upcoming_weekend_dates(now_jst)
+    return [now_jst.strftime("%Y%m%d")]
+
+
+def _races_for_date(date_yyyymmdd: str) -> list[dict]:
+    """Discover + scrape one race date; return raw race dicts for snapshot assembly."""
     discovered = discover_card(date_yyyymmdd)
     races = []
     for d in discovered:
@@ -123,20 +144,38 @@ def build_once(date_yyyymmdd: str) -> dict:
         runners = merge_entries_and_odds(entries, odds)
         races.append(
             {
+                "date": d.date_yyyymmdd,
                 "race_no": d.race_no,
                 "race_id": d.canonical_race_id,
                 "name": d.race_name or f"Race {d.race_no}",
+                "grade_label": d.grade_label,
                 "post_time_jst": d.post_time_jst,
                 "venue": VENUE_NAMES.get(d.venue_code, d.venue_code),
                 "runners": runners,
             }
         )
+    return races
+
+
+def build_once(date_yyyymmdd: str) -> dict:
+    """Discover + scrape + assemble one snapshot document for the date."""
+    races = _races_for_date(date_yyyymmdd)
     return build_live_snapshot(races, date=date_yyyymmdd, source="netkeiba-live")
+
+
+def build_dates(dates_yyyymmdd: list[str]) -> dict:
+    """Discover + scrape + assemble one snapshot across one or more race dates."""
+    races: list[dict] = []
+    for date in dates_yyyymmdd:
+        races.extend(_races_for_date(date))
+    meta_date = dates_yyyymmdd[0] if len(dates_yyyymmdd) == 1 else ",".join(dates_yyyymmdd)
+    return build_live_snapshot(races, date=meta_date, source="netkeiba-live")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--date", default=None, help="YYYYMMDD (default: today JST)")
+    ap.add_argument("--dates", default=None, help="comma-separated YYYYMMDD dates")
     ap.add_argument("--interval", type=int, default=30, help="seconds between cycles")
     ap.add_argument("--key", default="current", help="D1 live_snapshot key")
     ap.add_argument("--once", action="store_true", help="one cycle then exit")
@@ -171,9 +210,14 @@ def main() -> None:
                 break
             time.sleep(max(5, args.interval))
             continue
-        date = args.date or _today_jst()
+        if args.dates:
+            dates = [d.strip() for d in args.dates.split(",") if d.strip()]
+        elif args.date:
+            dates = [args.date]
+        else:
+            dates = _default_dates(now_jst, args.window)
         try:
-            snap = build_once(date)
+            snap = build_dates(dates)
             c = snap["meta"]["counts"]
             if args.skip_empty and c["total"] == 0:
                 print(f"[{datetime.now(timezone.utc):%H:%M:%S}Z] no races registered — skip")

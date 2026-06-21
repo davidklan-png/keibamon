@@ -76,9 +76,11 @@ def build_race(raw: dict[str, Any]) -> dict[str, Any]:
     else:
         status = STATUS_REGISTERED
     return {
+        "date": raw.get("date"),
         "race_no": raw.get("race_no"),
         "race_id": raw.get("race_id"),
         "name": raw.get("name"),
+        "grade_label": raw.get("grade_label"),
         "post_time": raw.get("post_time") or raw.get("post_time_jst"),
         "venue": raw.get("venue"),
         "status": status,
@@ -98,12 +100,18 @@ def build_live_snapshot(
 ) -> dict[str, Any]:
     """Assemble the full ``live_snapshot`` document.
 
-    Races are sorted by (venue, race_no) so multi-venue days render stably. The
-    meta block carries a coarse status so the app can show a standby state when
-    nothing is registered yet.
+    Races are sorted by (date, venue, race_no) so multi-date/multi-venue
+    snapshots render stably. The meta block carries a coarse status so the app
+    can show a standby state when nothing is registered yet.
     """
     built = [build_race(r) for r in races]
-    built.sort(key=lambda r: (str(r.get("venue") or ""), r.get("race_no") or 0))
+    built.sort(
+        key=lambda r: (
+            str(r.get("date") or ""),
+            str(r.get("venue") or ""),
+            r.get("race_no") or 0,
+        ),
+    )
 
     n_registered = sum(1 for r in built if r["status"] == STATUS_REGISTERED)
     n_open = sum(1 for r in built if r["status"] == STATUS_OPEN)

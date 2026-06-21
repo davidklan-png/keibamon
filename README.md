@@ -154,6 +154,25 @@ npm install
 npm run dev
 ```
 
+## Public App Deployment
+
+`keibamon.com/app` is the Vite app built into `splash/app` and served by the
+Cloudflare Worker in `wrangler.jsonc`. Deploy from the repo root with:
+
+```bash
+npm --prefix frontend test
+npm --prefix frontend run build
+npx wrangler deploy
+```
+
+The race list shown in production comes from D1 via `/api/live`, not from the
+frontend bundle. Republish the live snapshot with
+`tools/jravan/expose_live.py --dates ... --once --key current` whenever race
+dates, grade labels, runners, or odds need to change.
+
+See `docs/runbooks/deploy-public-app.md` for the full production runbook,
+including verification commands and the D1 emergency fallback.
+
 ## Data Rules
 
 - Raw source payloads are immutable.

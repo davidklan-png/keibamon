@@ -17,7 +17,9 @@ export type RaceStatus = "registered" | "open" | "result";
 export interface LiveRace {
   date?: string;
   race_no: number;
+  race_id?: string | null;
   name?: string | null;
+  grade_label?: string | null;
   post_time?: string | null;
   venue?: string | null;
   status?: RaceStatus;

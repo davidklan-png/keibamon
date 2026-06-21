@@ -51,9 +51,11 @@ odds post, **showing estimated odds**, refreshed near-real-time.
    The app shows `win_odds_est` only while there is no live price and labels it
    "est."; the moment a live price exists the estimate is dropped so a guess is
    never shown as a real price.
-4. **One current document, multi-venue.** The feed publishes under `key='current'`
-   (all registered races across venues for the active day, sorted by venue then
-   race_no). The Worker reads `current` first, falling back to the legacy
+4. **One current document, multi-date/multi-venue.** The feed publishes under
+   `key='current'` (registered races across venues and, during weekend windows,
+   both upcoming weekend dates). Each race carries its own `date` and optional
+   `grade_label`; the app uses those fields for day chips and popular-race
+   ranking. The Worker reads `current` first, falling back to the legacy
    `hanshin` key so an old publisher still works. No D1 schema change — it's
    another row in the existing `(key, payload, published_at)` table.
 5. **App un-gates registration.** The `win_odds > 0` filter is gone; the picker
@@ -124,6 +126,8 @@ Sandbox does edits + tests; the feed runs on the Mac and commits land on the Mac
 - [x] `live/snapshot.py` pure assembler (status + estimated-odds contract).
 - [x] `netkeiba_entries` additively captures `est_odds` (silver shape untouched).
 - [x] `tools/jravan/expose_live.py` near-real-time publish loop (key='current').
+- [x] `tools/jravan/expose_live.py` stamps per-race `date` and `grade_label`;
+      weekend publish windows include Saturday + Sunday where appropriate.
 - [x] Worker `/api/live` reads `current` with `hanshin` fallback + `?key=`.
 - [x] App un-gates registration; grayed pending state + est-odds label; 45s
       background refresh.
