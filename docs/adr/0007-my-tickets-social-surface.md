@@ -269,6 +269,43 @@ The Phase 1 Worker + D1 + Clerk JWT layer is **reused** — no new datastore.
    (so the cache survives a reload) and PATCHed best-effort, but they
    are NOT shared across users. The cheer UI works exactly as before.
 
+### Settlement hit conditions (resolver contract)
+
+For each OPEN ticket, the 45s `/api/live` poll matches `race.raceKey`; if
+`status === 'result'`, the pure resolver (`lib/settle.ts`) applies:
+
+| Bet type | Hit condition |
+|----------|---------------|
+| quinella | the line's 2 horses match the top-2 **as a set** |
+| wide     | both horses in the line finish in the **top 3** |
+| exacta   | the line's 2 horses match the top-2 **in order** |
+| trio     | the line's 3 horses match the top-3 **as a set** |
+| trifecta | the line's 3 horses match the top-3 **in order** |
+
+Winning-line payout: the `result.payouts` row matched by pool + canonicalized
+combo → `yen * unit / 100` (JRA per-¥100 convention). If payouts are absent,
+fall back to the commit-time `avgPayout` tagged `source:'estimate'`. Combo key
+matches `netkeiba_payouts.py`: ascending-sort for unordered types, preserve
+order for exacta / trifecta. The resolver never mutates its input.
+
+### Known correctness gap: dead heats & scratches (to verify before GA)
+
+The hit conditions above assume a single strict finishing order. Two real JRA
+cases break that assumption and must be honored when follow-up #1 lands the
+result contract:
+
+1. **Dead heats (同着).** A tie at a placing means JRA pays multiple combos. The
+   resolver must derive the placing **set** from the result's placing data
+   (which can list ≥2 horses at a position), not from one ordered array, or a
+   legitimately winning ticket on a tie race will mis-settle as a MISS.
+2. **Scratches / refunds (出走取消・返還).** A scratched horse in a line should
+   trigger a refund path, not an automatic MISS.
+
+Neither can be exercised today (the producer emits no result block), so this is
+a **design requirement on the result contract**, tracked with follow-up #1 — the
+`/api/live` producer must carry ties and scratches, and `settle.ts` must have
+table-driven tests for both before settlement goes live for real users.
+
 ### Phase 2 diff scope
 
 `git diff main...feat/adr-0007-phase2-persistence --stat` will show:
@@ -296,10 +333,20 @@ NOT touched: root `wrangler.jsonc`, `src/worker.js`, `backend/`, `splash/`,
 
 ### Phase 2 follow-ups
 
-1. **Drive `/api/live` to emit `result`.** Closing the payout-source gap
-   (Decision 7). A racing-tier change; separate branch + PR.
-2. **Server-side settle sweep.** A Worker cron / Durable Object alarm
-   that PATCHes tickets when their race reaches `result`, so users
-   offline at post-time still settle on reconnect.
-3. **`cheers` table + cross-user sync.** Phase 3.
-4. **Rate limits on POST /tickets.** Phase 4 hardening.
+1. **Drive `/api/live` to emit `result` (incl. ties + scratches).** Closes the
+   payout-source gap (Decision 7) AND supplies the placing/scratch data the
+   dead-heat & refund handling needs (see "Known correctness gap"). A
+   racing-tier change; separate branch + PR. **This gates the feature's value:**
+   until it lands, no ticket ever settles in prod and the result→cheer→share
+   loop never fires for real users — treat it as the critical-path dependency,
+   not tail-end cleanup.
+2. **Server-side settle sweep.** A Worker cron / Durable Object alarm that
+   PATCHes tickets when their race reaches `result`, so users offline at
+   post-time still settle on reconnect. Client-only settlement is best-effort;
+   for a product whose payoff moment is the point, pull this forward (Phase 3 /
+   early Phase 4) rather than leaving it open-ended.
+3. **Dead-heat & scratch handling in `settle.ts`.** Table-driven tests for 同着
+   ties (multiple winning combos) and scratch refunds, landed together with
+   follow-up #1's result contract. Must be green before settlement goes GA.
+4. **`cheers` table + cross-user sync.** Phase 3.
+5. **Rate limits on POST /tickets.** Phase 4 hardening.
