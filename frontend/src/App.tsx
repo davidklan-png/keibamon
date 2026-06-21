@@ -26,6 +26,11 @@ import {
   type LiveSnapshot,
   type LiveRace,
 } from "./api";
+import { AuthGate } from "./auth/AuthGate";
+import { AgeGate } from "./auth/AgeGate";
+import { useAuth } from "./auth/AuthProvider";
+import { postMe } from "./auth/socialClient";
+import { storageKeyFor } from "./auth/storageKey";
 
 type Step = "mine" | "race" | "style" | "tickets" | "explain";
 
@@ -251,17 +256,15 @@ function App() {
   ];
 
   // ADR-0007: My Tickets surface is its own full-screen home (own header). The
-  // classic 4-step builder remains reachable via onClassic.
+  // classic 4-step builder remains reachable via onClassic. Phase 1 wraps it
+  // in AuthGate + AgeGate so identity + 20+ self-attestation precede the feed.
   if (step === "mine") {
     return (
-      <main className="app">
-        <MyTickets
-          snap={snap}
-          onClassic={() => setStep("race")}
-          onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
-        />
-        <Footer />
-      </main>
+      <MyTicketsHome
+        snap={snap}
+        onClassic={() => setStep("race")}
+        onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
+      />
     );
   }
 
@@ -1047,9 +1050,12 @@ function mtRunnersOf(race: LiveRace): Runner[] {
   }));
 }
 
-function mtLoadStored(lang: string): CommittedTicket[] {
+function mtLoadStored(lang: string, userId: string | null): CommittedTicket[] {
   try {
-    const raw = localStorage.getItem("kbm.v4." + lang);
+    // ADR-0007 Phase 1 — namespaced per Clerk user when signed in. Signed-out
+    // falls back to the Phase 0 sample key so the pre-auth visual still has
+    // something to show. Phase 2 will replace this with the social D1.
+    const raw = localStorage.getItem(storageKeyFor(lang, userId));
     const parsed = raw ? (JSON.parse(raw) as CommittedTicket[]) : [];
     return Array.isArray(parsed) ? parsed : [];
   } catch {
@@ -1061,16 +1067,63 @@ interface MyTicketsProps {
   snap: LiveSnapshot | null;
   onClassic: () => void;
   onToggleLang: () => void;
+  /** Clerk user id; null only in transition states once MyTickets is rendered. */
+  userId: string | null;
 }
 
-function MyTickets({ snap, onClassic, onToggleLang }: MyTicketsProps) {
+// ADR-0007 Phase 1 — wraps MyTickets in AuthGate + AgeGate. The auth context
+// is read here so MyTickets itself stays Clerk-free and testable. Best-effort
+// profile upsert runs on sign-in (offline-first; postMe swallows its errors).
+interface MyTicketsHomeProps {
+  snap: LiveSnapshot | null;
+  onClassic: () => void;
+  onToggleLang: () => void;
+}
+
+function MyTicketsHome({ snap, onClassic, onToggleLang }: MyTicketsHomeProps) {
+  const { isSignedIn, userId, ageVerified, getToken } = useAuth();
+
+  useEffect(() => {
+    if (!isSignedIn) return;
+    let cancelled = false;
+    void (async () => {
+      const token = await getToken();
+      if (cancelled) return;
+      // Upsert a profile row on the social Worker; ignore failures.
+      await postMe(token);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, userId, getToken]);
+
+  return (
+    <AuthGate isSignedIn={isSignedIn}>
+      {ageVerified ? (
+        <main className="app">
+          <MyTickets
+            snap={snap}
+            onClassic={onClassic}
+            onToggleLang={onToggleLang}
+            userId={userId}
+          />
+          <Footer />
+        </main>
+      ) : (
+        <AgeGate />
+      )}
+    </AuthGate>
+  );
+}
+
+function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
 
   const [view, setView] = useState<MtView>("feed");
   const [detailId, setDetailId] = useState<string | null>(null);
   const [tickets, setTickets] = useState<CommittedTicket[]>(() =>
-    mtLoadStored(lang),
+    mtLoadStored(lang, userId),
   );
   const [selIdx, setSelIdx] = useState(1);
   const [unit, setUnit] = useState(200);
@@ -1093,14 +1146,15 @@ function MyTickets({ snap, onClassic, onToggleLang }: MyTicketsProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Reload the per-language log when the language flips (matches prototype key).
+  // Reload the per-(user,language) log when the language flips or the signed-in
+  // user changes. Phase 2 will move this to the social D1.
   useEffect(() => {
-    const s = mtLoadStored(lang);
+    const s = mtLoadStored(lang, userId);
     setTickets(s);
     storageEmpty.current = s.length === 0;
     seeded.current = s.length > 0;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang]);
+  }, [lang, userId]);
 
   // Drift: compare each runner's live odds to the previous /api/live poll.
   useEffect(() => {
@@ -1123,8 +1177,12 @@ function MyTickets({ snap, onClassic, onToggleLang }: MyTicketsProps) {
   }, [snap]);
 
   function persist(list: CommittedTicket[]) {
+    // Phase 1: signed-out writes are no-ops (no per-user log without a user).
+    // TODO(ADR-0007 Phase 2): replace localStorage with the social D1 as the
+    // source of truth; localStorage becomes an offline cache.
+    if (!userId) return;
     try {
-      localStorage.setItem("kbm.v4." + lang, JSON.stringify(list));
+      localStorage.setItem(storageKeyFor(lang, userId), JSON.stringify(list));
     } catch {
       /* offline cache only; Phase 2 persists per-user to the backend */
     }

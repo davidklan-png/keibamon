@@ -1848,3 +1848,125 @@ select:focus {
   animation: kbmRise 0.25s ease-out;
   z-index: 50;
 }
+
+/* ---------- ADR-0007 Phase 1 — auth screens ---------- */
+/* Centered full-viewport card for sign-in + age gate. Existing tokens only;
+   no new palette. The not-betting-advice footer is rendered by App's <Footer/>
+   on the My Tickets home, not here — the legal line under-20 notices stay
+   reachable on both auth screens via .auth-legal. */
+.auth-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  background: linear-gradient(180deg, #f4f9f2 0%, #e9f0e7 100%) fixed;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-card);
+  padding: 32px 22px 24px;
+  text-align: center;
+  animation: kbmRise 0.28s ease-out;
+}
+
+.auth-mark {
+  margin: 0 auto 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 18px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  color: var(--turf-deep);
+  font-weight: 800;
+  font-size: 13px;
+  letter-spacing: 0;
+}
+
+.auth-mark .ja {
+  color: var(--gold-deep);
+}
+
+.auth-card h1 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 22px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.auth-cta {
+  margin: 0 0 22px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.auth-primary {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 18px;
+  margin-bottom: 14px;
+  border-radius: 12px;
+  background: var(--turf);
+  color: #fff;
+  border: 0;
+  font-weight: 800;
+  font-size: 15px;
+  letter-spacing: 0.02em;
+  box-shadow: var(--shadow-card);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.auth-primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-banner);
+}
+
+.auth-primary:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.auth-legal {
+  margin: 0;
+  color: var(--soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+/* AgeGate-specific spacing — checkbox row above the CTA. */
+.age-gate .age-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 4px 0 18px;
+  padding: 12px 14px;
+  background: var(--tint);
+  border: 1px solid var(--line-2);
+  border-radius: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.age-gate .age-check input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--turf);
+  flex: 0 0 auto;
+}
+
+.age-gate .age-check span {
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 14px;
+}

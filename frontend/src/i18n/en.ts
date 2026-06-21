@@ -164,6 +164,18 @@ export const en = {
     communityCard: "{n} friends are on today’s card",
     friendsOnRace: "{n} friends on this race",
   },
+  // ADR-0007 Phase 1 — Clerk auth + age self-attestation.
+  auth: {
+    signInTitle: "Sign in to Keibamon",
+    signInCta: "Continue with email or social",
+    signInLegal:
+      "Recreational use only. Under-20 betting is prohibited by law.",
+    ageTitle: "Before you continue",
+    ageConfirm: "I confirm I'm 20 or older",
+    ageContinue: "Continue",
+    ageDeclineNote:
+      "You can browse without signing in. Betting is restricted to those 20+.",
+  },
   footer: {
     notAdvice:
       "Recreational ticket-structure tool. Not betting advice, not a winning method, not a profit guarantee. Under-20 betting is prohibited by law.",

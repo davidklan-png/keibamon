@@ -162,6 +162,17 @@ export const ja = {
     communityCard: "今日のカードに友だち{n}人が参戦中",
     friendsOnRace: "このレースに友だち{n}人",
   },
+  // ADR-0007 Phase 1 — Clerk auth + age self-attestation.
+  auth: {
+    signInTitle: "ケイバモンにサインイン",
+    signInCta: "メールまたはSNSで続行",
+    signInLegal: "レクリエーション用です。20歳未満の投票は法律で禁止されています。",
+    ageTitle: "続行する前に",
+    ageConfirm: "20歳以上です",
+    ageContinue: "続行",
+    ageDeclineNote:
+      "サインインしなくても閲覧はできます。投票は20歳以上限定です。",
+  },
   footer: {
     notAdvice:
       "レクリエーション用の馬券構成ツールです。投票助言・必勝法・利益保証ではありません。20歳未満の投票は法律で禁止されています。",
