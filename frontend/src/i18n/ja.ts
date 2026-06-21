@@ -133,6 +133,8 @@ export const ja = {
     result: "結果",
     hit: "的中",
     miss: "不的中",
+    refund: "返還",
+    refunded: "返還されました",
     won: "的中しました",
     settled: "確定",
     firming: "人気上昇",

@@ -1,26 +1,36 @@
 // ADR-0007 Phase 4 — canonical ticket-settlement resolver.
 //
-// This module is the SINGLE source of truth for "did a committed ticket hit
-// or miss, and for how much?" The frontend imports it via a thin shim
+// This module is the SINGLE source of truth for "did a committed ticket hit,
+// miss, or refund, and for how much?" The frontend imports it via a thin shim
 // (`frontend/src/lib/settle.ts`); the Worker's cron sweep imports it directly.
 // Keeping the rules in one place forbids the two tiers from drifting on the
 // definition of a hit (a real correctness risk for quinella/wide/trio where
-// order-vs-set matters).
+// order-vs-set matters and dead heats expand the winner set).
 //
-// Pure, no I/O, no Cloudflare deps — a faithful extraction of the verbatim
-// Phase 2 logic (commit `e357b8e`). Phase 4 Task 2 extends this with
-// dead-heat + scratch handling; that's a separate change on top of this move.
-//
-// The expected result shape (the historical splash page used this; the new
-// app consumes the same form):
+// Pure, no I/O, no Cloudflare deps. The expected result shape (the historical
+// splash page used this; the new app consumes the same form):
 //   result: {
 //     finishers?: number[];                 // [1st_umaban, 2nd_umaban, ...]
 //     top3?:      { pos: number; umaban: number }[];   // legacy form
+//     placings?:  { pos: number; umabans: number[] }[]; // dead-heat form
+//     scratched?: number[];                 // refund-eligible umabans
 //     payouts?:   { pool: string; combo: string; yen: number }[];
 //   }
 // `payouts.yen` is per 100-yen stake (JRA convention). A line at `unit` stake
 // returns `yen * unit / 100`. Combos are dash-separated umaban strings
 // ("5-16" or "5-16-1"), matching netkeiba_payouts.py.
+//
+// Dead-heat model: `placings` lets the result carry 同着 (two umabans at one
+// position). The resolver enumerates every consistent ordering (cartesian
+// product across tied positions) and a line hits if it matches ANY ordering.
+// This is a strict superset of the legacy single-`finishers` behavior on
+// clean races; on a tie race it correctly pays combos that name any of the
+// tied horses (the case the Phase 2 ADR flagged as a correctness gap).
+//
+// Scratch model: any combo containing a scratched umaban refunds the whole
+// ticket to `{state:'refunded', reason:'scratched'}` (JRA 返還). We don't
+// compute the refund amount (stake return — out of scope for this resolver);
+// the sweep records the state and the UI shows a generic "refund" badge.
 
 /** The five exotic bet types the recommender emits. */
 export type BetType = "quinella" | "wide" | "exacta" | "trio" | "trifecta";
@@ -39,35 +49,103 @@ export interface ResolveTicket {
 }
 
 export interface RaceResult {
+  /** Ordered umabans, 1st-first. Legacy form; converter treats each entry as one placing. */
   finishers?: number[];
+  /** Legacy {pos, umaban} form (the splash page's expected shape). */
   top3?: { pos: number; umaban: number }[];
+  /**
+   * Placings, set per position. Handles 同着 (dead heats) — e.g.
+   * `[{pos:1, umabans:[5]}, {pos:2, umabans:[16,7]}, {pos:3, umabans:[1]}]`
+   * means 5 won; 16 and 7 dead-heated for 2nd; 1 was alone at 3rd.
+   * When present, takes precedence over `finishers` / `top3`.
+   */
+  placings?: { pos: number; umabans: number[] }[];
+  /** Umabans scratched from this race; any line containing one is refunded. */
+  scratched?: number[];
   payouts?: { pool: string; combo: string; yen: number }[];
 }
 
 export type SettleResult =
   | { state: "open"; reason: "no_finishers_yet" }
   | { state: "won"; returned: number; source: "result" | "estimate" }
-  | { state: "miss" };
+  | { state: "miss" }
+  | { state: "refunded"; reason: "scratched" };
 
 /** Empty/null/{} result — the current production shape until the producer ships. */
 export function isEmptyResult(result: RaceResult | null | undefined): boolean {
   if (!result) return true;
+  if (result.placings && result.placings.length > 0) return false;
   if (result.finishers && result.finishers.length > 0) return false;
   if (result.top3 && result.top3.length > 0) return false;
   return true;
 }
 
-/** Normalize the finishing order to an umaban array, or null if absent. */
-function finishingOrder(result: RaceResult): number[] | null {
+/**
+ * Normalize the result into placings-as-sets. Three input shapes converge here:
+ *   - `placings` (preferred, can express 同着) — used as-is.
+ *   - `finishers: number[]` (ordered) — one umaban per position; ties impossible.
+ *   - `top3: {pos, umaban}[]` (legacy) — grouped by pos (a dead heat in this
+ *     form has two entries with the same `pos`).
+ * Returns null if no placing data is present.
+ */
+function placingsFromResult(
+  result: RaceResult,
+): { pos: number; umabans: number[] }[] | null {
+  if (result.placings && result.placings.length > 0) {
+    return [...result.placings]
+      .sort((a, b) => a.pos - b.pos)
+      .map((p) => ({ pos: p.pos, umabans: [...p.umabans] }));
+  }
   if (result.finishers && result.finishers.length > 0) {
-    return result.finishers;
+    return result.finishers.map((umaban, i) => ({ pos: i + 1, umabans: [umaban] }));
   }
   if (result.top3 && result.top3.length > 0) {
-    return [...result.top3]
-      .sort((a, b) => a.pos - b.pos)
-      .map((e) => e.umaban);
+    const byPos = new Map<number, number[]>();
+    for (const e of result.top3) {
+      const arr = byPos.get(e.pos) ?? [];
+      arr.push(e.umaban);
+      byPos.set(e.pos, arr);
+    }
+    return [...byPos.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([pos, umabans]) => ({ pos, umabans }));
   }
   return null;
+}
+
+/**
+ * Enumerate every consistent ordered finish implied by the placings.
+ *
+ * For placings `[{pos:1,umabans:[5]}, {pos:2,umabans:[16,7]}, {pos:3,umabans:[1]}]`
+ * the cartesian product yields 1×2×1 = 2 orderings: `[5,16,1]` and `[5,7,1]`.
+ * Each ordering is a flat `number[]` (1st-first) the legacy `lineHits` consumes.
+ *
+ * The JRA semantics: a dead-heat placing is a SET — for hit purposes, any
+ * horse tied at a position counts as having finished at that position.
+ * Enumerating keeps `lineHits` simple (a line hits if it matches ANY
+ * consistent ordering) without baking tie logic into five different bet-type
+ * branches. On a clean race this collapses to one ordering (today's behavior).
+ *
+ * Capped at 36 orderings (a 6-way tie at one position) — beyond that the
+ * result is implausible and we'd rather under-match than OOM the Worker.
+ */
+export function expandPlacings(
+  placings: { pos: number; umabans: number[] }[],
+): number[][] {
+  if (placings.length === 0) return [];
+  let orders: number[][] = [[]];
+  for (const { umabans } of placings) {
+    if (umabans.length === 0) continue;
+    const next: number[][] = [];
+    for (const prefix of orders) {
+      for (const u of umabans) {
+        next.push([...prefix, u]);
+      }
+    }
+    orders = next;
+    if (orders.length > 36) return orders.slice(0, 36);
+  }
+  return orders;
 }
 
 function sameSet(as: string[], bs: number[]): boolean {
@@ -136,11 +214,18 @@ function comboKey(type: BetType, combo: string[]): string {
 }
 
 /**
- * Look up a single winning line's payout (yen per 100-yen stake).
- * Returns null if the pool/combo isn't in the result (the producer may
- * legitimately omit a pool that had no winning tickets sold — but for the
- * 5 exotic types the recommender emits, JRA always pays out if the combo
- * hit, so a missing row is a publisher gap, not a real miss).
+ * Sum ALL payout rows matching this pool + combo (yen per 100-yen stake).
+ *
+ * Dead-heat pools (quinella/wide/trio/exacta where the rules pay multiple
+ * combos) legitimately have multiple payout rows for one winning line — e.g.
+ * a quinella on a tie at 2nd pays (1st,2nd-a) and (1st,2nd-b), each as its
+ * own row. JRA lists each as its own payout; summing mirrors what a real
+ * bettor receives.
+ *
+ * Returns null if no payout rows match (the producer may legitimately omit a
+ * pool — see the `source:'estimate'` fallback in `resolveTicket`). A 0-yen
+ * payout never appears in JRA data (minimum is the stake back), so "no rows"
+ * is unambiguous against "rows summed to 0".
  */
 function payoutYen(
   result: RaceResult,
@@ -149,6 +234,8 @@ function payoutYen(
 ): number | null {
   if (!result.payouts || result.payouts.length === 0) return null;
   const want = comboKey(type, combo);
+  let total = 0;
+  let matched = false;
   for (const p of result.payouts) {
     if (p.pool !== type) continue;
     // Normalize the publisher's combo to canonical (sorted-ascending for
@@ -161,21 +248,29 @@ function payoutYen(
             .map((x) => Number(x))
             .sort((a, b) => a - b)
             .join("-");
-    if (canon === want) return p.yen;
+    if (canon === want) {
+      total += p.yen;
+      matched = true;
+    }
   }
-  return null;
+  return matched ? total : null;
 }
 
 /**
- * Resolve a committed ticket to won/miss/open against a result payload.
+ * Resolve a committed ticket to won/miss/open/refunded against a result payload.
  *
- *   - No finishing order in the result yet → `{state:'open', reason:...}`.
+ *   - No placings in the result yet → `{state:'open', reason:...}`.
  *     The caller leaves the ticket OPEN; the UI shows the commit-time
  *     estimate (payoutBase). This is today's production path.
- *   - Finishing order present:
- *       - Any winning line  → `state:'won'`. `returned` is Σ line payouts
- *         (yen * unit/100) when payouts are present; otherwise it falls back
- *         to the ticket's avgPayout with `source:'estimate'`.
+ *   - Any combo umaban ∈ result.scratched → `{state:'refunded', reason:'scratched'}`
+ *     across the whole ticket. JRA refunds all lines containing a scratched
+ *     horse (返還); we don't compute the refund amount (stake return) — the
+ *     sweep records the state and the UI shows a generic "refund" badge.
+ *   - Placings present, no scratch:
+ *       - Any winning line (across all expanded orderings) → `state:'won'`.
+ *         `returned` is Σ line payouts (yen * unit/100) when payouts are
+ *         present; otherwise it falls back to the ticket's avgPayout with
+ *         `source:'estimate'`.
  *       - No winning line   → `state:'miss'`, returned = 0.
  */
 export function resolveTicket(
@@ -186,24 +281,38 @@ export function resolveTicket(
   if (isEmptyResult(result)) {
     return { state: "open", reason: "no_finishers_yet" };
   }
-  const order = finishingOrder(result!) ?? [];
-  if (order.length === 0) {
+  const placings = placingsFromResult(result!);
+  if (!placings || placings.length === 0) {
     return { state: "open", reason: "no_finishers_yet" };
   }
 
+  // Scratch check: any combo umaban in result.scratched refunds the ticket.
+  const scratched = result!.scratched ?? [];
+  if (scratched.length > 0) {
+    const scratchSet = new Set(scratched);
+    for (const line of ticket.lines) {
+      if (line.combo.some((u) => scratchSet.has(Number(u)))) {
+        return { state: "refunded", reason: "scratched" };
+      }
+    }
+  }
+
+  const orders = expandPlacings(placings);
   const stakeMultiplier = unit > 0 ? unit / 100 : 1;
   let totalReturned = 0;
   let anyHit = false;
   let payoutSource: "result" | "estimate" = "result";
 
   for (const line of ticket.lines) {
-    if (!lineHits(ticket.type, line.combo, order)) continue;
+    // A line hits if it matches ANY consistent ordering (dead-heat aware).
+    const hit = orders.some((order) => lineHits(ticket.type, line.combo, order));
+    if (!hit) continue;
     anyHit = true;
     const yen = payoutYen(result!, ticket.type, line.combo);
     if (yen == null) {
-      // Combo hit but the publisher didn't include the payout row. Fall back
-      // to the commit-time fair-value estimate (already in avgPayout) and
-      // flag it so the UI can mark the figure as provisional.
+      // Combo hit but the publisher didn't include any payout row for this
+      // pool+combo. Fall back to the commit-time fair-value estimate (already
+      // in avgPayout) and flag it so the UI can mark the figure as provisional.
       payoutSource = "estimate";
       totalReturned += ticket.avgPayout * stakeMultiplier;
     } else {

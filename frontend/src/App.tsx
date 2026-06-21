@@ -1027,7 +1027,9 @@ function mtStateColor(s: CommittedState): string {
     ? "var(--turf)"
     : s === "won"
       ? "var(--gold-amber)"
-      : "var(--miss)";
+      : s === "refunded"
+        ? "var(--soft)"
+        : "var(--miss)";
 }
 
 /** Phase 3 — deterministic avatar color from a string (handle/display name). */
@@ -2508,11 +2510,19 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                       animation: justSettled ? "kbmStamp .6s ease-out" : "none",
                     }}
                   >
-                    {tk.state === "won" ? t("mine.hit") : t("mine.miss")}
+                    {tk.state === "won"
+                      ? t("mine.hit")
+                      : tk.state === "refunded"
+                        ? t("mine.refund")
+                        : t("mine.miss")}
                   </div>
                   <div>
                     <div className="mt-result-caption">
-                      {tk.state === "won" ? t("mine.returned") : t("mine.settled")}
+                      {tk.state === "won"
+                        ? t("mine.returned")
+                        : tk.state === "refunded"
+                          ? t("mine.refunded")
+                          : t("mine.settled")}
                     </div>
                     <div
                       className="mt-result-value"

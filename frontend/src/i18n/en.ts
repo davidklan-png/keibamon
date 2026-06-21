@@ -135,6 +135,8 @@ export const en = {
     result: "RESULT",
     hit: "HIT",
     miss: "MISS",
+    refund: "REFUND",
+    refunded: "Refunded",
     won: "You hit it",
     settled: "Settled",
     firming: "firming",

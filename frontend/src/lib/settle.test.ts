@@ -1,5 +1,11 @@
 import { describe, it, expect } from "vitest";
-import { resolveTicket, lineHits, isEmptyResult, type RaceResult } from "./settle";
+import {
+  resolveTicket,
+  lineHits,
+  isEmptyResult,
+  expandPlacings,
+  type RaceResult,
+} from "./settle";
 import type { Ticket } from "./types";
 import type { BetType } from "./fairvalue";
 
@@ -265,5 +271,368 @@ describe("settle.resolveTicket — empty result keeps the ticket open", () => {
     const snapshot = JSON.parse(JSON.stringify(t));
     resolveTicket(t, 100, RESULT_FULL);
     expect(t).toEqual(snapshot);
+  });
+});
+
+// ===========================================================================
+// Phase 4 Task 2 — dead-heat (同着) + scratch (返還) correctness.
+//
+// Mirror of workers/social/test/settle.test.ts. If you add a case here, add
+// it on the worker side too — they MUST agree (the resolver is shared).
+// ===========================================================================
+
+// Dead heat at 2nd: 5 wins; 16 and 7 dead-heat for 2nd; 1 is 3rd.
+// expandPlacings yields two orderings: [5,16,1] and [5,7,1].
+const DEAD_HEAT_2ND_PLACINGS = [
+  { pos: 1, umabans: [5] },
+  { pos: 2, umabans: [16, 7] },
+  { pos: 3, umabans: [1] },
+];
+const DEAD_HEAT_2ND: RaceResult = {
+  placings: DEAD_HEAT_2ND_PLACINGS,
+  payouts: [
+    { pool: "quinella", combo: "5-16", yen: 800 },
+    { pool: "quinella", combo: "5-7", yen: 600 },
+    { pool: "exacta", combo: "5-16", yen: 1600 },
+    { pool: "exacta", combo: "5-7", yen: 1400 },
+    { pool: "wide", combo: "5-16", yen: 300 },
+    { pool: "wide", combo: "5-7", yen: 280 },
+    { pool: "wide", combo: "16-7", yen: 420 },
+    { pool: "trifecta", combo: "5-16-1", yen: 8800 },
+    { pool: "trifecta", combo: "5-7-1", yen: 7600 },
+    { pool: "trio", combo: "1-5-16", yen: 1200 },
+    { pool: "trio", combo: "1-5-7", yen: 1100 },
+  ],
+};
+
+// Dead heat at 3rd: 5, 16, then 1 and 7 tie for 3rd.
+const DEAD_HEAT_3RD: RaceResult = {
+  placings: [
+    { pos: 1, umabans: [5] },
+    { pos: 2, umabans: [16] },
+    { pos: 3, umabans: [1, 7] },
+  ],
+  payouts: [
+    { pool: "trifecta", combo: "5-16-1", yen: 6200 },
+    { pool: "trifecta", combo: "5-16-7", yen: 5400 },
+    { pool: "trio", combo: "1-5-16", yen: 900 },
+    { pool: "trio", combo: "5-7-16", yen: 850 },
+    { pool: "wide", combo: "5-1", yen: 220 },
+    { pool: "wide", combo: "5-7", yen: 240 },
+    { pool: "wide", combo: "16-1", yen: 290 },
+    { pool: "wide", combo: "7-16", yen: 510 },
+  ],
+};
+
+describe("settle.expandPlacings — dead-heat enumeration", () => {
+  it("clean race → one ordering (the input order)", () => {
+    expect(
+      expandPlacings([
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16] },
+        { pos: 3, umabans: [1] },
+      ]),
+    ).toEqual([[5, 16, 1]]);
+  });
+
+  it("dead heat at 2nd → 2 orderings (1×2×1)", () => {
+    expect(expandPlacings(DEAD_HEAT_2ND_PLACINGS)).toEqual([
+      [5, 16, 1],
+      [5, 7, 1],
+    ]);
+  });
+
+  it("dead heat at 3rd → 2 orderings (1×1×2)", () => {
+    expect(
+      expandPlacings([
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16] },
+        { pos: 3, umabans: [1, 7] },
+      ]),
+    ).toEqual([
+      [5, 16, 1],
+      [5, 16, 7],
+    ]);
+  });
+
+  it("three-way tie at 2nd → 3 orderings (1×3×1)", () => {
+    expect(
+      expandPlacings([
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16, 7, 3] },
+        { pos: 3, umabans: [1] },
+      ]),
+    ).toEqual([
+      [5, 16, 1],
+      [5, 7, 1],
+      [5, 3, 1],
+    ]);
+  });
+
+  it("capped at 36 orderings for implausible ties", () => {
+    const placings = [
+      { pos: 1, umabans: [1] },
+      ...Array.from({ length: 6 }, (_, i) => ({
+        pos: i + 2,
+        umabans: [i * 10 + 2, i * 10 + 3],
+      })),
+    ];
+    const out = expandPlacings(placings);
+    expect(out.length).toBe(36);
+    expect(out[0].length).toBe(7);
+  });
+
+  it("empty placings → empty orderings", () => {
+    expect(expandPlacings([])).toEqual([]);
+  });
+});
+
+describe("settle.resolveTicket — dead heat at 2nd (placings form)", () => {
+  const cases: Array<{
+    name: string;
+    type: BetType;
+    combos: string[][];
+    expectState: "won" | "miss";
+    expectReturned?: number;
+  }> = [
+    {
+      name: "quinella [5,16] hits via ordering [5,16,1]",
+      type: "quinella",
+      combos: [["5", "16"]],
+      expectState: "won",
+      expectReturned: 800,
+    },
+    {
+      name: "quinella [5,7] hits via ordering [5,7,1]",
+      type: "quinella",
+      combos: [["5", "7"]],
+      expectState: "won",
+      expectReturned: 600,
+    },
+    {
+      name: "exacta [5,16] hits (ordered)",
+      type: "exacta",
+      combos: [["5", "16"]],
+      expectState: "won",
+      expectReturned: 1600,
+    },
+    {
+      name: "exacta [5,7] hits (the OTHER tied horse)",
+      type: "exacta",
+      combos: [["5", "7"]],
+      expectState: "won",
+      expectReturned: 1400,
+    },
+    {
+      name: "wide [5,16] hits",
+      type: "wide",
+      combos: [["5", "16"]],
+      expectState: "won",
+      expectReturned: 300,
+    },
+    {
+      name: "wide [5,7] hits",
+      type: "wide",
+      combos: [["5", "7"]],
+      expectState: "won",
+      expectReturned: 280,
+    },
+    {
+      name: "trio [5,16,1] hits",
+      type: "trio",
+      combos: [["5", "16", "1"]],
+      expectState: "won",
+      expectReturned: 1200,
+    },
+    {
+      name: "trio [5,7,1] hits (the OTHER tied horse)",
+      type: "trio",
+      combos: [["5", "7", "1"]],
+      expectState: "won",
+      expectReturned: 1100,
+    },
+    {
+      name: "trifecta [5,16,1] hits",
+      type: "trifecta",
+      combos: [["5", "16", "1"]],
+      expectState: "won",
+      expectReturned: 8800,
+    },
+    {
+      name: "trifecta [5,7,1] hits",
+      type: "trifecta",
+      combos: [["5", "7", "1"]],
+      expectState: "won",
+      expectReturned: 7600,
+    },
+    {
+      name: "quinella [16,7] misses — neither is 1st in any ordering",
+      type: "quinella",
+      combos: [["16", "7"]],
+      expectState: "miss",
+    },
+    {
+      name: "trifecta [16,5,1] misses — wrong order in every enumeration",
+      type: "trifecta",
+      combos: [["16", "5", "1"]],
+      expectState: "miss",
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.type} — ${c.name}`, () => {
+      const t = ticket(c.type, c.combos, 100);
+      const out = resolveTicket(t, 100, DEAD_HEAT_2ND);
+      expect(out.state).toBe(c.expectState);
+      if (c.expectReturned !== undefined) {
+        expect(out).toHaveProperty("returned");
+        expect((out as { returned: number }).returned).toBe(c.expectReturned);
+      }
+    });
+  }
+
+  it("multi-line ticket sums payouts across the tied horses", () => {
+    const t = ticket("quinella", [["5", "16"], ["5", "7"]], 100);
+    const out = resolveTicket(t, 100, DEAD_HEAT_2ND);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(1400);
+  });
+});
+
+describe("settle.resolveTicket — dead heat at 3rd (placings form)", () => {
+  const cases: Array<{
+    name: string;
+    type: BetType;
+    combos: string[][];
+    expectState: "won" | "miss";
+    expectReturned?: number;
+  }> = [
+    {
+      name: "trifecta [5,16,1] hits via ordering [5,16,1]",
+      type: "trifecta",
+      combos: [["5", "16", "1"]],
+      expectState: "won",
+      expectReturned: 6200,
+    },
+    {
+      name: "trifecta [5,16,7] hits via ordering [5,16,7]",
+      type: "trifecta",
+      combos: [["5", "16", "7"]],
+      expectState: "won",
+      expectReturned: 5400,
+    },
+    {
+      name: "trio [5,16,1] hits",
+      type: "trio",
+      combos: [["5", "16", "1"]],
+      expectState: "won",
+      expectReturned: 900,
+    },
+    {
+      name: "trio [5,16,7] hits (the OTHER tied horse)",
+      type: "trio",
+      combos: [["5", "16", "7"]],
+      expectState: "won",
+      expectReturned: 850,
+    },
+    {
+      name: "wide [16,1] hits — 2nd and one tied 3rd both top-3",
+      type: "wide",
+      combos: [["16", "1"]],
+      expectState: "won",
+      expectReturned: 290,
+    },
+    {
+      name: "wide [16,7] hits — 2nd and the other tied 3rd",
+      type: "wide",
+      combos: [["16", "7"]],
+      expectState: "won",
+      expectReturned: 510,
+    },
+    {
+      name: "trifecta [5,1,16] misses — wrong order in every enumeration",
+      type: "trifecta",
+      combos: [["5", "1", "16"]],
+      expectState: "miss",
+    },
+  ];
+
+  for (const c of cases) {
+    it(`${c.type} — ${c.name}`, () => {
+      const t = ticket(c.type, c.combos, 100);
+      const out = resolveTicket(t, 100, DEAD_HEAT_3RD);
+      expect(out.state).toBe(c.expectState);
+      if (c.expectReturned !== undefined) {
+        expect(out).toHaveProperty("returned");
+        expect((out as { returned: number }).returned).toBe(c.expectReturned);
+      }
+    });
+  }
+});
+
+describe("settle.resolveTicket — scratch → refund (all 5 bet types)", () => {
+  const scratchResult: RaceResult = {
+    finishers: [5, 16, 1, 7, 3],
+    scratched: [7],
+    payouts: [],
+  };
+
+  const types: BetType[] = ["quinella", "wide", "exacta", "trio", "trifecta"];
+  for (const type of types) {
+    it(`${type} with a scratched umaban in the line → refunded`, () => {
+      const combos =
+        type === "trifecta" || type === "trio"
+          ? [["5", "7", "16"]]
+          : [["5", "7"]];
+      const t = ticket(type, combos, 100);
+      const out = resolveTicket(t, 100, scratchResult);
+      expect(out).toEqual({ state: "refunded", reason: "scratched" });
+    });
+  }
+
+  it("ticket WITHOUT a scratched umaban settles normally", () => {
+    const t = ticket("quinella", [["5", "16"]], 100);
+    const out = resolveTicket(t, 100, scratchResult);
+    expect(out.state).toBe("won");
+    expect((out as { source: string }).source).toBe("estimate");
+  });
+
+  it("scratch refunds the WHOLE multi-line ticket even if other lines hit", () => {
+    const t = ticket("quinella", [["5", "16"], ["5", "7"]], 100);
+    const out = resolveTicket(t, 100, scratchResult);
+    expect(out).toEqual({ state: "refunded", reason: "scratched" });
+  });
+});
+
+describe("settle.resolveTicket — placings precedence over legacy forms", () => {
+  it("placings take precedence when both placings and finishers are present", () => {
+    const mixed: RaceResult = {
+      finishers: [5, 16, 1, 7, 3],
+      placings: [
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16, 7] },
+        { pos: 3, umabans: [1] },
+      ],
+      payouts: [{ pool: "quinella", combo: "5-7", yen: 600 }],
+    };
+    const t = ticket("quinella", [["5", "7"]], 100);
+    const out = resolveTicket(t, 100, mixed);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(600);
+  });
+
+  it("legacy top3 with duplicate pos is treated as a dead heat", () => {
+    const legacyTie: RaceResult = {
+      top3: [
+        { pos: 1, umaban: 5 },
+        { pos: 2, umaban: 16 },
+        { pos: 2, umaban: 7 },
+      ],
+      payouts: [{ pool: "quinella", combo: "5-7", yen: 600 }],
+    };
+    const t = ticket("quinella", [["5", "7"]], 100);
+    const out = resolveTicket(t, 100, legacyTie);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(600);
   });
 });

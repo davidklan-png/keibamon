@@ -119,7 +119,7 @@ export function moodKey(t: Ticket): MoodKey {
 // server-side (Clerk user + social D1). Live odds/result are re-matched from
 // /api/live by RaceSnapshot.raceKey.
 // ===========================================================================
-export type CommittedState = "open" | "won" | "miss";
+export type CommittedState = "open" | "won" | "miss" | "refunded";
 
 /** Frozen at commit time; live fields refreshed by matching raceKey in /api/live. */
 export interface RaceSnapshot {

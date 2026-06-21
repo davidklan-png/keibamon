@@ -15,6 +15,7 @@ export {
   resolveTicket,
   lineHits,
   isEmptyResult,
+  expandPlacings,
   type BetType,
   type RaceResult,
   type SettleResult,

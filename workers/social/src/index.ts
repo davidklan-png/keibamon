@@ -78,7 +78,7 @@ const TOKEN_RE = /^Bearer\s+(.+)$/i;
 const NOW = () => Math.floor(Date.now() / 1000);
 
 /** Allowed state values on insert/update. Keep in sync with frontend CommittedState. */
-const TICKET_STATES = new Set(["open", "won", "miss"]);
+const TICKET_STATES = new Set(["open", "won", "miss", "refunded"]);
 
 /** Rate-limit ceilings per action per minute. Decision 8. */
 const RATE_LIMITS: Record<string, number> = {
