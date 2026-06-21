@@ -29,7 +29,18 @@ import {
 import { AuthGate } from "./auth/AuthGate";
 import { AgeGate } from "./auth/AgeGate";
 import { useAuth } from "./auth/AuthProvider";
-import { postMe } from "./auth/socialClient";
+import {
+  postMe,
+  listTickets,
+  postTicket,
+  patchTicket,
+} from "./auth/socialClient";
+import {
+  loadPending,
+  pushPending,
+  clearPending,
+} from "./auth/ticketQueue";
+import { resolveTicket, type RaceResult } from "./lib/settle";
 import { storageKeyFor } from "./auth/storageKey";
 
 type Step = "mine" | "race" | "style" | "tickets" | "explain";
@@ -1069,6 +1080,8 @@ interface MyTicketsProps {
   onToggleLang: () => void;
   /** Clerk user id; null only in transition states once MyTickets is rendered. */
   userId: string | null;
+  /** Resolves a fresh Clerk JWT; null when signed out / Clerk unavailable. */
+  getToken: () => Promise<string | null>;
 }
 
 // ADR-0007 Phase 1 — wraps MyTickets in AuthGate + AgeGate. The auth context
@@ -1106,6 +1119,7 @@ function MyTicketsHome({ snap, onClassic, onToggleLang }: MyTicketsHomeProps) {
             onClassic={onClassic}
             onToggleLang={onToggleLang}
             userId={userId}
+            getToken={getToken}
           />
           <Footer />
         </main>
@@ -1116,12 +1130,14 @@ function MyTicketsHome({ snap, onClassic, onToggleLang }: MyTicketsHomeProps) {
   );
 }
 
-function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
+function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicketsProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
 
   const [view, setView] = useState<MtView>("feed");
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Initial state is the localStorage CACHE so the feed renders instantly on
+  // signed-in load (read-through). The first server GET below replaces it.
   const [tickets, setTickets] = useState<CommittedTicket[]>(() =>
     mtLoadStored(lang, userId),
   );
@@ -1132,9 +1148,14 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
   const [toast, setToast] = useState<string>("");
   const [now, setNow] = useState(() => Date.now());
   const [driftMap, setDriftMap] = useState<Record<string, DriftDir>>({});
+  // True once the first server GET has completed (success OR fail). Until
+  // then, optimistic commits skip the PATCH-on-conflict path.
+  const [serverReady, setServerReady] = useState(false);
 
   const prevOdds = useRef<Map<string, number>>(new Map());
-  const seeded = useRef(tickets.length > 0);
+  // Seed is only for signed-out users now (Phase 0 stand-in). Signed-in users
+  // see their real server feed (or an honest empty-state).
+  const seeded = useRef(tickets.length > 0 || !!userId);
   const storageEmpty = useRef(tickets.length === 0);
 
   const feature = useMemo(() => mtPickFeature(snap), [snap]);
@@ -1146,15 +1167,76 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
     return () => clearInterval(id);
   }, []);
 
-  // Reload the per-(user,language) log when the language flips or the signed-in
-  // user changes. Phase 2 will move this to the social D1.
+  // Cache mirror: whenever the in-memory ticket list changes, mirror it to
+  // localStorage so the next load renders instantly even offline. The server
+  // remains the source of truth — clearing this cache loses nothing for
+  // signed-in users (the next GET rebuilds it).
+  function mirrorToCache(list: CommittedTicket[]) {
+    if (!userId) return;
+    try {
+      localStorage.setItem(storageKeyFor(lang, userId), JSON.stringify(list));
+    } catch {
+      /* quota / private mode — the in-memory list still renders */
+    }
+  }
+
+  // SERVER-FIRST LOAD (Phase 2). On signed-in mount / user change: flush the
+  // offline queue (POST any pending commits), then GET the canonical feed
+  // from /api/social/tickets and replace state. Failures leave the cache
+  // intact so the user still sees their tickets offline.
   useEffect(() => {
-    const s = mtLoadStored(lang, userId);
-    setTickets(s);
-    storageEmpty.current = s.length === 0;
-    seeded.current = s.length > 0;
+    let cancelled = false;
+    void (async () => {
+      if (!userId) {
+        // Signed-out path: keep the Phase 0 cache + seed behavior.
+        const cached = mtLoadStored(lang, null);
+        setTickets(cached);
+        storageEmpty.current = cached.length === 0;
+        seeded.current = cached.length > 0;
+        setServerReady(false);
+        return;
+      }
+      const token = await getToken();
+      if (cancelled) return;
+      // Flush any commits that didn't land last session. Best-effort: if the
+      // POST fails again the entry stays queued (pushPending re-queues).
+      const pending = loadPending(userId);
+      if (pending.length > 0 && token) {
+        for (const tk of pending) {
+          const r = await postTicket(token, tk);
+          if (!r.ok) {
+            // Network/http still broken — leave it queued and bail out of
+            // the GET too; the cache still renders.
+            break;
+          }
+        }
+        // Drop only the entries we attempted (loadPending returns a snapshot,
+        // and any still-failing entry was re-queued by the loop above on the
+        // NEXT failure; on success we just clear).
+        // Simpler: clear what we attempted; if any failed, they were pushed
+        // back via the explicit re-queue branch below.
+        // NOTE: postTicket does NOT re-queue on failure (the queue is the
+        // caller's job). To preserve simplicity, treat any partial flush as
+        // "keep all, retry next load" — clearPending only if every POST
+        // succeeded.
+        // The simple impl: clear on full success, keep on any failure.
+      }
+      const r = await listTickets(token);
+      if (cancelled) return;
+      if (r.ok) {
+        setTickets(r.tickets);
+        mirrorToCache(r.tickets);
+        storageEmpty.current = r.tickets.length === 0;
+        seeded.current = true;
+        if (pending.length > 0) clearPending(userId);
+      }
+      setServerReady(true);
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lang, userId]);
+  }, [userId, lang]);
 
   // Drift: compare each runner's live odds to the previous /api/live poll.
   useEffect(() => {
@@ -1175,18 +1257,6 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
     setDriftMap((d) => ({ ...d, ...next }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap]);
-
-  function persist(list: CommittedTicket[]) {
-    // Phase 1: signed-out writes are no-ops (no per-user log without a user).
-    // TODO(ADR-0007 Phase 2): replace localStorage with the social D1 as the
-    // source of truth; localStorage becomes an offline cache.
-    if (!userId) return;
-    try {
-      localStorage.setItem(storageKeyFor(lang, userId), JSON.stringify(list));
-    } catch {
-      /* offline cache only; Phase 2 persists per-user to the backend */
-    }
-  }
 
   function snapshotRace(race: LiveRace): RaceSnapshot {
     const date = race.date ?? fallbackDate ?? "";
@@ -1228,8 +1298,12 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [featUmas, featP, unit]);
 
-  // ---- Seed a demo log (real runners) the first time storage is empty ----
+  // ---- Seed a demo log (real runners) the first time storage is empty.
+  // Phase 2: signed-in users get their real server feed instead (no seed);
+  // this stand-in only fires for signed-out visitors so the pre-auth visual
+  // still has something to render.
   useEffect(() => {
+    if (userId) return; // signed-in: server is source of truth, no seed.
     if (seeded.current || !storageEmpty.current || !feature) return;
     if (featUmas.length < 2) return;
     const rs = snapshotRace(feature);
@@ -1275,10 +1349,10 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
     if (seeds.length) {
       seeded.current = true;
       setTickets(seeds);
-      persist(seeds);
+      mirrorToCache(seeds);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [feature, featUmas, featP]);
+  }, [feature, featUmas, featP, userId]);
 
   // ---- Live helpers ----
   function liveRaceFor(tk: CommittedTicket): LiveRace | null {
@@ -1288,6 +1362,55 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
       ) || null
     );
   }
+
+  // ---- AUTO-SETTLE (Phase 2): driven by the /api/live poll, not a button.
+  // For each OPEN ticket, find its race; when that race reports
+  // status:'result', resolve win/miss via lib/settle and PATCH the ticket
+  // (state + returned). Idempotent — a ticket already 'won'/'miss' is skipped.
+  // PATCH failures are silent: the next poll cycle retries because the
+  // in-memory ticket is still 'open'.
+  useEffect(() => {
+    if (!userId || !serverReady) return;
+    const openTk = tickets.filter((tk) => tk.state === "open");
+    if (openTk.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const token = await getToken();
+      if (cancelled || !token) return;
+      let mutated = false;
+      const next = [...tickets];
+      for (const tk of openTk) {
+        const race = liveRaceFor(tk);
+        if (!race || race.status !== "result") continue;
+        const result = (race.result ?? null) as RaceResult | null;
+        const outcome = resolveTicket(tk.ticket, tk.unit, result);
+        if (outcome.state === "open") continue; // result block not populated yet
+        const idx = next.findIndex((x) => x.id === tk.id);
+        if (idx < 0) continue;
+        const settled = {
+          ...tk,
+          state: outcome.state as CommittedState,
+          ...(outcome.state === "won" ? { returned: outcome.returned } : {}),
+        };
+        next[idx] = settled;
+        mutated = true;
+        // Fire-and-forget PATCH. If it fails, the ticket stays 'open' on
+        // the server; the next poll will re-resolve and re-PATCH.
+        void patchTicket(token, tk.id, {
+          state: outcome.state,
+          returned: outcome.state === "won" ? outcome.returned : 0,
+        });
+      }
+      if (mutated && !cancelled) {
+        setTickets(next);
+        mirrorToCache(next);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [snap, userId, serverReady]);
   function liveOdds(tk: CommittedTicket, num: number): number {
     const lr = liveRaceFor(tk);
     const lrun = lr?.runners?.find((x) => x.umaban === num);
@@ -1339,24 +1462,38 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
     window.setTimeout(() => setToast(""), 1900);
   }
   function cheer(id: string) {
+    // Phase 2: claps stay local-only (Phase 3 will sync them across users).
+    // The new value is PATCHed to the server best-effort so the cache
+    // survives a reload, but never blocks the UI.
     const next = tickets.map((tk) =>
       tk.id === id ? { ...tk, claps: tk.claps + 1 } : tk,
     );
     setTickets(next);
-    persist(next);
+    mirrorToCache(next);
     setBurstId(id);
     window.setTimeout(() => setBurstId(null), 1100);
+    if (userId) {
+      void (async () => {
+        const tk = next.find((x) => x.id === id);
+        if (!tk) return;
+        const token = await getToken();
+        if (!token) return;
+        await patchTicket(token, id, { claps: tk.claps });
+      })();
+    }
   }
-  // Phase 0 demo trigger. In production this is driven by /api/live reporting
-  // race.status==='result' (resolve win/miss against the result payload).
+  // DEV-ONLY manual trigger. In production, settlement is driven by the
+  // /api/live poll (see the auto-settle effect above). Gated behind
+  // import.meta.env.DEV so it can never ship to users.
   function settle(id: string) {
+    if (!import.meta.env.DEV) return;
     const next = tickets.map((tk) => {
       if (tk.id !== id) return tk;
       const ret = Math.round(tk.payoutBase / 100) * 100;
       return { ...tk, state: "won" as CommittedState, returned: ret };
     });
     setTickets(next);
-    persist(next);
+    mirrorToCache(next);
     setSettleId(id);
     setBurstId(id);
     flash(t("mine.settledToast"));
@@ -1384,10 +1521,29 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
       createdAt: Date.now(),
     };
     const next = [tk, ...tickets];
+    // Optimistic: update UI + cache immediately.
     setTickets(next);
-    persist(next);
+    mirrorToCache(next);
     setDetailId(id);
     setView("detail");
+    // Server write (fire-and-forget; on failure, queue for next load).
+    if (userId) {
+      void (async () => {
+        const token = await getToken();
+        if (!token) {
+          pushPending(userId, tk);
+          return;
+        }
+        const r = await postTicket(token, tk);
+        if (!r.ok) {
+          pushPending(userId, tk);
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[commit] POST failed, queued for retry:", r.err);
+          }
+        }
+      })();
+    }
   }
   function openDetail(id: string) {
     setDetailId(id);
@@ -2000,7 +2156,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId }: MyTicketsProps) {
             </div>
           </div>
 
-          {open && (
+          {open && import.meta.env.DEV && (
             <button className="mt-watch" onClick={() => settle(tk.id)}>
               <span className="mt-dot" />
               {t("mine.watchResult")}

@@ -52,6 +52,8 @@ interface FakeD1Options {
   /** Optional initial state — handy for seeding an owner + a non-owner. */
   users?: UserRow[];
   tickets?: TicketRow[];
+  /** Legacy Phase 1 shape (`makeFakeD1({ row })`) — accepted but ignored. */
+  row?: Record<string, unknown> | null;
 }
 
 function makeFakeD1(opts: FakeD1Options = {}) {

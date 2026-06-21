@@ -187,12 +187,17 @@ interface PatchBody {
   claps?: unknown;
 }
 
-function parseTicketBody(body: unknown): {
-  ok: true;
-  ticket: Required<
-    Pick<CommittedTicketBody, "id" | "serial" | "state" | "payoutBase" | "createdAt">
-  > & { raceKey: string; payload: string };
-} | { ok: false; code: string } {
+interface ParsedTicketBody {
+  id: string;
+  serial: string;
+  raceKey: string;
+  payload: string;
+  state: string;
+  payoutBase: number;
+  createdAt: number;
+}
+
+function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicketBody } | { ok: false; code: string } {
   const b = body as CommittedTicketBody;
   if (typeof b.id !== "string" || !b.id) return { ok: false, code: "bad_id" };
   if (typeof b.serial !== "string" || !b.serial) return { ok: false, code: "bad_serial" };

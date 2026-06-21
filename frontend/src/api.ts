@@ -1,5 +1,7 @@
 /** Tiny fetcher for the existing /api/live snapshot. No external deps. */
 
+import type { RaceResult } from "./lib/settle";
+
 export interface LiveRunner {
   umaban: number;
   name?: string | null;
@@ -23,6 +25,13 @@ export interface LiveRace {
   post_time?: string | null;
   venue?: string | null;
   status?: RaceStatus;
+  /**
+   * Phase 2 (ADR-0007): result block when status==='result'. Today's
+   * /api/live producer passes `raw.get('result')` through unchanged and no
+   * upstream currently emits it, so this is usually null/empty. The settle
+   * resolver degrades to {state:'open'} when empty — see lib/settle.ts.
+   */
+  result?: RaceResult | null;
   runners?: LiveRunner[];
 }
 
