@@ -154,6 +154,46 @@ export async function unfollow(
   return { ok: true, data: { ok: true } };
 }
 
+/** Phase 4: POST /api/social/block/:userId — idempotent; severs follows both ways. */
+export async function block(
+  token: string | null,
+  userId: string,
+): Promise<SocialResult<{ ok: true }>> {
+  const r = await authedFetch(token, `/api/social/block/${encodeURIComponent(userId)}`, {
+    method: "POST",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: { ok: true } };
+}
+
+/** Phase 4: DELETE /api/social/block/:userId — idempotent unblock. */
+export async function unblock(
+  token: string | null,
+  userId: string,
+): Promise<SocialResult<{ ok: true }>> {
+  const r = await authedFetch(token, `/api/social/block/${encodeURIComponent(userId)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: { ok: true } };
+}
+
+/** Phase 4: POST /api/social/report — write-only moderation intake. */
+export async function report(
+  token: string | null,
+  body: { target_type: "ticket" | "user"; target_id: string; reason: string },
+): Promise<SocialResult<{ ok: true }>> {
+  const r = await authedFetch(token, `/api/social/report`, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: { ok: true } };
+}
+
 /** Phase 3: POST /api/social/tickets/:id/cheer. Returns authoritative count. */
 export async function cheer(
   token: string | null,

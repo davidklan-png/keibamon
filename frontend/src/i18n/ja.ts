@@ -188,6 +188,14 @@ export const ja = {
     blockedSelfFollow: "自分自身はフォローできません。",
     noTickets: "まだ公開された馬券がありません。",
     back: "戻る",
+    // Phase 4 — ブロック / 報告 (モデレーション intake)。
+    block: "ブロック",
+    unblock: "ブロック解除",
+    blocked: "ブロックしました。",
+    report: "報告",
+    reportReason: "理由を教えてください",
+    reportSent: "報告を送信しました。",
+    cannotBlockSelf: "自分自身はブロックできません。",
   },
   // ADR-0007 Phase 1 — Clerk auth + age self-attestation.
   auth: {

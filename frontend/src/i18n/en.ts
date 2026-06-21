@@ -190,6 +190,14 @@ export const en = {
     blockedSelfFollow: "You can't follow yourself.",
     noTickets: "No shared tickets yet.",
     back: "Back",
+    // Phase 4 — block / report (moderation intake).
+    block: "Block",
+    unblock: "Unblock",
+    blocked: "Blocked.",
+    report: "Report",
+    reportReason: "Tell us what's wrong",
+    reportSent: "Report sent.",
+    cannotBlockSelf: "You can't block yourself.",
   },
   // ADR-0007 Phase 1 — Clerk auth + age self-attestation.
   auth: {

@@ -39,6 +39,8 @@ import {
   unfollow as socialUnfollow,
   cheer as socialCheer,
   uncheer as socialUncheer,
+  block as socialBlock,
+  report as socialReport,
   getProfile,
   getFriendsOnRace,
   getFriendsOnCard,
@@ -1167,6 +1169,10 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
   const [handleDraft, setHandleDraft] = useState("");
   const [handleError, setHandleError] = useState<string | null>(null);
   const [handleSetting, setHandleSetting] = useState(false);
+  // Phase 4 — report modal state. `reportTarget` is null when modal is closed.
+  const [reportTarget, setReportTarget] = useState<{ type: "ticket" | "user"; id: string } | null>(null);
+  const [reportReason, setReportReason] = useState("");
+  const [reportSending, setReportSending] = useState(false);
   // The signed-in viewer's handle (null = hasn't set one yet → prompt on social action).
   const [viewerHandle, setViewerHandle] = useState<string | null>(null);
   // Ref to the detail-card root so the share button can raster it.
@@ -1643,6 +1649,54 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       if (!token) return;
       await socialUnfollow(token, targetUserId);
       if (targetHandle) void loadProfile(targetHandle, true);
+    })();
+  }
+
+  /**
+   * Phase 4 — block a user. Immediate (no confirm — block is reversible via
+   * the same button). Server severs follows both ways + filters the blocked
+   * user's tickets from the viewer's feed. We drop the profile view back to
+   * the feed so the UX isn't "stuck on the profile of someone I just blocked".
+   */
+  function doBlock(targetUserId: string) {
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      const r = await socialBlock(token, targetUserId);
+      if (r.ok) {
+        flash(t("profile.blocked"));
+        setView("feed");
+      } else if (r.err.kind === "http" && r.err.status === 403) {
+        // 403 maps to either cannot_block_self or blocked-already; either way
+        // the toast reflects the no-op.
+        flash(t("profile.cannotBlockSelf"));
+      }
+    })();
+  }
+
+  /**
+   * Phase 4 — submit the report modal. Closes the modal on success and flashes
+   * a confirmation; on failure leaves the modal open so the user can retry.
+   */
+  function sendReport() {
+    if (!reportTarget) return;
+    const reason = reportReason.trim();
+    if (!reason) return;
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      setReportSending(true);
+      const r = await socialReport(token, {
+        target_type: reportTarget.type,
+        target_id: reportTarget.id,
+        reason,
+      });
+      setReportSending(false);
+      if (r.ok) {
+        setReportTarget(null);
+        setReportReason("");
+        flash(t("profile.reportSent"));
+      }
     })();
   }
 
@@ -2204,16 +2258,32 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                   </div>
                 </div>
                 {userId && selectedProfileHandle && p.id !== "__self__" && (
-                  <button
-                    className={`mt-follow-btn ${p.is_following ? "on" : ""}`}
-                    onClick={() =>
-                      p.is_following
-                        ? doUnfollow(p.id, p.handle)
-                        : doFollow(p.id, p.handle)
-                    }
-                  >
-                    {p.is_following ? t("profile.unfollow") : t("profile.follow")}
-                  </button>
+                  <>
+                    <button
+                      className={`mt-follow-btn ${p.is_following ? "on" : ""}`}
+                      onClick={() =>
+                        p.is_following
+                          ? doUnfollow(p.id, p.handle)
+                          : doFollow(p.id, p.handle)
+                      }
+                    >
+                      {p.is_following ? t("profile.unfollow") : t("profile.follow")}
+                    </button>
+                    <button
+                      className="mt-block-btn"
+                      onClick={() => doBlock(p.id)}
+                    >
+                      {t("profile.block")}
+                    </button>
+                    <button
+                      className="mt-report-btn"
+                      onClick={() =>
+                        setReportTarget({ type: "user", id: p.id })
+                      }
+                    >
+                      {t("profile.report")}
+                    </button>
+                  </>
                 )}
               </div>
               <div className="mt-profile-tickets">
@@ -2313,6 +2383,36 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             disabled={handleSetting || !handleDraft.trim()}
           >
             {handleSetting ? "…" : t("mine.setHandleCta")}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ====================== REPORT MODAL (Phase 4) ======================
+  function renderReportModal() {
+    if (!reportTarget) return null;
+    return (
+      <div className="mt-modal-overlay" onClick={() => !reportSending && setReportTarget(null)}>
+        <div className="mt-modal" onClick={(e) => e.stopPropagation()}>
+          <div className="mt-modal-title">{t("profile.report")}</div>
+          <p className="mt-modal-hint">{t("profile.reportReason")}</p>
+          <textarea
+            className="mt-modal-input"
+            value={reportReason}
+            placeholder={t("profile.reportReason")}
+            onChange={(e) => setReportReason(e.target.value)}
+            autoFocus
+            maxLength={500}
+            rows={3}
+            disabled={reportSending}
+          />
+          <button
+            className="mt-modal-cta"
+            onClick={() => sendReport()}
+            disabled={reportSending || !reportReason.trim()}
+          >
+            {reportSending ? "…" : t("profile.report")}
           </button>
         </div>
       </div>
@@ -2570,6 +2670,16 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                 {burstId === tk.id && burstSpans}
               </button>
             )}
+            {/* Phase 4 — ticket report. Anyone can report any ticket
+                (including their own — the moderation queue decides). */}
+            <button
+              className="mt-report-btn"
+              onClick={() =>
+                setReportTarget({ type: "ticket", id: tk.id })
+              }
+            >
+              {t("profile.report")}
+            </button>
           </div>
 
           <div className="mt-friends">
@@ -2612,6 +2722,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       {view === "detail" && renderDetail()}
       {view === "profile" && renderProfile()}
       {renderHandlePrompt()}
+      {renderReportModal()}
       {toast && <div className="mt-toast">{toast}</div>}
     </div>
   );

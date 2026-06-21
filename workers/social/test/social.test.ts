@@ -66,12 +66,29 @@ interface RateLimitRow {
   count: number;
 }
 
+interface BlockRow {
+  blocker_id: string;
+  blocked_id: string;
+  created_at: number;
+}
+
+interface ReportRow {
+  id: string;
+  reporter_id: string;
+  target_type: "ticket" | "user";
+  target_id: string;
+  reason: string;
+  created_at: number;
+}
+
 interface FakeD1Options {
   /** Optional initial state — handy for seeding an owner + a non-owner. */
   users?: UserRow[];
   tickets?: TicketRow[];
   follows?: FollowRow[];
   cheers?: CheerRow[];
+  blocks?: BlockRow[];
+  reports?: ReportRow[];
   /** Legacy Phase 1 shape (`makeFakeD1({ row })`) — accepted but ignored. */
   row?: Record<string, unknown> | null;
 }
@@ -82,6 +99,8 @@ function makeFakeD1(opts: FakeD1Options = {}) {
   const tickets = new Map<string, TicketRow>(); // by id
   const follows = new Set<string>(); // "follower_id|followee_id"
   const cheers = new Set<string>(); // "ticket_id|user_id"
+  const blocks = new Set<string>(); // "blocker_id|blocked_id"
+  const reports: ReportRow[] = [];
   const rateLimits = new Map<string, RateLimitRow>(); // key: user|action|bucket
   const calls: PreparedCall[] = [];
   let nonce = 0;
@@ -93,6 +112,8 @@ function makeFakeD1(opts: FakeD1Options = {}) {
   for (const t of opts.tickets ?? []) tickets.set(t.id, t);
   for (const f of opts.follows ?? []) follows.add(`${f.follower_id}|${f.followee_id}`);
   for (const c of opts.cheers ?? []) cheers.add(`${c.ticket_id}|${c.user_id}`);
+  for (const b of opts.blocks ?? []) blocks.add(`${b.blocker_id}|${b.blocked_id}`);
+  for (const r of opts.reports ?? []) reports.push(r);
 
   function freshId(prefix: string): string {
     nonce += 1;
@@ -360,6 +381,56 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       return { count: next };
     }
 
+    // ---- BLOCKS (Phase 4) ----
+    m = /^INSERT INTO blocks[\s\S]*ON CONFLICT\(blocker_id, blocked_id\) DO NOTHING/i.exec(s);
+    if (m) {
+      const [blockerId, blockedId] = b as [string, string];
+      blocks.add(`${blockerId}|${blockedId}`);
+      return null;
+    }
+    m = /^DELETE FROM blocks WHERE blocker_id = \? AND blocked_id = \?/i.exec(s);
+    if (m) {
+      const [blockerId, blockedId] = b as [string, string];
+      blocks.delete(`${blockerId}|${blockedId}`);
+      return null;
+    }
+    m = /^SELECT 1 FROM blocks[\s\S]*WHERE \(blocker_id = \? AND blocked_id = \?\)[\s\S]*OR \(blocker_id = \? AND blocked_id = \?\)/i.exec(s);
+    if (m) {
+      const [aId, bId, cId, dId] = b as [string, string, string, string];
+      const exists =
+        blocks.has(`${aId}|${bId}`) || blocks.has(`${cId}|${dId}`);
+      return exists ? { "1": 1 } : null;
+    }
+
+    // ---- REPORTS (Phase 4) ----
+    m = /^INSERT INTO reports \(id, reporter_id, target_type, target_id, reason, created_at\)/i.exec(s);
+    if (m) {
+      const [id, reporterId, targetType, targetId, reason, createdAt] = b as [
+        string,
+        string,
+        "ticket" | "user",
+        string,
+        string,
+        number,
+      ];
+      // FK check: reporter must exist (we always ensureCaller first, so this
+      // passes in practice). target_id existence isn't enforced by FK in the
+      // migration (no REFERENCES — target_id can be a ticket OR a user), so
+      // we accept any string.
+      if (!usersById.has(reporterId)) {
+        throw new Error("FK violation: reporter not found");
+      }
+      reports.push({
+        id,
+        reporter_id: reporterId,
+        target_type: targetType,
+        target_id: targetId,
+        reason,
+        created_at: createdAt,
+      });
+      return null;
+    }
+
     // ---- FEED / PROFILE / FRIENDS JOINs (compute from in-memory state) ----
     // These are the SELECT ... FROM tickets t JOIN users u ... LEFT JOIN cheers
     // shapes. We detect by the JOIN clause and recompute from the maps.
@@ -374,6 +445,15 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       // Feed variant has `OR t.user_id IN (SELECT followee_id FROM follows...)`
       // and binds userId twice. Profile binds once.
       const isFeed = /OR t\.user_id IN \(SELECT followee_id FROM follows/i.test(s);
+      // Phase 4: feed filters out tickets owned by users the viewer blocked.
+      // The `NOT EXISTS (SELECT 1 FROM blocks WHERE blocker_id = ? ...)`
+      // clause adds a third bind (still the viewer's user_id).
+      const hasBlockFilter = /NOT EXISTS[\s\S]*FROM blocks[\s\S]*WHERE blocker_id = \?/i.test(s);
+      const blockedByViewer = new Set(
+        [...blocks]
+          .filter((bk) => bk.startsWith(`${userId}|`))
+          .map((bk) => bk.split("|")[1]),
+      );
       let scope: TicketRow[];
       if (isFeed) {
         const followees = new Set(
@@ -382,10 +462,16 @@ function makeFakeD1(opts: FakeD1Options = {}) {
             .map((f) => f.split("|")[1]),
         );
         scope = [...tickets.values()].filter(
-          (t) => t.user_id === userId || followees.has(t.user_id),
+          (t) =>
+            (t.user_id === userId || followees.has(t.user_id)) &&
+            (!hasBlockFilter || !blockedByViewer.has(t.user_id)),
         );
       } else {
-        scope = [...tickets.values()].filter((t) => t.user_id === userId);
+        scope = [...tickets.values()].filter(
+          (t) =>
+            t.user_id === userId &&
+            (!hasBlockFilter || !blockedByViewer.has(t.user_id)),
+        );
       }
       scope.sort((a, c) => c.created_at - a.created_at);
       return null; // .all() path handles the array; first() not used on JOINs.
@@ -412,6 +498,12 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       const limitMatch = /LIMIT (\d+)/i.exec(s);
       const limit = limitMatch ? Number(limitMatch[1]) : 100;
       const isFeed = /OR t\.user_id IN \(SELECT followee_id FROM follows/i.test(s);
+      const hasBlockFilter = /NOT EXISTS[\s\S]*FROM blocks[\s\S]*WHERE blocker_id = \?/i.test(s);
+      const blockedByViewer = new Set(
+        [...blocks]
+          .filter((bk) => bk.startsWith(`${userId}|`))
+          .map((bk) => bk.split("|")[1]),
+      );
       let scope: TicketRow[];
       if (isFeed) {
         const followees = new Set(
@@ -420,10 +512,16 @@ function makeFakeD1(opts: FakeD1Options = {}) {
             .map((f) => f.split("|")[1]),
         );
         scope = [...tickets.values()].filter(
-          (t) => t.user_id === userId || followees.has(t.user_id),
+          (t) =>
+            (t.user_id === userId || followees.has(t.user_id)) &&
+            (!hasBlockFilter || !blockedByViewer.has(t.user_id)),
         );
       } else {
-        scope = [...tickets.values()].filter((t) => t.user_id === userId);
+        scope = [...tickets.values()].filter(
+          (t) =>
+            t.user_id === userId &&
+            (!hasBlockFilter || !blockedByViewer.has(t.user_id)),
+        );
       }
       scope.sort((a, c) => c.created_at - a.created_at);
       const out = scope.slice(0, limit).map((t) => {
@@ -481,6 +579,8 @@ function makeFakeD1(opts: FakeD1Options = {}) {
     tickets,
     follows,
     cheers,
+    blocks,
+    reports,
     rateLimits,
   };
 }
@@ -1507,5 +1607,477 @@ describe("social Worker — Phase 3 (social graph)", () => {
     const anonBody = (await anonRes.json()) as Record<string, unknown>;
     expect(anonBody.is_following).toBe(false);
     void viewer;
+  });
+});
+
+describe("social Worker — Phase 4 (block + report)", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  it("returns 401 on every authed Phase 4 route without a token", async () => {
+    const { db } = makeFakeD1();
+    const cases = [
+      { method: "POST", path: "/api/social/block/u-target" },
+      { method: "DELETE", path: "/api/social/block/u-target" },
+      { method: "POST", path: "/api/social/report" },
+    ];
+    for (const c of cases) {
+      const res = await worker.fetch(
+        req(c.path, { method: c.method }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      );
+      expect(res.status).toBe(401);
+    }
+  });
+
+  /** Helper: seed two users (A + B) by hitting /me with two clerk subs.
+   *  Returns their worker-assigned ids so tests can target them. */
+  async function seedTwoUsers(db: D1Database): Promise<{ aId: string; bId: string }> {
+    jwtSub("clerk_a");
+    const aRes = await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const aId = ((await aRes.json()) as { id: string }).id;
+    jwtSub("clerk_b");
+    const bRes = await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const bId = ((await bRes.json()) as { id: string }).id;
+    return { aId, bId };
+  }
+
+  it("block is idempotent: blocking the same user twice yields one row, both 200", async () => {
+    const { db, blocks } = makeFakeD1();
+    const { aId, bId } = await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    const r1 = await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r1.status).toBe(200);
+    jwtSub("clerk_a");
+    const r2 = await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r2.status).toBe(200);
+    expect(blocks.size).toBe(1);
+    expect(blocks.has(`${aId}|${bId}`)).toBe(true);
+  });
+
+  it("self-block is forbidden: POST /block/<self> returns 403", async () => {
+    const { db, blocks } = makeFakeD1();
+    const { aId } = await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/block/${aId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "cannot_block_self" });
+    expect(blocks.size).toBe(0);
+  });
+
+  it("block returns 404 when the target user does not exist", async () => {
+    const { db } = makeFakeD1();
+    await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/block/does-not-exist`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "not_found" });
+  });
+
+  it("block severs existing follows in BOTH directions", async () => {
+    const { db, blocks, follows } = makeFakeD1();
+    const { aId, bId } = await seedTwoUsers(db);
+
+    // A follows B, B follows A (both directions).
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/follow/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req(`/api/social/follow/${aId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(follows.size).toBe(2);
+
+    // A blocks B → both follows should be severed.
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(blocks.has(`${aId}|${bId}`)).toBe(true);
+    expect(follows.size).toBe(0);
+  });
+
+  it("after A blocks B, neither can follow the other (403 blocked)", async () => {
+    const { db, blocks } = makeFakeD1();
+    const { aId, bId } = await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(blocks.size).toBe(1);
+
+    // A tries to follow B → 403 blocked.
+    jwtSub("clerk_a");
+    const r1 = await worker.fetch(
+      req(`/api/social/follow/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r1.status).toBe(403);
+    expect(await r1.json()).toMatchObject({ error: "blocked" });
+
+    // B tries to follow A → 403 blocked (reverse direction).
+    jwtSub("clerk_b");
+    const r2 = await worker.fetch(
+      req(`/api/social/follow/${aId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r2.status).toBe(403);
+    expect(await r2.json()).toMatchObject({ error: "blocked" });
+  });
+
+  it("after A blocks B, neither can cheer the other's WON ticket (403 blocked)", async () => {
+    // Seed: A + B + a WON ticket owned by A.
+    const { db, tickets } = makeFakeD1({
+      tickets: [
+        {
+          id: "kb-won",
+          user_id: "u-a",
+          serial: "KB-A1",
+          race_key: "20260621|Hanshin|11|Takarazuka Kinen",
+          payload: JSON.stringify({ id: "kb-won", serial: "KB-A1" }),
+          state: "won",
+          payout_base: 5000,
+          returned: 6000,
+          created_at: 1,
+        },
+      ],
+      users: [
+        {
+          id: "u-a",
+          clerk_user_id: "clerk_a",
+          handle: null,
+          display_name: null,
+          avatar: null,
+          age_verified: 1,
+          created_at: 1,
+        },
+        {
+          id: "u-b",
+          clerk_user_id: "clerk_b",
+          handle: null,
+          display_name: null,
+          avatar: null,
+          age_verified: 1,
+          created_at: 1,
+        },
+      ],
+    });
+    expect(tickets.size).toBe(1);
+
+    // B blocks A.
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req(`/api/social/block/u-a`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+
+    // B tries to cheer A's WON ticket → 403 blocked (reverse direction works
+    // because blockExistsEitherDirection).
+    jwtSub("clerk_b");
+    const res = await worker.fetch(
+      req(`/api/social/tickets/kb-won/cheer`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(403);
+    expect(await res.json()).toMatchObject({ error: "blocked" });
+  });
+
+  it("unblock is idempotent: DELETE on a non-blocked user returns 200", async () => {
+    const { db, blocks } = makeFakeD1();
+    const { aId, bId } = await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(blocks.size).toBe(0);
+  });
+
+  it("after unblock, follow works again", async () => {
+    const { db, follows } = makeFakeD1();
+    const { aId, bId } = await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/block/${bId}`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/follow/${bId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(follows.size).toBe(1);
+    void aId;
+  });
+
+  it("feed EXCLUDES tickets from users the caller has blocked", async () => {
+    // Seed: A + B, B owns a ticket, A follows B (so it'd be in feed), then A blocks B.
+    const { db, follows, blocks } = makeFakeD1({
+      users: [
+        {
+          id: "u-a",
+          clerk_user_id: "clerk_a",
+          handle: null,
+          display_name: null,
+          avatar: null,
+          age_verified: 1,
+          created_at: 1,
+        },
+        {
+          id: "u-b",
+          clerk_user_id: "clerk_b",
+          handle: "b",
+          display_name: "B",
+          avatar: null,
+          age_verified: 1,
+          created_at: 1,
+        },
+      ],
+      tickets: [
+        {
+          id: "kb-b1",
+          user_id: "u-b",
+          serial: "KB-B1",
+          race_key: "20260621|Hanshin|11|Takarazuka Kinen",
+          payload: JSON.stringify({ id: "kb-b1", serial: "KB-B1", state: "open" }),
+          state: "open",
+          payout_base: 5000,
+          returned: null,
+          created_at: 1,
+        },
+      ],
+    });
+
+    // A follows B (so the ticket would normally be in feed).
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/follow/u-b`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(follows.size).toBe(1);
+
+    // Feed BEFORE block: B's ticket is present.
+    jwtSub("clerk_a");
+    const beforeRes = await worker.fetch(
+      req(`/api/social/feed`, { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const beforeBody = (await beforeRes.json()) as { tickets: { id: string }[] };
+    expect(beforeBody.tickets.find((t) => t.id === "kb-b1")).toBeTruthy();
+
+    // A blocks B.
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/block/u-b`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(blocks.size).toBe(1);
+    expect(follows.size).toBe(0); // block severs the follow
+
+    // Feed AFTER block: B's ticket is gone.
+    jwtSub("clerk_a");
+    const afterRes = await worker.fetch(
+      req(`/api/social/feed`, { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const afterBody = (await afterRes.json()) as { tickets: { id: string }[] };
+    expect(afterBody.tickets.find((t) => t.id === "kb-b1")).toBeUndefined();
+  });
+
+  it("POST /report stores a row for a valid ticket report", async () => {
+    const { db, reports } = makeFakeD1();
+    await seedTwoUsers(db);
+
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/report`, {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_type: "ticket",
+          target_id: "kb-bad",
+          reason: "spam",
+        }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(reports.length).toBe(1);
+    expect(reports[0]).toMatchObject({
+      target_type: "ticket",
+      target_id: "kb-bad",
+      reason: "spam",
+    });
+  });
+
+  it("POST /report rejects bad bodies (bad target_type, empty target_id, too-long reason)", async () => {
+    const { db, reports } = makeFakeD1();
+    await seedTwoUsers(db);
+
+    const cases: Array<{ body: unknown }> = [
+      { body: { target_type: "post", target_id: "x", reason: "x" } }, // bad type
+      { body: { target_type: "ticket", target_id: "", reason: "x" } }, // empty id
+      { body: { target_type: "ticket", target_id: "x", reason: "x".repeat(501) } }, // too long
+      { body: { target_type: "ticket", target_id: "x" } }, // missing reason
+    ];
+    for (const c of cases) {
+      jwtSub("clerk_a");
+      const res = await worker.fetch(
+        req(`/api/social/report`, {
+          method: "POST",
+          headers: { ...authed(), "Content-Type": "application/json" },
+          body: JSON.stringify(c.body),
+        }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      );
+      expect(res.status).toBe(400);
+    }
+    expect(reports.length).toBe(0);
+  });
+
+  it("report rate limit: 11th report in a minute returns 429 + Retry-After", async () => {
+    const { db, reports } = makeFakeD1();
+    await seedTwoUsers(db);
+
+    // First 10 reports succeed.
+    for (let i = 0; i < 10; i++) {
+      jwtSub("clerk_a");
+      const res = await worker.fetch(
+        req(`/api/social/report`, {
+          method: "POST",
+          headers: { ...authed(), "Content-Type": "application/json" },
+          body: JSON.stringify({
+            target_type: "ticket",
+            target_id: `kb-${i}`,
+            reason: "spam",
+          }),
+        }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      );
+      expect(res.status).toBe(200);
+    }
+    expect(reports.length).toBe(10);
+
+    // 11th report is rejected.
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/report`, {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({
+          target_type: "ticket",
+          target_id: "kb-11",
+          reason: "spam",
+        }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe(String(60));
+    expect(reports.length).toBe(10);
+  });
+
+  it("block rate limit: 31st block in a minute returns 429", async () => {
+    // Seed 31 distinct target users so we don't hit the self-block guard.
+    const users = Array.from({ length: 31 }, (_, i) => ({
+      id: `u-target-${i}`,
+      clerk_user_id: `clerk_target_${i}`,
+      handle: null,
+      display_name: null,
+      avatar: null,
+      age_verified: 1,
+      created_at: 1,
+    }));
+    const { db } = makeFakeD1({ users });
+
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/me`, { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+
+    for (let i = 0; i < 30; i++) {
+      jwtSub("clerk_a");
+      const res = await worker.fetch(
+        req(`/api/social/block/u-target-${i}`, { method: "POST", headers: authed() }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      );
+      expect(res.status).toBe(200);
+    }
+
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/block/u-target-30`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(429);
+    expect(res.headers.get("Retry-After")).toBe(String(60));
   });
 });

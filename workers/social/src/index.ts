@@ -92,6 +92,11 @@ const RATE_LIMITS: Record<string, number> = {
   follow: 30,
   cheer: 60,
   ticket: 20,
+  // Phase 4: block + report abuse guards. Block is generous (users curating
+  // their feed shouldn't hit it); report is tight (the moderation queue
+  // shouldn't be spammed).
+  block: 30,
+  report: 10,
 };
 const RATE_WINDOW = 60; // seconds
 
@@ -668,6 +673,103 @@ async function removeCheer(
     .run();
 }
 
+// ---------------------------------------------------------------------------
+// Phase 4 — block + report primitives.
+//
+// Block is asymmetric + one-way (Twitter model): INSERT means `blocker` has
+// blocked `blocked`. A block:
+//   1. Severs existing follows in BOTH directions (A blocks B → A unfollows
+//      B AND B unfollows A).
+//   2. Prevents future follow/cheer between the pair, in either direction
+//      (A can't follow or cheer B; B can't follow or cheer A).
+//   3. Filters the blocked user's tickets out of the BLOCKER's feed (one-way
+//      — the blocked user can still see the blocker's tickets, mirroring the
+//      "I don't want to see them" intent of a block).
+//
+// Report is write-only: rows land in `reports` for later moderation review
+// (Phase 4 backlog — no review UI ships in this phase).
+
+/** Returns true if EITHER user has blocked the other (block is symmetric for
+ *  the purpose of social interaction guards — either side blocks the pair). */
+async function blockExistsEitherDirection(
+  db: D1Database,
+  aId: string,
+  bId: string,
+): Promise<boolean> {
+  if (aId === bId) return false;
+  const row = await db
+    .prepare(
+      `SELECT 1 FROM blocks
+        WHERE (blocker_id = ? AND blocked_id = ?)
+           OR (blocker_id = ? AND blocked_id = ?)`,
+    )
+    .bind(aId, bId, bId, aId)
+    .first<{ "1": number }>();
+  return !!row;
+}
+
+/** Insert-or-nothing block + sever existing follows both ways. Idempotent. */
+async function blockUser(
+  db: D1Database,
+  blockerId: string,
+  blockedId: string,
+): Promise<void> {
+  await db
+    .prepare(
+      `INSERT INTO blocks (blocker_id, blocked_id, created_at)
+       VALUES (?, ?, ?)
+       ON CONFLICT(blocker_id, blocked_id) DO NOTHING`,
+    )
+    .bind(blockerId, blockedId, NOW())
+    .run();
+  // Sever follows in both directions. Two DELETEs, not one — the pair is
+  // asymmetric (follower/followee) so each direction needs its own clause.
+  await db
+    .prepare(`DELETE FROM follows WHERE follower_id = ? AND followee_id = ?`)
+    .bind(blockerId, blockedId)
+    .run();
+  await db
+    .prepare(`DELETE FROM follows WHERE follower_id = ? AND followee_id = ?`)
+    .bind(blockedId, blockerId)
+    .run();
+}
+
+async function unblockUser(
+  db: D1Database,
+  blockerId: string,
+  blockedId: string,
+): Promise<void> {
+  await db
+    .prepare(`DELETE FROM blocks WHERE blocker_id = ? AND blocked_id = ?`)
+    .bind(blockerId, blockedId)
+    .run();
+}
+
+/** Write a report row. Returns true on success. Caller validates fields + rate. */
+async function addReport(
+  db: D1Database,
+  reporterId: string,
+  targetType: "ticket" | "user",
+  targetId: string,
+  reason: string,
+): Promise<boolean> {
+  const id = crypto.randomUUID();
+  try {
+    await db
+      .prepare(
+        `INSERT INTO reports (id, reporter_id, target_type, target_id, reason, created_at)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .bind(id, reporterId, targetType, targetId, reason, NOW())
+      .run();
+    return true;
+  } catch {
+    // FK violation (target user doesn't exist) or CHECK — caller has already
+    // validated; treat any error as a soft failure.
+    return false;
+  }
+}
+
 /** Decode a TicketWithSocial into the client's CommittedTicket shape. */
 function decodeSocialTicket(
   row: TicketWithSocial,
@@ -693,6 +795,9 @@ function decodeSocialTicket(
 /**
  * Feed: caller's own tickets + followees' tickets, newest first, cap 100.
  * Each ticket carries owner + cheers count + cheeredByMe.
+ *
+ * Phase 4: filters out tickets owned by users the caller has blocked
+ * (one-way — the blocked user can still see the blocker's tickets).
  */
 async function buildFeed(
   db: D1Database,
@@ -710,12 +815,16 @@ async function buildFeed(
          JOIN users u ON u.id = t.user_id
          LEFT JOIN (SELECT ticket_id, COUNT(*) AS n FROM cheers GROUP BY ticket_id) c
            ON c.ticket_id = t.id
-        WHERE t.user_id = ?
-           OR t.user_id IN (SELECT followee_id FROM follows WHERE follower_id = ?)
+        WHERE (t.user_id = ?
+           OR t.user_id IN (SELECT followee_id FROM follows WHERE follower_id = ?))
+           AND NOT EXISTS (
+             SELECT 1 FROM blocks
+              WHERE blocker_id = ? AND blocked_id = t.user_id
+           )
         ORDER BY t.created_at DESC
         LIMIT 100`,
     )
-    .bind(userId, userId)
+    .bind(userId, userId, userId)
     .all<TicketWithSocial>();
   const out: Record<string, unknown>[] = [];
   for (const row of results) {
@@ -848,10 +957,12 @@ async function friendsOnCard(
 const TICKET_PATH = /^\/api\/social\/tickets(\/([^/]+))?$/;
 const TICKET_CHEER_PATH = /^\/api\/social\/tickets\/([^/]+)\/cheer$/;
 const FOLLOW_PATH = /^\/api\/social\/follow\/([^/]+)$/;
+const BLOCK_PATH = /^\/api\/social\/block\/([^/]+)$/;
 const PROFILE_PATH = /^\/api\/social\/users\/([^/]+)$/;
 const RACE_FRIENDS_PATH = /^\/api\/social\/races\/([^/]+)\/friends$/;
 const FEED_PATH = "/api/social/feed";
 const FRIENDS_ON_CARD_PATH = "/api/social/friends/on-card";
+const REPORT_PATH = "/api/social/report";
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -891,6 +1002,17 @@ async function router(request: Request, env: Env, cors: Record<string, string>):
   const followMatch = FOLLOW_PATH.exec(pathname);
   if (followMatch) {
     return handleFollow(request, env, cors, decodeURIComponent(followMatch[1]));
+  }
+
+  // /api/social/block/:userId — Phase 4 block graph (POST = block, DELETE = unblock).
+  const blockMatch = BLOCK_PATH.exec(pathname);
+  if (blockMatch) {
+    return handleBlock(request, env, cors, decodeURIComponent(blockMatch[1]));
+  }
+
+  // /api/social/report — Phase 4 moderation intake.
+  if (pathname === REPORT_PATH) {
+    return handleReport(request, env, cors);
   }
 
   // /api/social/tickets/:id/cheer — Phase 3 cheers.
@@ -1113,6 +1235,14 @@ async function handleFollow(
   const target = await userById(env.DB, targetId);
   if (!target) return json({ error: "not_found" }, 404, cors);
 
+  // Phase 4: a block in EITHER direction forbids follow. The block check
+  // happens after the 404 so a missing user still surfaces as not_found,
+  // not as a leaky 403.
+  const blocked = await blockExistsEitherDirection(env.DB, caller.id, targetId);
+  if (blocked) {
+    return json({ error: "blocked" }, 403, cors);
+  }
+
   if (request.method === "POST") {
     const allowed = await rateLimitCheck(env.DB, caller.id, "follow");
     if (!allowed) {
@@ -1140,6 +1270,121 @@ async function handleFollow(
   return json({ ok: true }, 200, cors);
 }
 
+/**
+ * Phase 4 — /api/social/block/:userId.
+ *   POST   = block (idempotent; severs follows both ways)
+ *   DELETE = unblock (idempotent)
+ *
+ * Self-block is forbidden (CHECK constraint is the backstop). A 404 for a
+ * missing target user is reported as `not_found` (block existence is private;
+ * we don't leak it via a different status).
+ */
+async function handleBlock(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  targetId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  if (request.method !== "POST" && request.method !== "DELETE") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  if (targetId === caller.id) {
+    return json({ error: "cannot_block_self" }, 403, cors);
+  }
+  // 404 if the target user doesn't exist (don't leak existence via 200).
+  const target = await userById(env.DB, targetId);
+  if (!target) return json({ error: "not_found" }, 404, cors);
+
+  // Rate-limit (Phase 4: block gets 30/min — generous, but capped so a
+  // compromised token can't DOS the blocks table).
+  const allowed = await rateLimitCheck(env.DB, caller.id, "block");
+  if (!allowed) {
+    return json(
+      { error: "rate_limited" },
+      429,
+      cors,
+      { "Retry-After": String(RATE_WINDOW) },
+    );
+  }
+
+  if (request.method === "POST") {
+    await blockUser(env.DB, caller.id, targetId);
+  } else {
+    await unblockUser(env.DB, caller.id, targetId);
+  }
+  return json({ ok: true }, 200, cors);
+}
+
+/**
+ * Phase 4 — POST /api/social/report.
+ * Body: { target_type: "ticket" | "user", target_id: string, reason: string }
+ *
+ * Write-only: rows land in `reports` for later moderation review. No UI for
+ * review ships in Phase 4 (backlog item). Reason is capped at 500 chars to
+ * keep the table cheap; reporters who need more room can file a ticket.
+ */
+async function handleReport(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (request.method !== "POST") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  let body: { target_type?: unknown; target_id?: unknown; reason?: unknown };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return json({ error: "bad_body" }, 400, cors);
+  }
+
+  if (body.target_type !== "ticket" && body.target_type !== "user") {
+    return json({ error: "bad_target_type" }, 400, cors);
+  }
+  if (typeof body.target_id !== "string" || !body.target_id) {
+    return json({ error: "bad_target_id" }, 400, cors);
+  }
+  if (typeof body.reason !== "string") {
+    return json({ error: "bad_reason" }, 400, cors);
+  }
+  const reason = body.reason.trim();
+  if (reason.length === 0 || reason.length > 500) {
+    return json({ error: "bad_reason" }, 400, cors);
+  }
+
+  const allowed = await rateLimitCheck(env.DB, caller.id, "report");
+  if (!allowed) {
+    return json(
+      { error: "rate_limited" },
+      429,
+      cors,
+      { "Retry-After": String(RATE_WINDOW) },
+    );
+  }
+
+  const ok = await addReport(
+    env.DB,
+    caller.id,
+    body.target_type,
+    body.target_id,
+    reason,
+  );
+  if (!ok) return json({ error: "server_error" }, 500, cors);
+  return json({ ok: true }, 200, cors);
+}
+
 async function handleCheer(
   request: Request,
   env: Env,
@@ -1163,6 +1408,11 @@ async function handleCheer(
   // Self-cheer forbidden (Decision 2).
   if (ticket.user_id === caller.id) {
     return json({ error: "cannot_cheer_own_ticket" }, 409, cors);
+  }
+  // Phase 4: a block in EITHER direction forbids cheer (same rule as follow).
+  const blocked = await blockExistsEitherDirection(env.DB, caller.id, ticket.user_id);
+  if (blocked) {
+    return json({ error: "blocked" }, 403, cors);
   }
 
   const allowed = await rateLimitCheck(env.DB, caller.id, "cheer");
