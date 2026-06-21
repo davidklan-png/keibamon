@@ -118,7 +118,10 @@ function ClerkAuthInner({ children }: { children: React.ReactNode }) {
     },
     openSignIn: () => {
       try {
-        clerk.openSignIn();
+        // Pin the redirect target to the current URL so a misconfigured Clerk
+        // dashboard "After sign-in URL" can't regress the user to /. The modal
+        // flow ignores this; the redirect fallback honors it.
+        clerk.openSignIn({ redirectUrl: window.location.href });
       } catch {
         /* Clerk modal unavailable — no-op. */
       }
