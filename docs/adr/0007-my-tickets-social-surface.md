@@ -1,6 +1,6 @@
 # ADR-0007: "My Tickets" — committed-bet log + social surface
 
-- **Status:** Accepted (2026-06-21)
+- **Status:** Accepted (2026-06-21); **Phase 1 IN PROGRESS** (2026-06-21)
 - **Date:** 2026-06-21
 - **Deciders:** David Klan
 - **Builds on:** the `/api/live` D1 projection from [[ADR-0003]]; the
@@ -8,6 +8,16 @@
   recommender surface from ADR-0005.
 - **Source:** `KeibamonDesign` handoff ("My Tickets — committed tickets, live
   odds, shareable card").
+
+## Phase status
+
+| Phase | State | Where |
+|-------|-------|-------|
+| 0 — UI on localStorage | Shipped (commit on main) | `frontend/src/App.tsx` `Step="mine"` |
+| **1 — Clerk auth + identity skeleton** | **In review** (`feat/adr-0007-phase1-clerk`) | `frontend/src/auth/*`, `workers/social/` |
+| 2 — Per-user persistence (social D1) | Pending | ADR-0007 §Phase 2 |
+| 3 — Social (follows, cheers) | Pending | ADR-0007 §Phase 3 |
+| 4 — Hardening (rate limits, ToS) | Pending | ADR-0007 §Phase 4 |
 
 ## Context
 
@@ -143,3 +153,59 @@ ones.
 This was prepared in the Cowork sandbox, which **cannot git commit/push** (per
 `CLAUDE.md`). This ADR is written to `docs/adr/0007-my-tickets-social-surface.md`
 for you to review and commit on the Mac.
+
+## Phase 1 — Decisions made in implementation (2026-06-21)
+
+These resolve the choices the ADR left open when Phase 1 hit the hard
+constraints (racing Worker owns `keibamon.com/*`; cannot share that origin
+without editing it). The racing tier is untouched — see "Diff scope" below.
+
+1. **Separate-origin deploy for the social Worker.** The racing Worker
+   (`src/worker.js`) owns `keibamon.com/*` (assets + `/api/live`). The social
+   Worker therefore deploys to its own origin with `/api/social/*` and NEVER
+   shares a route prefix with the racing Worker. `/api/live` stays where it
+   is; `/api/social/me` lives on the social Worker. The two Workers don't
+   share a `wrangler.jsonc`, D1 binding, or origin.
+2. **Phase 1 deploy target: `*.workers.dev` subdomain.** Zero DNS work for
+   the human — `keibamon-social.<subdomain>.workers.dev`. Custom domain
+   `social.keibamon.com` is a documented Phase 2 follow-up (it needs a route
+   override on the social Worker only, which is fine; the racing Worker is
+   still untouched).
+3. **Frontend targets the social Worker via `VITE_SOCIAL_API_BASE`.** The
+   build embeds the URL; CORS is enforced in the social Worker via the
+   `ALLOWED_ORIGINS` var.
+4. **JWT verification with `jose` (not Clerk's SDK on the Worker).** Keeps
+   the Worker dependency-light (one pure-JS lib, no Clerk runtime) and
+   testable with no network. JWKS is fetched from Clerk's well-known URL on
+   first verify and cached on the isolate.
+5. **`AuthGate` is pure-presentational (no Clerk imports).** A thin context
+   (`AuthProvider`) wraps Clerk's hooks and exposes a single `useAuth()` to
+   the app. This lets `AuthGate` be exercised with `renderToStaticMarkup`
+   (the i18n.test.tsx style) without pulling Clerk's runtime into the test;
+   the test stubs `SignInScreen` for the same reason.
+6. **Soft-fail when `VITE_CLERK_PUBLISHABLE_KEY` is unset.** Build must not
+   hard-crash. In dev, a one-liner warning prints; `AuthProvider` returns a
+   no-op value (signed-out, `openSignIn` warns); the app still renders.
+7. **20+ self-attestation in localStorage (Phase 1) → social D1 (Phase 2).**
+   The `setPublicMetadata` path the spec mentioned does not exist on Clerk's
+   frontend `UserResource` in v5 (publicMetadata is read-only from the
+   client). Phase 1 persists `age_verified` to `localStorage` keyed by Clerk
+   user id AND to the social D1 row via POST `/api/social/me`. Phase 2 will
+   replace the localStorage read with a `GET /api/social/me` fetch in
+   `AuthProvider` so the D1 is the single source of truth.
+
+### Phase 1 diff scope
+
+`git diff main...feat/adr-0007-phase1-clerk --stat` will show:
+
+- `frontend/src/auth/` (new) — AuthProvider, AuthGate, SignInScreen, AgeGate,
+  socialClient, storageKey, and the two test files.
+- `frontend/src/main.tsx`, `frontend/src/App.tsx`, `frontend/src/i18n/{en,ja}.ts`,
+  `frontend/src/styles.css`, `frontend/src/vite-env.d.ts`, `frontend/package.json`,
+  `frontend/.env.example`.
+- `workers/social/` (new) — isolated Worker package, D1 migration, tests.
+- `docs/adr/0007-my-tickets-social-surface.md`, `docs/runbooks/phase1-clerk-auth.md`.
+
+NOT touched: root `wrangler.jsonc`, `src/worker.js`, `backend/`, `splash/`,
+`tools/jravan/`, `ingestion/`, `src/keibamon_core/`, the racing D1,
+`/api/live`.
