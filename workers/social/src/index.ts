@@ -31,6 +31,7 @@
 //     replaces with a real token bucket in KV.
 
 import { jwtVerify, createRemoteJWKSet } from "jose";
+import { settleSweep } from "./sweep";
 
 export interface Env {
   DB: D1Database;
@@ -41,6 +42,12 @@ export interface Env {
   ALLOWED_ORIGINS: string;
   /** Reserved for a later phase that writes publicMetadata from the Worker. */
   CLERK_SECRET_KEY?: string;
+  /**
+   * Phase 4: base URL of the racing Worker (no trailing slash), used by the
+   * cron settle sweep to fetch /api/live. Empty/missing → sweep logs a
+   * warning and no-ops.
+   */
+  LIVE_BASE: string;
 }
 
 interface UserRow {
@@ -478,6 +485,33 @@ async function patchTicket(
   return { status: 200, row: decoded ?? body };
 }
 
+/**
+ * Owner-less state transition used by the cron settle sweep. Idempotent:
+ * the `WHERE state = 'open'` clause makes concurrent sweeps + client PATCH
+ * races safe (a sweep can't re-settle an already-settled row). Does NOT
+ * rewrite the payload — `decodeTicket` overlays the flat columns on top of
+ * the stale payload, so the rendered state stays correct.
+ *
+ * Returns true iff a row was actually updated.
+ */
+export async function patchTicketState(
+  db: D1Database,
+  id: string,
+  state: "won" | "miss" | "refunded",
+  returned: number | null,
+): Promise<boolean> {
+  const { meta } = await db
+    .prepare(
+      `UPDATE tickets
+          SET state = ?, returned = ?
+        WHERE id = ? AND state = 'open'`,
+    )
+    .bind(state, returned, id)
+    .run();
+  const changes = (meta as { changes?: number } | null)?.changes ?? 0;
+  return changes > 0;
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3 — social primitives (follows, cheers, rate limits, profile, feed).
 // ---------------------------------------------------------------------------
@@ -827,60 +861,76 @@ export default {
     if (request.method === "OPTIONS") {
       return new Response(null, { status: 204, headers: cors });
     }
+    return router(request, env, cors);
+  },
 
-    const url = new URL(request.url);
-    const pathname = url.pathname;
-
-    // /api/social/me — Phase 1 identity (+ Phase 3 handle/dn/avatar patch).
-    if (pathname === "/api/social/me") {
-      return handleMe(request, env, cors);
-    }
-
-    // /api/social/follow/:userId — Phase 3 follow graph.
-    const followMatch = FOLLOW_PATH.exec(pathname);
-    if (followMatch) {
-      return handleFollow(request, env, cors, decodeURIComponent(followMatch[1]));
-    }
-
-    // /api/social/tickets/:id/cheer — Phase 3 cheers.
-    const cheerMatch = TICKET_CHEER_PATH.exec(pathname);
-    if (cheerMatch) {
-      return handleCheer(request, env, cors, decodeURIComponent(cheerMatch[1]));
-    }
-
-    // /api/social/tickets and /api/social/tickets/:id — Phase 2 persistence.
-    const ticketMatch = TICKET_PATH.exec(pathname);
-    if (ticketMatch && !TICKET_CHEER_PATH.exec(pathname)) {
-      return handleTickets(request, env, cors, ticketMatch[2] ?? null);
-    }
-
-    // /api/social/feed — Phase 3 feed.
-    if (pathname === FEED_PATH) {
-      return handleFeed(request, env, cors);
-    }
-
-    // /api/social/friends/on-card — Phase 3 today's-card strip.
-    if (pathname === FRIENDS_ON_CARD_PATH) {
-      return handleFriendsOnCard(request, env, cors, url);
-    }
-
-    // /api/social/races/:raceKey/friends — Phase 3 friends-on-race.
-    const raceFriendsMatch = RACE_FRIENDS_PATH.exec(pathname);
-    if (raceFriendsMatch) {
-      return handleRaceFriends(request, env, cors, decodeURIComponent(raceFriendsMatch[1]));
-    }
-
-    // /api/social/users/:handle — Phase 3 public profile.
-    const profileMatch = PROFILE_PATH.exec(pathname);
-    if (profileMatch) {
-      return handleProfile(request, env, cors, decodeURIComponent(profileMatch[1]));
-    }
-
-    // Only the route prefixes above are served here. /api/live stays on
-    // the racing Worker; everything else is 404 (no collision with racing origin).
-    return json({ error: "not_found" }, 404, cors);
+  // ADR-0007 Phase 4: cron settle sweep. Trigger every 5 min UTC (see
+  // wrangler.jsonc `triggers.crons`). The sweep fetches /api/live from the
+  // racing Worker via LIVE_BASE and settles OPEN tickets whose race has
+  // reached `status === 'result'`. ctx.waitUntil keeps the request alive
+  // past the response so the cron doesn't cut the sweep short.
+  async scheduled(
+    _controller: ScheduledController,
+    env: Env,
+    ctx: ExecutionContext,
+  ): Promise<void> {
+    ctx.waitUntil(settleSweep(env));
   },
 };
+
+async function router(request: Request, env: Env, cors: Record<string, string>): Promise<Response> {
+  const url = new URL(request.url);
+  const pathname = url.pathname;
+
+  // /api/social/me — Phase 1 identity (+ Phase 3 handle/dn/avatar patch).
+  if (pathname === "/api/social/me") {
+    return handleMe(request, env, cors);
+  }
+
+  // /api/social/follow/:userId — Phase 3 follow graph.
+  const followMatch = FOLLOW_PATH.exec(pathname);
+  if (followMatch) {
+    return handleFollow(request, env, cors, decodeURIComponent(followMatch[1]));
+  }
+
+  // /api/social/tickets/:id/cheer — Phase 3 cheers.
+  const cheerMatch = TICKET_CHEER_PATH.exec(pathname);
+  if (cheerMatch) {
+    return handleCheer(request, env, cors, decodeURIComponent(cheerMatch[1]));
+  }
+
+  // /api/social/tickets and /api/social/tickets/:id — Phase 2 persistence.
+  const ticketMatch = TICKET_PATH.exec(pathname);
+  if (ticketMatch && !TICKET_CHEER_PATH.exec(pathname)) {
+    return handleTickets(request, env, cors, ticketMatch[2] ?? null);
+  }
+
+  // /api/social/feed — Phase 3 feed.
+  if (pathname === FEED_PATH) {
+    return handleFeed(request, env, cors);
+  }
+
+  // /api/social/friends/on-card — Phase 3 today's-card strip.
+  if (pathname === FRIENDS_ON_CARD_PATH) {
+    return handleFriendsOnCard(request, env, cors, url);
+  }
+
+  // /api/social/races/:raceKey/friends — Phase 3 friends-on-race.
+  const raceFriendsMatch = RACE_FRIENDS_PATH.exec(pathname);
+  if (raceFriendsMatch) {
+    return handleRaceFriends(request, env, cors, decodeURIComponent(raceFriendsMatch[1]));
+  }
+
+  // /api/social/users/:handle — Phase 3 public profile.
+  const profileMatch = PROFILE_PATH.exec(pathname);
+  if (profileMatch) {
+    return handleProfile(request, env, cors, decodeURIComponent(profileMatch[1]));
+  }
+
+  // Only the route prefixes above are served here. /api/live stays on
+  // the racing Worker; everything else is 404 (no collision with racing origin).
+  return json({ error: "not_found" }, 404, cors);
+}
 
 async function handleMe(
   request: Request,

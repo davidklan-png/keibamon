@@ -488,6 +488,7 @@ function makeFakeD1(opts: FakeD1Options = {}) {
 const BASE_ENV: Omit<Env, "DB"> = {
   CLERK_ISSUER: "https://example.clerk.accounts.dev",
   ALLOWED_ORIGINS: "https://app.example.com,http://localhost:5173",
+  LIVE_BASE: "https://racing.example.workers.dev",
 };
 
 function req(path: string, init: RequestInit = {}): Request {

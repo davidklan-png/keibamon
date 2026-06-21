@@ -19,5 +19,13 @@
       "database_name": "keibamon_social",
       "database_id": "c43d603d-47c3-40fd-830e-fac6e3c03803"
     }
-  ]
+  ],
+  // ADR-0007 Phase 4: cron settle sweep. Every 5 minutes (UTC) the Worker
+  // fetches /api/live from the racing Worker (LIVE_BASE secret) and PATCHes
+  // any OPEN ticket whose race has reached `status === 'result'`. The 45s
+  // client poll is the fast path; this is the offline-backstop for users
+  // who weren't online when the race finished.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
 }
