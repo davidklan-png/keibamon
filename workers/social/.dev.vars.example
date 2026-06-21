@@ -1,0 +1,18 @@
+# ADR-0007 Phase 1 — social Worker secrets. Copy to .dev.vars (NEVER commit).
+# Get these from the Clerk Dashboard → API Keys + Frontend API URL.
+
+# Clerk Frontend API URL, e.g. https://keen-otter-1.clerk.accounts.dev
+# (no trailing slash; the worker appends /.well-known/jwks.json)
+CLERK_ISSUER=
+
+# Optional override of the JWKS URL (defaults to ${CLERK_ISSUER}/.well-known/jwks.json)
+CLERK_JWKS_URL=
+
+# Comma-separated list of allowed origins for CORS, e.g.
+#   http://localhost:5173,https://keibamon.com
+ALLOWED_ORIGINS=
+
+# Only set if the Worker writes Clerk publicMetadata (Phase 1 does NOT —
+# age_verified lives in the social D1 row). Kept here so a later phase can
+# flip to server-side metadata writes without re-discovering the var name.
+CLERK_SECRET_KEY=

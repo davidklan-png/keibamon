@@ -1,0 +1,23 @@
+{
+  // ADR-0007 Phase 1 — social Worker (identity + Phase 2 persistence).
+  // ISOLATED from the racing Worker (root ../../wrangler.jsonc + src/worker.js):
+  //   - separate origin (Phase 1: *.workers.dev subdomain; custom domain later)
+  //   - separate D1 (keibamon_social; NEVER references keibamon-live)
+  //   - no assets binding (frontend is served by the racing Worker)
+  // Frontend targets this Worker via VITE_SOCIAL_API_BASE; CORS is set here.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "keibamon-social",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-06-11",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": {
+    "enabled": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "keibamon_social",
+      "database_id": "<run: npx wrangler d1 create keibamon_social>"
+    }
+  ]
+}
