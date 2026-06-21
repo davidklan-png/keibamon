@@ -1537,6 +1537,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         const r = await postTicket(token, tk);
         if (!r.ok) {
           pushPending(userId, tk);
+          flash(t("mine.offlineQueued"));
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.warn("[commit] POST failed, queued for retry:", r.err);
@@ -1650,7 +1651,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
           </div>
 
           {tickets.length === 0 && (
-            <p className="empty">{t("tickets.noRunners")}</p>
+            <p className="empty">{t("mine.empty")}</p>
           )}
 
           {tickets.map((tk) => {

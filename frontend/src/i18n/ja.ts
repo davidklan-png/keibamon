@@ -158,6 +158,10 @@ export const ja = {
     notAdvice: "遊びです — 投票助言ではありません。",
     count: "{n}件",
     handle: "@あなた",
+    // ADR-0007 Phase 2 — サーバ優先の永続化 + 自動精算。
+    estimate: "見積もり",
+    empty: "まだ馬券がありません。「新規」から登録できます。",
+    offlineQueued: "オフラインで保存しました — 接続時に同期します。",
     you: "あなた",
     communityCard: "今日のカードに友だち{n}人が参戦中",
     friendsOnRace: "このレースに友だち{n}人",

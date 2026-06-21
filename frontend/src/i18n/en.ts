@@ -160,6 +160,10 @@ export const en = {
     notAdvice: "For fun — not betting advice.",
     count: "{n} total",
     handle: "@you",
+    // ADR-0007 Phase 2 — server-first persistence + auto-settle strings.
+    estimate: "estimate",
+    empty: "No tickets yet — pick New bet to commit one.",
+    offlineQueued: "Saved offline — will sync when you reconnect.",
     you: "You",
     communityCard: "{n} friends are on today’s card",
     friendsOnRace: "{n} friends on this race",

@@ -1,6 +1,6 @@
 # ADR-0007: "My Tickets" — committed-bet log + social surface
 
-- **Status:** Accepted (2026-06-21); **Phase 1 IN PROGRESS** (2026-06-21)
+- **Status:** Accepted (2026-06-21); **Phase 2 IN REVIEW** (2026-06-21)
 - **Date:** 2026-06-21
 - **Deciders:** David Klan
 - **Builds on:** the `/api/live` D1 projection from [[ADR-0003]]; the
@@ -14,8 +14,8 @@
 | Phase | State | Where |
 |-------|-------|-------|
 | 0 — UI on localStorage | Shipped (commit on main) | `frontend/src/App.tsx` `Step="mine"` |
-| **1 — Clerk auth + identity skeleton** | **In review** (`feat/adr-0007-phase1-clerk`) | `frontend/src/auth/*`, `workers/social/` |
-| 2 — Per-user persistence (social D1) | Pending | ADR-0007 §Phase 2 |
+| 1 — Clerk auth + identity skeleton | Merged | `frontend/src/auth/*`, `workers/social/` |
+| **2 — Per-user persistence (social D1)** | **In review** (`feat/adr-0007-phase2-persistence`) | `workers/social/migrations/0002_tickets.sql`, `frontend/src/lib/settle.ts`, `frontend/src/auth/{socialClient,ticketQueue}.ts` |
 | 3 — Social (follows, cheers) | Pending | ADR-0007 §Phase 3 |
 | 4 — Hardening (rate limits, ToS) | Pending | ADR-0007 §Phase 4 |
 
@@ -209,3 +209,97 @@ without editing it). The racing tier is untouched — see "Diff scope" below.
 NOT touched: root `wrangler.jsonc`, `src/worker.js`, `backend/`, `splash/`,
 `tools/jravan/`, `ingestion/`, `src/keibamon_core/`, the racing D1,
 `/api/live`.
+
+## Phase 2 — Decisions made in implementation (2026-06-21)
+
+Phase 2 moves committed tickets server-side and adds settlement. The hard
+constraint stayed the same: the racing tier (racing D1, `/api/live`, asset
+Worker, `tools/jravan`, `ingestion`, `src/keibamon_core`) is **untouched**.
+The Phase 1 Worker + D1 + Clerk JWT layer is **reused** — no new datastore.
+
+1. **Tickets table on `keibamon_social` (not a new D1).** Phase 1 already
+   stood up the social D1 with a `users` table; Phase 2 adds `tickets` as
+   a sibling. `payload JSON` carries the verbatim `CommittedTicket` so the
+   social tier stays opaque to the lake schema; the flat `state` /
+   `returned` / `race_key` / `payout_base` columns are the
+   resolver / query surface. A `(user_id, created_at DESC)` index backs
+   the feed.
+2. **Settlement is client-side, driven by `/api/live`.** The 45s poll in
+   `App.tsx` already exists; a new effect on the same snapshot iterates
+   the user's OPEN tickets, matches `raceKey`, and resolves win/miss when
+   `status==='result'`. PATCH is fired per ticket. No new infra, no
+   server cron, no Durable Object. (A future server-side sweep for
+   offline-at-post-time users is a Phase 3+ follow-up.)
+3. **The manual "Watch the result" button is gated behind
+   `import.meta.env.DEV`.** Production users never see it. Phase 0's
+   stub-settle path is inert in prod; the real path is the auto-effect.
+4. **Offline commit queue in localStorage (`ticketQueue.ts`).** Commits
+   are optimistic; failed POSTs queue under `kbm.pending.<userId>` and
+   flush before the GET on the next signed-in load. Cap 50 (FIFO
+   eviction), de-dupe by id. PATCH (settle / claps) is NOT queued — it's
+   idempotent and retried on the next poll.
+5. **localStorage demoted to a read-through cache.** The first server GET
+   replaces state and mirrors the response into the same `kbm.v4.<userId>.<lang>`
+   key Phase 1 used; the cache renders instantly on the next load and
+   survives offline. Clearing it loses nothing for signed-in users
+   (the GET rebuilds it).
+6. **Settlement resolver is pure + idempotent (`lib/settle.ts`).**
+   Implementations for all 5 bet types the recommender emits
+   (`quinella`, `wide`, `exacta`, `trio`, `trifecta`). Payout lookup
+   canonicalizes combos to the form `netkeiba_payouts.py` uses
+   (ascending-sort for unordered types, preserve-order for exacta /
+   trifecta). The resolver returns `{state:'open', reason:'no_finishers_yet'}`
+   when the result block is empty — it never fabricates a settlement.
+7. **Payout-source gap is REAL and accepted (2026-06-21).** Today's
+   `/api/live` producer (`tools/jravan/expose_live.py`) does NOT emit a
+   result block. `snapshot.py:87` passes `raw.get('result')` through
+   unchanged and no upstream populates it. So in production, every
+   "result" race still has empty `result` → resolver returns
+   `{state:'open', reason:'no_finishers_yet'}` → ticket stays open → UI
+   shows the commit-time estimate (`payoutBase`). No false settlement,
+   no fabricated payout. When the producer starts emitting finishing
+   order + payouts (a racing-tier change, separate branch), this
+   resolver resolves them with no UI change. Tracked as Phase 2
+   follow-up #1.
+8. **Demo seed gated to signed-out users.** Phase 0's two demo tickets
+   were a stand-in for the missing backend; signed-in users now get
+   their real server feed (or an honest empty-state).
+9. **`claps` stays local-only.** Phase 3 will add a `cheers` table and
+   cross-user sync; for now claps are persisted in the ticket's payload
+   (so the cache survives a reload) and PATCHed best-effort, but they
+   are NOT shared across users. The cheer UI works exactly as before.
+
+### Phase 2 diff scope
+
+`git diff main...feat/adr-0007-phase2-persistence --stat` will show:
+
+- `workers/social/migrations/0002_tickets.sql` (new) — tickets table +
+  `(user_id, created_at DESC)` index.
+- `workers/social/src/index.ts`, `workers/social/test/social.test.ts` —
+  ticket CRUD endpoints + ownership tests (real in-memory D1 fake).
+- `frontend/src/api.ts` — optional `result: RaceResult | null` on
+  `LiveRace`.
+- `frontend/src/auth/socialClient.ts` (extended) — `listTickets`,
+  `postTicket`, `patchTicket` typed helpers.
+- `frontend/src/auth/ticketQueue.ts` + test (new) — offline commit queue.
+- `frontend/src/lib/settle.ts` + test (new) — settlement resolver for
+  all 5 bet types, table-driven.
+- `frontend/src/App.tsx` — server-first load, optimistic commit, auto-
+  settle effect, DEV-only manual trigger, signed-out-only seed.
+- `frontend/src/i18n/{en,ja}.ts` — three new strings (`estimate`,
+  `empty`, `offlineQueued`).
+- `docs/adr/0007-*.md`, `docs/runbooks/phase2-persistence.md`.
+
+NOT touched: root `wrangler.jsonc`, `src/worker.js`, `backend/`, `splash/`,
+`tools/jravan/`, `ingestion/`, `src/keibamon_core/`, the racing D1,
+`/api/live`, `expose_live.py`.
+
+### Phase 2 follow-ups
+
+1. **Drive `/api/live` to emit `result`.** Closing the payout-source gap
+   (Decision 7). A racing-tier change; separate branch + PR.
+2. **Server-side settle sweep.** A Worker cron / Durable Object alarm
+   that PATCHes tickets when their race reaches `result`, so users
+   offline at post-time still settle on reconnect.
+3. **`cheers` table + cross-user sync.** Phase 3.
+4. **Rate limits on POST /tickets.** Phase 4 hardening.
