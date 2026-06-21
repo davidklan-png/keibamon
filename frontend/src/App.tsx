@@ -55,6 +55,21 @@ import {
 import { resolveTicket, type RaceResult } from "./lib/settle";
 import { storageKeyFor } from "./auth/storageKey";
 import { exportTicketCard, type ShareOutcome } from "./lib/share";
+import {
+  MT_MOOD_COLOR,
+  MT_VIBES,
+  avatarColor,
+  mtStateColor,
+  mtSep,
+  mtRaceKey,
+  mtFmtDate,
+  mtPickFeature,
+  mtRunnersOf,
+  mtLoadStored,
+  raceHasLiveOdds,
+  type MtView,
+  type DriftDir,
+} from "./lib/mytickets-view";
 
 type Step = "mine" | "race" | "style" | "tickets" | "explain";
 
@@ -87,12 +102,6 @@ function yen(n: number): string {
 function fmt(n: number | undefined, d = 1): string {
   if (n == null || !isFinite(n)) return "-";
   return Number(n).toFixed(d);
-}
-
-/** ADR-0006: a race is "open" once any runner carries a live (non-estimated) price. */
-function raceHasLiveOdds(race: LiveRace): boolean {
-  if (race.status) return race.status === "open" || race.status === "result";
-  return (race.runners || []).some((r) => (r.win_odds || 0) > 0);
 }
 
 function App() {
@@ -1009,93 +1018,6 @@ function ExplainScreen(props: ExplainScreenProps) {
 // /api/live poll (NOT the prototype's 3s timer), and committed tickets persist
 // to localStorage as a stand-in until the Clerk + social-D1 backend lands.
 // ============================================================================
-type MtView = "feed" | "new" | "detail" | "profile";
-type DriftDir = "firm" | "drift" | "steady";
-
-const MT_MOOD_COLOR: Record<MoodKey, string> = {
-  safer: "var(--turf)",
-  balanced: "var(--sky)",
-  spicier: "var(--coral)",
-};
-
-const MT_VIBES: { mood: MoodKey; pid: PersonalityId }[] = [
-  { mood: "safer", pid: "safe" },
-  { mood: "balanced", pid: "balanced" },
-  { mood: "spicier", pid: "longshot" },
-];
-
-function mtStateColor(s: CommittedState): string {
-  return s === "open"
-    ? "var(--turf)"
-    : s === "won"
-      ? "var(--gold-amber)"
-      : s === "refunded"
-        ? "var(--soft)"
-        : "var(--miss)";
-}
-
-/** Phase 3 — deterministic avatar color from a string (handle/display name). */
-const AVATAR_COLORS = ["#FF6A6A", "#2D8CF0", "#E59A14", "#15A862", "#9B59B6", "#1ABC9C"];
-function avatarColor(seed: string): string {
-  let hash = 0;
-  for (let i = 0; i < seed.length; i++) hash = (hash * 31 + seed.charCodeAt(i)) | 0;
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length];
-}
-
-function mtSep(type: BetType): string {
-  return type === "exacta" || type === "trifecta" ? " › " : " – ";
-}
-
-function mtRaceKey(race: LiveRace, fallbackDate?: string): string {
-  const date = race.date ?? fallbackDate ?? "";
-  return `${date}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
-}
-
-function mtFmtDate(date: string, lang: "en" | "ja"): string {
-  if (!date) return "";
-  const normalized = /^\d{8}$/.test(date)
-    ? `${date.slice(0, 4)}-${date.slice(4, 6)}-${date.slice(6, 8)}`
-    : date;
-  const parsed = new Date(`${normalized}T00:00:00`);
-  if (Number.isNaN(parsed.getTime())) return date;
-  return new Intl.DateTimeFormat(lang === "ja" ? "ja-JP" : "en-US", {
-    month: "short",
-    day: "numeric",
-    weekday: "short",
-  }).format(parsed);
-}
-
-function mtPickFeature(snap: LiveSnapshot | null): LiveRace | null {
-  const races = (snap?.races || []).filter((r) => (r.runners || []).length > 0);
-  if (races.length === 0) return null;
-  const open = races.filter((r) => raceHasLiveOdds(r));
-  const pool = open.length > 0 ? open : races;
-  return (
-    pool.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
-    pool[pool.length - 1]
-  );
-}
-
-function mtRunnersOf(race: LiveRace): Runner[] {
-  return (race.runners || []).map((r) => ({
-    uma: String(r.umaban),
-    name: r.name ?? null,
-    odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
-  }));
-}
-
-function mtLoadStored(lang: string, userId: string | null): CommittedTicket[] {
-  try {
-    // ADR-0007 Phase 1 — namespaced per Clerk user when signed in. Signed-out
-    // falls back to the Phase 0 sample key so the pre-auth visual still has
-    // something to show. Phase 2 will replace this with the social D1.
-    const raw = localStorage.getItem(storageKeyFor(lang, userId));
-    const parsed = raw ? (JSON.parse(raw) as CommittedTicket[]) : [];
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
 
 interface MyTicketsProps {
   snap: LiveSnapshot | null;
