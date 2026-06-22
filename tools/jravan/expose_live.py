@@ -44,7 +44,12 @@ from keibamon_core.polling.netkeiba import (  # noqa: E402
     fetch_odds_payload,
     parse_odds_payload,
 )
-from publish_d1 import push_to_d1  # noqa: E402
+from publish_d1 import (  # noqa: E402
+    fetch_race_card_max,
+    fetch_snapshot,
+    push_to_d1,
+    upsert_race_card_max,
+)
 
 _JST = ZoneInfo("Asia/Tokyo")
 
@@ -130,6 +135,7 @@ def _maybe_result(
     *,
     post_time_jst: str | None,
     now_jst: datetime,
+    race_date_yyyymmdd: str | None = None,
 ) -> dict | None:
     """Best-effort: fetch result.html -> build_result -> resolver block.
 
@@ -150,11 +156,33 @@ def _maybe_result(
     official result page, never anything pre-race. We do NOT attach a result
     block while ``post_time`` is in the future, even if result.html is
     reachable (e.g. a stale page from a prior running of the same race_no).
+
+    ``race_date_yyyymmdd`` (R4 fix): the SCHEDULED race date, so the
+    "hasn't started" gate can be evaluated against the race's actual post
+    time (race_date + post_time), not today's calendar day at the post
+    hour. Without this, re-publishing a past race day (e.g. verifying the
+    Saturday card on Monday) incorrectly computed ``post_at = today at
+    HH:MM`` -- which is in the future -- and gated out every result fetch,
+    producing a 36-race snapshot with zero result blocks. The original
+    race-day-cycle path (same-day publish) is unaffected.
     """
     if post_time_jst:
         try:
             hh, mm = post_time_jst.split(":")[:2]
-            post_at = now_jst.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+            if race_date_yyyymmdd:
+                # R4: pin post_at to the SCHEDULED race date + post time.
+                # now_jst < post_at then correctly evaluates "has the race
+                # started" for past-day re-publishes.
+                d = datetime.strptime(race_date_yyyymmdd, "%Y%m%d")
+                post_at = datetime(
+                    d.year, d.month, d.day, int(hh), int(mm), tzinfo=_JST
+                )
+            else:
+                # Legacy same-day path: today at HH:MM. Equivalent to the
+                # pre-R4 behavior when race_date is unknown.
+                post_at = now_jst.replace(
+                    hour=int(hh), minute=int(mm), second=0, microsecond=0
+                )
             if now_jst < post_at:
                 return None  # race hasn't started -- don't risk a stale page
         except (ValueError, TypeError):
@@ -194,10 +222,27 @@ def _default_dates(now_jst: datetime, window: str) -> list[str]:
     return [now_jst.strftime("%Y%m%d")]
 
 
-def _races_for_date(date_yyyymmdd: str) -> list[dict]:
-    """Discover + scrape one race date; return raw race dicts for snapshot assembly."""
+def _races_for_date(
+    date_yyyymmdd: str,
+    *,
+    prior_by_race_id: dict[str, dict] | None = None,
+) -> list[dict]:
+    """Discover + scrape one race date; return raw race dicts for snapshot assembly.
+
+    ``prior_by_race_id`` (R4 fix): map of race_id -> prior captured race dict
+    (typically from the currently-deployed snapshot). When a fresh result fetch
+    returns None (the page is gone, network blip, parser hiccup), the prior
+    result block is carried forward instead of being lost. This is defense-
+    in-depth against buggy re-publishes: a result that was OFFICIALLY captured
+    once stays in the snapshot until a NEW official result replaces it. The
+    alternative -- silently dropping the result -- is exactly the failure that
+    bit the verification pass: a Monday re-publish of Saturday's card produced
+    a 36-race snapshot with zero result blocks because netkeiba's result.html
+    momentarily parsed empty for every race.
+    """
     discovered = discover_card(date_yyyymmdd)
     now_jst = datetime.now(_JST)
+    prior_by_race_id = prior_by_race_id or {}
     races = []
     for d in discovered:
         entries = _entries_for(d.numeric_id)
@@ -223,9 +268,18 @@ def _races_for_date(date_yyyymmdd: str) -> list[dict]:
             d.canonical_race_id,
             post_time_jst=d.post_time_jst,
             now_jst=now_jst,
+            race_date_yyyymmdd=date_yyyymmdd,
         )
         if result is not None:
             race["result"] = result
+        else:
+            # R4: carry forward a prior captured result so a transient fetch
+            # miss or post-time gate doesn't drop already-official results.
+            prior_race = prior_by_race_id.get(d.canonical_race_id)
+            prior_result = (prior_race or {}).get("result")
+            if prior_result:
+                race["result"] = prior_result
+                race["result_source"] = "prior"  # provenance for the audit trail
         races.append(race)
     return races
 
@@ -236,13 +290,167 @@ def build_once(date_yyyymmdd: str) -> dict:
     return build_live_snapshot(races, date=date_yyyymmdd, source="netkeiba-live")
 
 
-def build_dates(dates_yyyymmdd: list[str]) -> dict:
-    """Discover + scrape + assemble one snapshot across one or more race dates."""
+def build_dates(
+    dates_yyyymmdd: list[str],
+    *,
+    prior_snapshot: dict | None = None,
+) -> dict:
+    """Discover + scrape + assemble one snapshot across one or more race dates.
+
+    ``prior_snapshot`` (R4 fix): if provided, per-race result blocks that
+    can't be freshly fetched are carried forward from this snapshot. See
+    ``_races_for_date`` for the rationale.
+    """
+    prior_by_race_id: dict[str, dict] = {}
+    if prior_snapshot:
+        for r in prior_snapshot.get("races", []):
+            rid = r.get("race_id")
+            if rid and r.get("result"):
+                prior_by_race_id[rid] = r
     races: list[dict] = []
     for date in dates_yyyymmdd:
-        races.extend(_races_for_date(date))
+        races.extend(_races_for_date(date, prior_by_race_id=prior_by_race_id))
     meta_date = dates_yyyymmdd[0] if len(dates_yyyymmdd) == 1 else ",".join(dates_yyyymmdd)
     return build_live_snapshot(races, date=meta_date, source="netkeiba-live")
+
+
+def _race_counts_by_date(snap: dict | None) -> dict[str, int]:
+    """Per-date race counts in a snapshot. Falls back to ``meta.date`` when a
+    race dict doesn't carry its own ``date`` (the legacy single-date shape)."""
+    if not snap:
+        return {}
+    fallback = (snap.get("meta") or {}).get("date") or ""
+    counts: dict[str, int] = {}
+    for r in snap.get("races", []):
+        d = r.get("date") or fallback or ""
+        counts[d] = counts.get(d, 0) + 1
+    return counts
+
+
+def _venue_code_for(venue_name: str | None) -> str:
+    """Inverse of VENUE_NAMES — display name back to the 2-digit JRA code so
+    we can join against race_card_max (keyed on venue_code). Unknown display
+    names pass through verbatim; that's fine for the guard's lookup (it just
+    won't find a max for that key, treated as no prior floor)."""
+    if not venue_name:
+        return ""
+    for code, name in VENUE_NAMES.items():
+        if name == venue_name:
+            return code
+    return venue_name
+
+
+def _race_counts_by_date_venue(snap: dict | None) -> dict[tuple[str, str], int]:
+    """Per-(date, venue_code) race counts in a snapshot. The guard's primary
+    signal: a truncated card shows up as one venue's count below its prior
+    high-water mark even when the date-level total looks fine (e.g. Tokyo
+    dropping 12 -> 8 while Hakodate and Hanshin stay at 12 — total 36 -> 32
+    is visible at the date level too, but per-venue pins WHICH venue
+    regressed)."""
+    if not snap:
+        return {}
+    fallback_date = (snap.get("meta") or {}).get("date") or ""
+    counts: dict[tuple[str, str], int] = {}
+    for r in snap.get("races", []):
+        d = str(r.get("date") or fallback_date or "")
+        v = _venue_code_for(r.get("venue"))
+        if not v:
+            continue
+        counts[(d, v)] = counts.get((d, v), 0) + 1
+    return counts
+
+
+# Per-(date, venue) floor below which a publish is REFUSED. JRA cards at a
+# single venue on a race day are typically 10-12 races; 8 is an extreme
+# outlier (typhoon cancellations, single-digit cards at small tracks). A
+# venue below this floor on a date we've never seen before can't be detected
+# by the race_card_max check alone (no prior high-water to compare), so this
+# structural prior is the backstop for the "first publish for a date was
+# already truncated" hole. Set conservatively low — it's a tripwire, not a
+# predictor.
+STRUCTURAL_VENUE_FLOOR = 6
+
+
+def should_skip_publish(
+    new: dict | None,
+    existing: dict | None,
+    card_max: dict[tuple[str, str], int] | None = None,
+) -> tuple[bool, str]:
+    """Completeness guard. Return ``(skip, reason)``.
+
+    The rule: a publish must NOT overwrite ``key='current'`` when the new
+    snapshot regresses ANY (date, venue) below the high-water mark we've
+    previously published. Two independent baselines:
+
+    1. ``card_max`` (from race_card_max in D1): the historical max per
+       (date, venue). A publish that would lower it is REFUSED — the existing
+       snapshot keeps the better view. This survives across publishes, so a
+       transient discover_card miss can't lower the bar over time.
+    2. ``existing`` snapshot's per-(date, venue) counts: an additional floor
+       for the very first publish after deploy (when race_card_max is empty).
+       The prior publish's actual counts stand in for the missing max.
+
+    A structural floor (``STRUCTURAL_VENUE_FLOOR``) catches the residual hole:
+    a FIRST-EVER publish for a date where the producer misses late races on
+    every fetch -- no prior max, no existing snapshot, but a venue at e.g.
+    4 races is obviously broken. We flag (don't refuse) below the floor so
+    the dashboard still gets SOMETHING, but the meta carries a ``partial``
+    marker and the operator is paged.
+
+    Returns ``(True, reason)`` to refuse; ``(False, "")`` to allow.
+
+    Note: this is a one-shot fetch-then-write -- not atomic against concurrent
+    publishers. The Mac publisher is single-threaded per cycle (one launchd
+    fire -> one process -> one write), so the race window doesn't exist in
+    production.
+    """
+    new_counts = _race_counts_by_date_venue(new)
+    if not new_counts:
+        return False, ""  # empty new snapshot -- let --skip-empty handle it
+    card_max = card_max or {}
+
+    # If we have an existing snapshot, derive per-(date, venue) counts from it
+    # as an additional floor (covers first-publish-after-deploy when
+    # race_card_max hasn't accumulated yet).
+    existing_counts = _race_counts_by_date_venue(existing) if existing else {}
+
+    regressed = []
+    for key, n_new in sorted(new_counts.items()):
+        n_prior_max = card_max.get(key)
+        n_existing = existing_counts.get(key)
+        n_floor: int | None = None
+        for candidate in (n_prior_max, n_existing):
+            if candidate is not None and (n_floor is None or candidate > n_floor):
+                n_floor = candidate
+        if n_floor is not None and n_new < n_floor:
+            regressed.append(f"{key[0]}|{key[1]}: {n_new} < {n_floor}")
+
+    if regressed:
+        return True, "regressed venue(s): " + ", ".join(regressed)
+    return False, ""
+
+
+def partial_flag(
+    new: dict | None,
+    card_max: dict[tuple[str, str], int] | None = None,
+) -> tuple[bool, list[str]]:
+    """Return ``(is_partial, warnings)`` for a snapshot that's about to publish.
+
+    A "partial" snapshot is one where a venue is below the STRUCTURAL floor
+    (a JRA card almost never has < 6 races at a venue on a normal race day)
+    -- the guard's race_card_max check can't catch this for a FIRST-EVER
+    publish for the date (no prior high-water), so this is the backstop.
+
+    Returns ``(False, [])`` for a healthy publish. The publisher writes
+    ``meta.counts.partial`` from the boolean and surfaces ``warnings`` in the
+    cycle log so an operator sees the flag at publish time.
+    """
+    new_counts = _race_counts_by_date_venue(new)
+    warnings = []
+    for (date, venue), n in sorted(new_counts.items()):
+        if n < STRUCTURAL_VENUE_FLOOR:
+            warnings.append(f"{date}|{venue}: {n} races (below floor {STRUCTURAL_VENUE_FLOOR})")
+    return bool(warnings), warnings
 
 
 def main() -> None:
@@ -290,16 +498,80 @@ def main() -> None:
         else:
             dates = _default_dates(now_jst, args.window)
         try:
-            snap = build_dates(dates)
+            # Fetch the existing snapshot ONCE per cycle -- used by both the
+            # completeness guard (per-venue floor) and the result-carry-forward
+            # merge (so a buggy re-publish can't drop official results).
+            try:
+                existing = fetch_snapshot(key=args.key)
+            except Exception as fetch_exc:  # noqa: BLE001
+                print(
+                    f"[{datetime.now(timezone.utc):%H:%M:%S}Z] existing-snapshot fetch failed "
+                    f"({fetch_exc!r}); guard and result-merge will run without prior"
+                )
+                existing = None
+            snap = build_dates(dates, prior_snapshot=existing)
             c = snap["meta"]["counts"]
             if args.skip_empty and c["total"] == 0:
                 print(f"[{datetime.now(timezone.utc):%H:%M:%S}Z] no races registered — skip")
             else:
-                push_to_d1(snap, key=args.key)
-                print(
-                    f"[{datetime.now(timezone.utc):%H:%M:%S}Z] published {c['total']} races "
-                    f"({c['registered']} registered, {c['open']} open)"
-                )
+                # Completeness guard (ADR-0007 R4 -- Tokyo truncation
+                # root cause): refuse to overwrite 'current' when ANY
+                # (date, venue) in the new snapshot is below the historical
+                # high-water mark (race_card_max) OR the existing snapshot's
+                # counts. The R3 guard compared only per-date totals -- a
+                # 32->32 re-publish passed, advancing the timestamp while
+                # the card stayed broken. R4 gates on per-(date, venue)
+                # floors drawn from a separate D1 table that survives across
+                # publishes; a transient discover_card miss can't lower it.
+                try:
+                    card_max = fetch_race_card_max(dates)
+                except Exception as guard_exc:  # noqa: BLE001
+                    print(
+                        f"[{datetime.now(timezone.utc):%H:%M:%S}Z] card_max fetch failed "
+                        f"({guard_exc!r}); guard will use existing snapshot only"
+                    )
+                    card_max = {}
+                skip, reason = should_skip_publish(snap, existing, card_max)
+                # Backstop: even if the per-venue max check passes, a venue
+                # below the STRUCTURAL floor on a first-ever publish for the
+                # date is flagged in meta.counts.partial so the deployed JSON
+                # is self-describing.
+                is_partial, partial_warns = partial_flag(snap, card_max)
+                if is_partial:
+                    snap["meta"]["counts"]["partial"] = True
+                    snap["meta"]["counts"]["partial_reasons"] = partial_warns
+                else:
+                    snap["meta"]["counts"]["partial"] = False
+                if skip:
+                    print(
+                        f"[{datetime.now(timezone.utc):%H:%M:%S}Z] REFUSED regressed publish "
+                        f"({reason}); keeping existing snapshot"
+                    )
+                else:
+                    push_to_d1(snap, key=args.key)
+                    # Advance the high-water mark so the next cycle's guard
+                    # sees this publish as the new floor. Idempotent --
+                    # equal-or-smaller counts are no-ops.
+                    new_counts = _race_counts_by_date_venue(snap)
+                    try:
+                        upsert_race_card_max(new_counts)
+                    except Exception as upsert_exc:  # noqa: BLE001
+                        print(
+                            f"[{datetime.now(timezone.utc):%H:%M:%S}Z] card_max upsert failed "
+                            f"({upsert_exc!r}); next-cycle guard will lag"
+                        )
+                    partial_note = " [PARTIAL]" if is_partial else ""
+                    by_venue_str = ", ".join(
+                        f"{v}={n}" for (_, v), n in sorted(new_counts.items())
+                    )
+                    print(
+                        f"[{datetime.now(timezone.utc):%H:%M:%S}Z] published {c['total']} races "
+                        f"({c['registered']} registered, {c['open']} open) "
+                        f"by_venue[{by_venue_str}]{partial_note}"
+                    )
+                    if partial_warns:
+                        for w in partial_warns:
+                            print(f"  PARTIAL: {w}")
         except Exception as exc:  # noqa: BLE001 - loud, but keep the loop alive
             print(f"cycle failed: {exc!r}")
         if args.once:

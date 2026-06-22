@@ -186,6 +186,11 @@ def test_fetch_fn_seam_keeps_test_offline(monkeypatch):
     ``discover_card`` (forcing the network path), because the production
     fetch path would call ``netkeiba_http.fetch_payload`` with a malformed
     URL on this host.
+
+    Note: discover_card now retries by default (R4 -- Tokyo truncation root
+    cause). The stub is called multiple times but each call is the stub --
+    never the network. ``attempts=1`` is the deterministic-test path that
+    still pins the seam.
     """
     # Sentinel: if the fetch_fn is bypassed, this counter stays 0.
     calls = []
@@ -194,6 +199,113 @@ def test_fetch_fn_seam_keeps_test_offline(monkeypatch):
         calls.append(date_yyyymmdd)
         return (FIXTURES / "race_list_20260621.html").read_text(encoding="utf-8")
 
-    result = discover_card("20260621", fetch_fn=stub)
+    result = discover_card("20260621", fetch_fn=stub, attempts=1)
     assert calls == ["20260621"]
     assert len(result) == 36
+
+
+# ---------------------------------------------------------------------------
+# R4 (Tokyo truncation root cause) -- retry-merge in discover_card.
+# A single-GET discover was the producer's actual failure mode: netkeiba's
+# race_list_sub.html occasionally omits one venue's late races on a single
+# fetch, then returns the full card on the next. The retry-merge takes the
+# UNION of N attempts so a transient miss in one response is recovered.
+# ---------------------------------------------------------------------------
+
+
+def _build_html(race_ids_by_venue: dict[str, list[str]]) -> str:
+    """Synthesize a minimal race-list-sub HTML page that the parser accepts.
+    Each race_id is a 12-digit numeric id; venue_code is positions 5-6."""
+    items = []
+    for venue, rids in race_ids_by_venue.items():
+        for rid in rids:
+            # Minimal <li> with the href the parser matches + a post_time
+            # so _parse_race_list extracts it cleanly.
+            items.append(
+                f'<li class="RaceList_DataItem">'
+                f'<a href="/race/shutuba.html?race_id={rid}&amp;x=1">x</a>'
+                f'<span class="RaceList_Itemtime">15:45 </span>'
+                f'<span class="ItemTitle">Race</span>'
+                f'</li>'
+            )
+    return "<html><body>" + "".join(items) + "</body></html>"
+
+
+def _full_card() -> str:
+    return _build_html(
+        {
+            "05": [f"2026050306{i:02d}" for i in range(1, 13)],  # Tokyo R1-R12
+            "09": [f"2026090306{i:02d}" for i in range(1, 13)],  # Hanshin R1-R12
+            "02": [f"2026020306{i:02d}" for i in range(1, 13)],  # Hakodate R1-R12
+        }
+    )
+
+
+def _truncated_card() -> str:
+    """Tokyo truncated to R1-R8 -- the verification layer's observed state."""
+    return _build_html(
+        {
+            "05": [f"2026050306{i:02d}" for i in range(1, 9)],  # Tokyo R1-R8 only
+            "09": [f"2026090306{i:02d}" for i in range(1, 13)],
+            "02": [f"2026020306{i:02d}" for i in range(1, 13)],
+        }
+    )
+
+
+def test_retry_merge_recovers_transient_truncation():
+    """The R4 fix: the FIRST fetch returns a truncated card (Tokyo R1-R8 only),
+    the SECOND returns the full card. Retry-merge takes the UNION so Tokyo R9-R12
+    are recovered instead of being published as a truncated snapshot."""
+    responses = iter([_truncated_card(), _full_card(), _full_card()])
+    result = discover_card(
+        "20260621",
+        fetch_fn=lambda _d: next(responses),
+        attempts=3,
+        sleep_s=0,  # no real wait between stub calls
+    )
+    by_venue = {}
+    for r in result:
+        by_venue[r.venue_code] = by_venue.get(r.venue_code, 0) + 1
+    assert by_venue == {"02": 12, "05": 12, "09": 12}, by_venue
+    assert len(result) == 36
+
+
+def test_retry_merge_persistent_truncation_returns_truncated():
+    """If every attempt returns the same truncated card, retry-merge can't
+    recover. This is the residual hole the structural floor in
+    expose_live.partial_flag catches -- discover returns 32 races, the
+    publisher publishes but flags meta.counts.partial."""
+    result = discover_card(
+        "20260621",
+        fetch_fn=lambda _d: _truncated_card(),
+        attempts=3,
+        sleep_s=0,
+    )
+    by_venue = {}
+    for r in result:
+        by_venue[r.venue_code] = by_venue.get(r.venue_code, 0) + 1
+    assert by_venue == {"02": 12, "05": 8, "09": 12}, by_venue
+
+
+def test_retry_default_attempts_is_3():
+    """Default is 3 attempts so production recovers a transient miss without
+    configuration. Tests that inject fetch_fn must pass attempts=1 for
+    deterministic single-call behavior (see test_fetch_fn_seam... above)."""
+    calls = []
+    result = discover_card(
+        "20260621",
+        fetch_fn=lambda d: (calls.append(d) or _full_card()),
+        sleep_s=0,
+    )
+    assert len(calls) == 3
+    assert len(result) == 36
+
+
+def test_retry_raises_when_every_attempt_errors():
+    """ADR-0004: silent scrape failure loses race days -- surface the last
+    exception when every attempt raised."""
+    def err(_d):
+        raise RuntimeError("network down")
+    with pytest.raises(RuntimeError, match="network down"):
+        discover_card("20260621", fetch_fn=err, attempts=3, sleep_s=0)
+

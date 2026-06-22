@@ -11,6 +11,41 @@ There are two production surfaces:
 
 Both have to be current for the public app to look right.
 
+## Definition of done — verify against the live URL (NON-NEGOTIABLE)
+
+A deploy or publish task is **not done** until it is confirmed against the
+**deployed endpoint**, not a local build, a `/tmp` artifact, or your own
+re-fetch into a file. The only acceptance signal is what
+`https://keibamon.com/...` actually returns to a fresh request.
+
+This rule exists because it has been violated repeatedly: handbacks have
+reported "36 races published / settlement proven" while the deployed
+`/api/live` still served a truncated 32-race card — the agent had verified
+against `/tmp/proof/*.json` and a local build, not the live Worker. A publish
+that advances `meta.published_at` while the card stays broken is the trap:
+**a fresh timestamp is not a fresh card.**
+
+Required for every publish/deploy — copy-paste and read the output:
+
+```bash
+# Snapshot publish — assert freshness AND completeness, cache-busted:
+curl -s 'https://keibamon.com/api/live?key=current&_cb='$(date +%s) \
+  | jq '{published_at:.meta.published_at, n:([.races[].race_id]|length)}'
+# n must equal the EXPECTED race count for the day, not just ">= last time".
+# Spot-check the specific races you claim to have fixed are actually present:
+curl -s 'https://keibamon.com/api/live?key=current' \
+  | jq '[.races[].race_id] | map(select(test("-05-")))'   # e.g. all of Tokyo
+
+# App bundle — assert the deployed index.html's hashed JS returns 200:
+curl -s https://keibamon.com/app/ | grep -o 'assets/index-[^"]*\.js' \
+  | head -1 | xargs -I{} curl -s -o /dev/null -w '%{http_code}\n' https://keibamon.com/app/{}
+```
+
+If the deployed URL doesn't show the change, the task is **open** — regardless
+of green local tests, a clean `git status`, or a successful-looking
+`wrangler deploy` / publish log. Do not report success from anything other than
+the live URL.
+
 ## Publish (deploy)
 
 **A git push is not a deploy.** Pushing or merging to `main` syncs source to
