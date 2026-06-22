@@ -33,6 +33,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # for publish_d1
 from keibamon_core.adapters import netkeiba_http  # noqa: E402
 from keibamon_core.adapters.netkeiba_discovery import discover_card  # noqa: E402
 from keibamon_core.adapters.netkeiba_entries import parse_entries_payload  # noqa: E402
+from keibamon_core.adapters.netkeiba_payouts import parse_payouts_payload  # noqa: E402
+from keibamon_core.adapters.netkeiba_results import parse_results_payload  # noqa: E402
+from keibamon_core.live.result import build_result  # noqa: E402
 from keibamon_core.live.snapshot import (  # noqa: E402
     build_live_snapshot,
     merge_entries_and_odds,
@@ -113,6 +116,55 @@ def _entries_for(nk_id: str) -> list[dict]:
         return []
 
 
+def _maybe_result(
+    nk_id: str,
+    race_id: str,
+    *,
+    post_time_jst: str | None,
+    now_jst: datetime,
+) -> dict | None:
+    """Best-effort: fetch result.html -> build_result -> resolver block.
+
+    Returns ``None`` (race stays ``open``) when:
+
+      - the race hasn't started (post_time in the future);
+      - the fetch fails (offline / rate-limited / malformed page);
+      - the page parses but no placings could be derived (race still
+        running, under 審議, or pre-result).
+
+    A successful return means the race is OFFICIAL enough for the resolver:
+    placings are present, payouts are present (or the resolver falls back to
+    the commit-time estimate). Failure NEVER kills the publish cycle --
+    the race dict is emitted without a ``result`` key and ``snapshot.build_race``
+    leaves status at ``open``.
+
+    Provenance / PIT: the result block carries only data scraped FROM the
+    official result page, never anything pre-race. We do NOT attach a result
+    block while ``post_time`` is in the future, even if result.html is
+    reachable (e.g. a stale page from a prior running of the same race_no).
+    """
+    if post_time_jst:
+        try:
+            hh, mm = post_time_jst.split(":")[:2]
+            post_at = now_jst.replace(hour=int(hh), minute=int(mm), second=0, microsecond=0)
+            if now_jst < post_at:
+                return None  # race hasn't started -- don't risk a stale page
+        except (ValueError, TypeError):
+            pass  # unparseable post_time -- fall through and try the fetch
+    try:
+        url = f"https://race.netkeiba.com/race/result.html?race_id={nk_id}"
+        body, _ = netkeiba_http.fetch_payload(url)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  {race_id}: result fetch skipped ({exc!r})")
+        return None
+    finishers = parse_results_payload(body, nk_id)
+    payouts = parse_payouts_payload(body, nk_id)
+    block = build_result(finishers, payouts)
+    if not block:
+        return None
+    return block
+
+
 def _upcoming_weekend_dates(now_jst: datetime) -> list[str]:
     """Return the next Saturday/Sunday card dates from ``now``.
 
@@ -137,23 +189,36 @@ def _default_dates(now_jst: datetime, window: str) -> list[str]:
 def _races_for_date(date_yyyymmdd: str) -> list[dict]:
     """Discover + scrape one race date; return raw race dicts for snapshot assembly."""
     discovered = discover_card(date_yyyymmdd)
+    now_jst = datetime.now(_JST)
     races = []
     for d in discovered:
         entries = _entries_for(d.numeric_id)
         odds = _live_odds_by_umaban(d.numeric_id, d.canonical_race_id) if entries else {}
         runners = merge_entries_and_odds(entries, odds)
-        races.append(
-            {
-                "date": d.date_yyyymmdd,
-                "race_no": d.race_no,
-                "race_id": d.canonical_race_id,
-                "name": d.race_name or f"Race {d.race_no}",
-                "grade_label": d.grade_label,
-                "post_time_jst": d.post_time_jst,
-                "venue": VENUE_NAMES.get(d.venue_code, d.venue_code),
-                "runners": runners,
-            }
+        race: dict = {
+            "date": d.date_yyyymmdd,
+            "race_no": d.race_no,
+            "race_id": d.canonical_race_id,
+            "name": d.race_name or f"Race {d.race_no}",
+            "grade_label": d.grade_label,
+            "post_time_jst": d.post_time_jst,
+            "venue": VENUE_NAMES.get(d.venue_code, d.venue_code),
+            "runners": runners,
+        }
+        # ADR-0007 R1: best-effort attach a `result` block for finished races.
+        # snapshot.build_race flips status to "result" when the key is present;
+        # the app's auto-settle + the social Worker's cron sweep then resolve
+        # OPEN tickets on this race. Failure (no result / fetch error / under
+        # 審議) leaves the key absent and the race stays "open".
+        result = _maybe_result(
+            d.numeric_id,
+            d.canonical_race_id,
+            post_time_jst=d.post_time_jst,
+            now_jst=now_jst,
         )
+        if result is not None:
+            race["result"] = result
+        races.append(race)
     return races
 
 
