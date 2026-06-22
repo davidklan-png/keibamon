@@ -1,0 +1,20 @@
+{
+  "_comment": "Synthetic ADR-0007 R2 Task 3 fixture — exercises the 降着 (demotion after 審議) path. Horse 7 crossed the line 1st but impeded horse 3 in the stretch; stewards demote 7 to 2nd (降着) and promote 3 to 1st. JRA settles tickets on the POST-ADJUDICATION order, so: quinella pays on 3-7 (ascending canonical), exacta pays on 3-7 (3rd then 2nd = the corrected finish order), trifecta pays on 3-7-11. The producer's `placings` carries the corrected positions, and the demoted horse (umaban 7) stays at pos=2 with its `降着` marker in finish_position_raw — NOT moved to scratched. This is the file build_result should emit; feed to workers/social/src/settle.ts::resolveTicket to verify. Verification gap: this fixture is SYNTHETIC — constructed from JRA rule semantics, not captured from a real netkeiba result.html. The result.html parser at adapters/netkeiba_results.py reads the 着順 cell positionally; a real page may format the demoted horse's Rank cell as a bare int ('2'), as '2(降)' with a marker suffix, or via a separate annotation. Re-verify the parser against a real 降着 result.html before the capture-PC handoff (ADR-0004). See DATA_TRAPS['result_block.dq_post_adjudication_verification_gap'].",
+  "_placings_intended": "3 promoted to 1st; 7 demoted to 2nd (was 1st); 11 unchanged at 3rd",
+  "_source_umabans_in_race": "1, 2, 3, 5, 7, 9, 11, 14 (8-declared; 7 demoted from 1st to 2nd after 審議)",
+  "_parser_input_hint": "finishers = [{horse_number:3, finish_position:1, raw:''}, {horse_number:7, finish_position:2, raw:'降着'}, {horse_number:11, finish_position:3, raw:''}, ...]; the raw marker does NOT exclude the horse from placings.",
+  "placings": [
+    { "pos": 1, "umabans": [3] },
+    { "pos": 2, "umabans": [7] },
+    { "pos": 3, "umabans": [11] }
+  ],
+  "payouts": [
+    { "pool": "quinella", "combo": "3-7",   "yen": 620 },
+    { "pool": "wide",     "combo": "3-7",   "yen": 260 },
+    { "pool": "wide",     "combo": "3-11",  "yen": 340 },
+    { "pool": "wide",     "combo": "7-11",  "yen": 410 },
+    { "pool": "exacta",   "combo": "3-7",   "yen": 1360 },
+    { "pool": "trio",     "combo": "3-7-11",  "yen": 1230 },
+    { "pool": "trifecta", "combo": "3-7-11", "yen": 6040 }
+  ]
+}

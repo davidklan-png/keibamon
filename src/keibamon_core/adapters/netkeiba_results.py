@@ -93,11 +93,18 @@ def parse_results_payload(
         umaban = _to_int(_cell_text(cells[2]))
         if umaban is None:
             continue  # without umaban we can't join payouts / settle
-        finish = _to_int(_cell_text(cells[0]))
+        finish_raw = _cell_text(cells[0])
+        finish = _to_int(finish_raw)
         rec: dict[str, Any] = {
             "horse_number": umaban,
             "horse_id": _extract_horse_id_from_cell(cells[3]) or "0000000000",
             "finish_position": finish if finish else None,
+            # Raw 着順 cell text (ADR-0007 R1): lets downstream distinguish
+            # 取消/除外 (scratched; refunded) from 中止 (DNF; no refund) from
+            # 失格 (DQ; placings stand). ``finish_position`` collapses all to
+            # None which would erase the refund path. Empty string for actual
+            # numeric placings so downstream can skip the cost.
+            "finish_position_raw": finish_raw if not finish else "",
             "finish_time_seconds": _parse_finish_time(_cell_text(cells[7])),
             "margin": _clean_str(_cell_text(cells[8])),
             "win_odds": _to_float(_cell_text(cells[10])),

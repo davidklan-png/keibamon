@@ -11,23 +11,67 @@ There are two production surfaces:
 
 Both have to be current for the public app to look right.
 
-## Frontend assets
+## Publish (deploy)
 
-From the repo root:
+**A git push is not a deploy.** Pushing or merging to `main` syncs source to
+GitHub; it does NOT update the live Worker. The `keibamon.com/app` bundle is
+whatever `splash/app/` was last uploaded by `npx wrangler deploy` from the
+Mac. There is no CI hook and no auto-deploy on push — if you skip
+`wrangler deploy`, production stays on the old bundle indefinitely and
+nobody will tell you. `git status` clean ≠ published.
+
+### Clerk-key build requirement (the silent-failure trap)
+
+`npm --prefix frontend run build` reads `frontend/.env` at build time and
+inlines `VITE_CLERK_PUBLISHABLE_KEY` into the JS bundle
+(`frontend/src/main.tsx:12`, `frontend/src/auth/AuthProvider.tsx:60`). That
+file is **gitignored** (`.gitignore:42` ignores `.env*`; only `.env.example`
+is excepted), so:
+
+- A fresh clone has no `frontend/.env`. The build SUCCEEDS, the bundle
+  deploys, and the asset-hash check below still passes — but the auth gate
+  renders signed-out and every authenticated social-Worker call rejects.
+  This is the silent failure: well-formed deploy, broken app.
+- A branch switch across worktrees can leave `frontend/.env` pointing at a
+  different Clerk instance (test vs prod `pk_…` key). Same trap, subtler.
+
+Preflight before every publish — fails loud if the key is missing or
+unfilled:
 
 ```bash
-npm --prefix frontend test
-npm --prefix frontend run build
-npx wrangler deploy
+test -f frontend/.env && grep -q '^VITE_CLERK_PUBLISHABLE_KEY=pk_' frontend/.env \
+  || echo "MISSING: cp frontend/.env.example frontend/.env and fill in the pk_ key"
 ```
 
-The Vite build writes to `splash/app` (`frontend/vite.config.ts`). Wrangler then
-uploads `splash/` and redeploys the `keibamon` Worker.
+Because the bundle passes the asset check regardless, ALSO load
+`https://keibamon.com/app/` in a browser after each publish and confirm
+the sign-in render appears (not the signed-out fallback).
 
-Verify the deployed app:
+### Publish command
+
+From the repo root, on the branch you want live:
 
 ```bash
+npm --prefix frontend test       # vitest + Playwright visual baselines
+npm --prefix frontend run build  # writes splash/app/, inlines the Clerk key
+npx wrangler deploy              # uploads splash/ to the keibamon Worker
+```
+
+The Vite build writes to `splash/app` (`frontend/vite.config.ts`). Wrangler
+then uploads `splash/` and redeploys the `keibamon` Worker.
+
+`wrangler deploy` reads `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID`
+(the new env var names). `CF_API_TOKEN` / `CF_ACCOUNT_ID` still work but
+warn at startup. The Python `push_to_d1` publisher still reads `CF_*`
+directly — different path, see ## Live race snapshot.
+
+### Verify the publish
+
+```bash
+# Asset hash matches the locally-built bundle
 curl -sS https://keibamon.com/app/ | rg '/app/assets/index-.*\.(js|css)'
+
+# Bundle content (cheap regression check)
 asset=$(curl -sS https://keibamon.com/app/ |
   sed -n 's/.*src="\([^"]*index-[^"]*\.js\)".*/\1/p')
 curl -sS "https://keibamon.com${asset}" |
@@ -35,7 +79,9 @@ curl -sS "https://keibamon.com${asset}" |
 ```
 
 Expected for the current race picker: `Popular races`, `date-chip`, and
-`race-card` are present; `Manual Odds` and `Intuition` are absent.
+`race-card` are present; `Manual Odds` and `Intuition` are absent. Then
+do the in-browser sign-in check above — the curl checks can't see the
+Clerk-key regression.
 
 ## Live race snapshot
 

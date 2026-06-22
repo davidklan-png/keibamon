@@ -142,9 +142,14 @@ def test_publish_window_guard():
     assert win(at(2026, 6, 19, 9), "register") is False   # Fri too early
     assert win(at(2026, 6, 18, 15), "register") is True   # Thu
     assert win(at(2026, 6, 18, 12), "register") is False  # Thu too early
-    # race: Sat/Sun 09:00-16:59
-    assert win(at(2026, 6, 20, 10), "race") is True        # Sat
-    assert win(at(2026, 6, 20, 17), "race") is False       # Sat post-window
+    # race: Sat/Sun 09:00-18:59 JST. The 17:00-18:59 extension (R2 Task 2)
+    # catches late 確定: a race that finishes near 16:00 + a 30+min 審議
+    # can confirm after the old 17:00 cutoff.
+    assert win(at(2026, 6, 20, 10), "race") is True        # Sat morning
+    assert win(at(2026, 6, 20, 16), "race") is True        # Sat late afternoon
+    assert win(at(2026, 6, 20, 17), "race") is True        # Sat extended window (R2)
+    assert win(at(2026, 6, 20, 18), "race") is True        # Sat last extended hour
+    assert win(at(2026, 6, 20, 19), "race") is False       # Sat post-window
     assert win(at(2026, 6, 19, 12), "race") is False       # Fri not a race day
     # any: never gated
     assert win(at(2026, 6, 17, 3), "any") is True

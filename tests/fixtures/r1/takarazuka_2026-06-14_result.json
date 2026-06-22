@@ -1,0 +1,143 @@
+{
+  "placings": [
+    {
+      "pos": 1,
+      "umabans": [
+        16
+      ]
+    },
+    {
+      "pos": 2,
+      "umabans": [
+        5
+      ]
+    },
+    {
+      "pos": 3,
+      "umabans": [
+        1
+      ]
+    },
+    {
+      "pos": 4,
+      "umabans": [
+        9
+      ]
+    },
+    {
+      "pos": 5,
+      "umabans": [
+        8
+      ]
+    },
+    {
+      "pos": 6,
+      "umabans": [
+        7
+      ]
+    },
+    {
+      "pos": 7,
+      "umabans": [
+        17
+      ]
+    },
+    {
+      "pos": 8,
+      "umabans": [
+        10
+      ]
+    },
+    {
+      "pos": 9,
+      "umabans": [
+        2
+      ]
+    },
+    {
+      "pos": 10,
+      "umabans": [
+        12
+      ]
+    },
+    {
+      "pos": 11,
+      "umabans": [
+        11
+      ]
+    },
+    {
+      "pos": 12,
+      "umabans": [
+        4
+      ]
+    },
+    {
+      "pos": 13,
+      "umabans": [
+        14
+      ]
+    },
+    {
+      "pos": 14,
+      "umabans": [
+        13
+      ]
+    },
+    {
+      "pos": 15,
+      "umabans": [
+        6
+      ]
+    },
+    {
+      "pos": 16,
+      "umabans": [
+        18
+      ]
+    },
+    {
+      "pos": 17,
+      "umabans": [
+        3
+      ]
+    }
+  ],
+  "payouts": [
+    {
+      "pool": "quinella",
+      "combo": "5-16",
+      "yen": 620
+    },
+    {
+      "pool": "wide",
+      "combo": "5-16",
+      "yen": 260
+    },
+    {
+      "pool": "wide",
+      "combo": "1-16",
+      "yen": 490
+    },
+    {
+      "pool": "wide",
+      "combo": "1-5",
+      "yen": 290
+    },
+    {
+      "pool": "exacta",
+      "combo": "16-5",
+      "yen": 1360
+    },
+    {
+      "pool": "trio",
+      "combo": "1-5-16",
+      "yen": 1230
+    },
+    {
+      "pool": "trifecta",
+      "combo": "16-5-1",
+      "yen": 6040
+    }
+  ]
+}

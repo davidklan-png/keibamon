@@ -16,10 +16,10 @@ CRON_TZ=Asia/Tokyo
 # A few special G1s get numbered entries Thursday ~14:00 JST. Hourly Thu 14-17.
 0 14-17 * * 4     $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
 
-# --- Race day: near-real-time odds -------------------------------------------
-# Sat & Sun, every 2 min, 09:00-16:59 JST. 2 min == JRA's own current-race odds
-# update interval (~120s); polling faster gains nothing but load.
-*/2 9-16 * * 6,0  $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
-
-# Catch the last race + just-closed settle on race days at 17:0x.
-0,2,4,6 17 * * 6,0  $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
+# --- Race day: near-real-time odds + late-確定 catch --------------------------
+# Sat & Sun, every 2 min, 09:00-18:59 JST. 2 min == JRA's own current-race odds
+# update interval (~120s); polling faster gains nothing but load. The 17:00-18:59
+# extension (ADR-0007 R2 Task 2) catches late 確定 (a race that finishes near
+# 16:00 + a 30+min 審議 can confirm after the old 17:00 cutoff); without it
+# those races never attached a result block and the Phase-4 sweep couldn't settle.
+*/2 9-18 * * 6,0  $HOME/projects/personal/Keibamon/tools/jravan/expose_live_once.sh
