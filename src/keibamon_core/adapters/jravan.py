@@ -481,6 +481,20 @@ DATA_TRAPS = {
         "gate -- no plist edit required. The 17:00-18:59 cycles are full (entries+odds+"
         "result), not result-only (R2 prompt's Option A vs B trade-off; the wasted entries/"
         "odds fetches are cheap and keep the snapshot coherent).",
+    "result_block.dq_post_adjudication_verification_gap": "ADR-0007 R2 Task 3. R1 v1's "
+        "docstring claimed 失格/降着 'keeps gate-order placing (JRA pays at gate)' -- "
+        "WRONG. JRA settles tickets on the POST-ADJUDICATION order: 失格 places the "
+        "horse last; 降着 moves it to a specific lower position. netkeiba's 着順 cell "
+        "carries the corrected int position, which parse_results_payload reads through "
+        "unchanged. The producer-side contract is tested by "
+        "test_build_result_demotion_fixture_produces_corrected_placings against a "
+        "SYNTHETIC fixture (tests/fixtures/r1/demotion_shingi_result.json) constructed "
+        "from JRA rule semantics. The PARSER side (parse_results_payload reading a real "
+        "result.html Rank cell for a demoted horse) is NOT verified against a real "
+        "capture -- a real page may format the cell as a bare int, '2(降)' with a "
+        "marker suffix, or use a separate annotation column. Re-verify against a real "
+        "降着/失格 result.html before the capture-PC handoff (ADR-0004). The R2 docstring "
+        "in live/result.py reflects the corrected semantics either way.",
 }
 
 

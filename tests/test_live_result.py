@@ -15,6 +15,8 @@ The test scenarios cover every code path in build_result:
   4. DNF (no refund) — 中止 does NOT surface in `scratched`.
   5. DQ — 失格 keeps the parsed placing (POST-ADJUDICATION order; JRA
      settles on the corrected cell int, not gate order — R2 Task 3 fix).
+     5b. Demotion fixture (降着 after 審議) — tests/fixtures/r1/
+     demotion_shingi_result.json; corrected order survives into placings.
   6. Pool mapping — all 8 silver pools → 5 resolver BetTypes.
   7. Empty result — no placings → {} (race not official).
   8. Combo shape — dash-joined umabans, raw form preserved.
@@ -31,6 +33,7 @@ from keibamon_core.adapters.netkeiba_results import parse_results_payload
 from keibamon_core.live.result import build_result
 
 FIXTURES = Path(__file__).parent / "fixtures" / "netkeiba"
+FIXTURES_R1 = Path(__file__).parent / "fixtures" / "r1"
 
 
 def _fixture_payload() -> str:
@@ -189,6 +192,63 @@ def test_build_result_dq_keeps_post_adjudication_placing() -> None:
     assert pos3 == {"pos": 3, "umabans": [1]}
     # DQ is NOT a scratch.
     assert result.get("scratched", []) == []
+
+
+def test_build_result_demotion_fixture_produces_corrected_placings() -> None:
+    """Realistic 降着 (demotion after 審議) scenario, fixture-driven. Horse 7
+    crossed 1st but impeded horse 3 in the stretch; stewards demote 7 to 2nd
+    (降着) and promote 3 to 1st. JRA settles tickets on the POST-ADJUDICATION
+    order, so:
+
+      - quinella pays on 3-7 (the corrected top-2 unordered)
+      - exacta pays on 3-7 (3 first, 7 second — the corrected finish order)
+      - trifecta pays on 3-7-11
+
+    The producer carries the corrected positions into `placings`, and the
+    demoted horse (umaban 7) stays at pos=2 with its 降着 marker — NOT moved
+    to scratched. This verifies R2 Task 3's correction of R1 v1's "gate
+    order" docstring claim. Reads the expected output from
+    tests/fixtures/r1/demotion_shingi_result.json.
+
+    Verification gap: the fixture is SYNTHETIC — constructed from JRA rule
+    semantics. The result.html parser was not re-verified against a real
+    降着 result.html capture; a real page may format the Rank cell
+    differently (bare int, '2(降)' suffix, separate annotation column).
+    See DATA_TRAPS['result_block.dq_post_adjudication_verification_gap'].
+    """
+    import json
+
+    fixture_path = FIXTURES_R1 / "demotion_shingi_result.json"
+    expected = json.loads(fixture_path.read_text())
+
+    # Parser output: demoted horse carries corrected position (2) + 降着 marker.
+    finishers = [
+        {"horse_number": 3, "finish_position": 1, "finish_position_raw": ""},       # promoted from 2nd
+        {"horse_number": 7, "finish_position": 2, "finish_position_raw": "降着"},    # demoted from 1st
+        {"horse_number": 11, "finish_position": 3, "finish_position_raw": ""},
+        # Other finishers (4th-8th) omitted — beyond top-3, don't affect placings.
+    ]
+    # Payouts reflect the corrected order; build_result passes them through.
+    payouts = [
+        {"pool": "quinella", "combo_raw": "3-7", "payout_yen": 620},
+        {"pool": "wide", "combo_raw": "3-7", "payout_yen": 260},
+        {"pool": "wide", "combo_raw": "3-11", "payout_yen": 340},
+        {"pool": "wide", "combo_raw": "7-11", "payout_yen": 410},
+        {"pool": "exacta", "combo_raw": "3-7", "payout_yen": 1360},
+        {"pool": "trio", "combo_raw": "3-7-11", "payout_yen": 1230},
+        {"pool": "trifecta", "combo_raw": "3-7-11", "payout_yen": 6040},
+    ]
+    result = build_result(finishers, payouts)
+
+    # Placings match the fixture's expected output (post-adjudication order).
+    assert result["placings"] == expected["placings"]
+    # Payouts pass through verbatim.
+    assert result["payouts"] == expected["payouts"]
+    # 降着 is NOT a scratch — JRA settles on the corrected order, not a refund.
+    assert result.get("scratched", []) == []
+    # Specifically: the demoted horse stays at pos=2.
+    pos2 = next(p for p in result["placings"] if p["pos"] == 2)
+    assert pos2 == {"pos": 2, "umabans": [7]}
 
 
 # --- 6. Pool mapping drops win/place/bracket_quinella ------------------------
