@@ -5,10 +5,13 @@
   Keibamon race-day odds agent (ADR-0006).
 
   Fires every 120s; the tool's JST window guard (window=race) makes every fire
-  a no-op except Sat/Sun 09:00-16:59 JST, when it scrapes live odds and republishes.
+  a no-op except Sat/Sun 09:00-18:59 JST, when it scrapes live odds and republishes.
   120s matches JRA's own current-race odds update interval, so this is as
   "near-real-time" as the source allows. Not a long-lived poller; each fire is a
-  short-lived process that exits.
+  short-lived process that exits. The 17:00-18:59 extension (ADR-0007 R2 Task 2)
+  catches late 確定: a race that finishes near 16:00 + a 30+min 審議 can
+  confirm after the old 17:00 cutoff; without the extension those races never
+  attached a result block and the Phase-4 sweep couldn't settle them.
 
   Install (adjust paths if your home/repo differ):
     cp deploy/launchd/com.keibamon.expose-race.plist ~/Library/LaunchAgents/

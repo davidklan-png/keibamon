@@ -70,14 +70,22 @@ def in_window(now_jst: datetime, window: str) -> bool:
 
       register : Thu 14:00-17:59 (special-G1 numbered entries) OR
                  Fri 10:00-21:59 (weekend numbered entries + estimated odds)
-      race     : Sat/Sun 09:00-16:59 (race-day odds; JRA updates ~every 120s)
+      race     : Sat/Sun 09:00-18:59 JST. The 9:00-17:00 portion covers the
+                 race-day odds feed (JRA updates ~every 120s; last race on a
+                 Sat/Sun card is typically 15:30-16:00). The 17:00-18:59
+                 extension (ADR-0007 R2 Task 2) catches late 確定: a race
+                 that finishes near 16:00 + a 30+min 審議 can confirm after
+                 the old 17:00 cutoff. Without the extension, those races
+                 never attached a result block, so the Phase-4 sweep couldn't
+                 settle them. The cycle is full (entries+odds+result), not
+                 result-only — see R2 prompt's Option A vs B trade-off.
       any      : always (no gate)
     """
     if window in ("", "any"):
         return True
     wd, h = now_jst.weekday(), now_jst.hour
     if window == "race":
-        return wd in (5, 6) and 9 <= h < 17
+        return wd in (5, 6) and 9 <= h < 19
     if window == "register":
         return (wd == 3 and 14 <= h < 18) or (wd == 4 and 10 <= h < 22)
     return True  # unknown window name -> don't block

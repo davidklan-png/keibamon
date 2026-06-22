@@ -471,6 +471,16 @@ DATA_TRAPS = {
         "AND resolver-relevant payouts are present (R2 Task 1 confirmation gate) -- "
         "anything less leaves the race at status='open' and the UI keeps showing the "
         "commit-time estimate.",
+    "result_block.race_window_extended": "ADR-0007 R2 Task 2. expose_live.in_window's "
+        "'race' window runs Sat/Sun 09:00-18:59 JST (was 09:00-16:59). The 2-hour extension "
+        "catches late 確定: a race that finishes near 16:00 + a 30+min 審議 can confirm "
+        "after the old 17:00 cutoff; without the extension those races never attached a "
+        "result block, so the social Worker's cron sweep (workers/social/src/sweep.ts, "
+        "5min UTC cron) had nothing to settle. The launchd agent "
+        "(com.keibamon.expose-race, 120s fire) picks up the new boundary via the in_window "
+        "gate -- no plist edit required. The 17:00-18:59 cycles are full (entries+odds+"
+        "result), not result-only (R2 prompt's Option A vs B trade-off; the wasted entries/"
+        "odds fetches are cheap and keep the snapshot coherent).",
 }
 
 
