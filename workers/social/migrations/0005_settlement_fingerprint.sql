@@ -1,0 +1,25 @@
+-- ADR-0007 R3 — settlement fingerprint (re-settlement on result change).
+--
+-- Before this migration, ticket settlement was a one-way latch: once a ticket
+-- went open -> {won|miss|refunded} it was never re-evaluated, even if the
+-- result it was settled against was later corrected or completed. That bit a
+-- real case: a ticket settled against a partial Tokyo card (R1-R8 only, R12
+-- truncated by a transient discover_card miss) was frozen at the wrong state
+-- even after the full card was republished.
+--
+-- This column records the identity of the result block the ticket settled
+-- against. The cron sweep recomputes the current result's hash from /api/live
+-- and, if it differs from the stored hash, re-resolves the ticket and updates
+-- state/returned/hash. R2's 確定 gate stays authoritative -- only official
+-- results attach, so re-settlement reconciles partial -> complete and any
+-- rare 確定 correction, never provisional flapping.
+--
+-- Hash format: SHA-256 hex of a stable serialization of
+--   {placings (sorted by pos, umabans ascending within pos),
+--    scratched (sorted ascending),
+--    payouts (sorted by pool then combo; yen as-is)}
+-- Computed by workers/social/src/sweep.ts::hashResult. NULL on tickets
+-- settled before this migration; the first sweep after deploy treats NULL
+-- as "must re-evaluate" and writes the current hash.
+
+ALTER TABLE tickets ADD COLUMN settle_result_hash TEXT;
