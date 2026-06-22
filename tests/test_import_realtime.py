@@ -31,6 +31,22 @@ def _wrap(rid, raw, ch):
             "record_type": rid}
 
 
+def _wrap_current(rid, raw, ch, *, date="20260621", racekey="02010401"):
+    """Post-rescue capture-PC shape (no race_key; raw_uri is the JV-Data filename).
+
+    Regression for 2026-06-21 weekend ingest: producer dropped `race_key`,
+    `record_type`, `pool`, `captured_at`, `seconds_to_post` and now emits
+    `raw_uri="0B30YYYYMMDD<jyo><race>.rtd"` (date at byte offset 4). Without
+    `_extract_date`'s offset-4 fallback these records landed in rt-unknown.
+    """
+    ts = f"{date}T001510356385Z"
+    return {"source_name": "jravan_rt", "source_record_id": f"{rid}:{ch}",
+            "raw_uri": f"0B30{date}{racekey}.rtd", "content_hash": ch,
+            "ingested_at": "2026-06-21T00:15:10.356385Z",
+            "published_time": ts, "available_at": ts, "record_id": rid,
+            "spec": "0B30", "raw": raw}
+
+
 def _make_usb(root: Path):
     d = root / "incoming" / "realtime" / "20260614" / "2026061409030411"
     d.mkdir(parents=True)
@@ -106,3 +122,44 @@ def test_mixed_source_write_no_timestamp_collision(tmp_path):
     types = duckdb.sql(
         f"SELECT DISTINCT typeof(ingested_at) FROM read_parquet('{ds}', hive_partitioning=true)").fetchall()
     assert len(types) == 1 and "TIMESTAMP" in types[0][0].upper()  # one uniform type
+
+
+def test_current_shape_record_lands_under_correct_date(tmp_path):
+    """Post-rescue capture-PC records (no race_key; raw_uri='0B30YYYYMMDD...rtd')
+    must group under rt-<date>, not rt-unknown.
+
+    Regression for the 2026-06-21 weekend ingest: 23k+ records would have
+    landed in rt-unknown without _extract_date's offset-4 fallback, breaking
+    the silver builder (it expects rt-<date>).
+    """
+    usb, lake_root = tmp_path / "xfer", tmp_path / "lake"
+    d = usb / "incoming" / "realtime" / "20260621" / "2026062102010401"
+    d.mkdir(parents=True)
+    with gzip.open(d / "20260621T001510356385Z.ndjson.gz", "wt", encoding="utf-8") as fh:
+        fh.write(json.dumps(_wrap_current("O1", O1_RAW, "hashO1new")) + "\n")
+        fh.write(json.dumps(_wrap_current("O2", O2_RAW, "hashO2new")) + "\n")
+    out = run_import(usb, lake_root)
+    assert out["written"] == 2
+    assert out["dates"] == ["20260621"]
+    o1 = lake_root / "raw" / "jravan_rt" / "rt-20260621" / "O1.rt-20260621.ndjson.gz"
+    assert o1.exists(), "current-shape O1 record must land in rt-20260621, not rt-unknown"
+    # rt-unknown must NOT exist (the regression symptom)
+    assert not (lake_root / "raw" / "jravan_rt" / "rt-unknown").exists()
+
+
+def test_extract_date_falls_back_through_known_fields():
+    """_extract_date tries race_key, then timestamps, then 0B30 raw_uri offset-4."""
+    sys.path.insert(0, str(ROOT / "tools" / "jravan"))
+    from import_realtime import _extract_date  # noqa: E402
+    # legacy shape: race_key wins
+    assert _extract_date({"race_key": "2026061409030411"}) == "20260614"
+    # current shape: published_time wins (raw_uri also has the date)
+    assert _extract_date(
+        {"published_time": "20260621T001510356385Z",
+         "raw_uri": "0B302026062102010401.rtd"}
+    ) == "20260621"
+    # current shape without published_time: raw_uri offset-4 wins
+    assert _extract_date({"raw_uri": "0B302026062102010401.rtd"}) == "20260621"
+    # no date anywhere
+    assert _extract_date({"raw_uri": "garbage"}) == "unknown"
+    assert _extract_date({}) == "unknown"

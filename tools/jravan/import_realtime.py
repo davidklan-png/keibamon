@@ -61,6 +61,33 @@ def _load_existing(snap_dir: Path) -> dict[str, set[str]]:
     return have
 
 
+def _extract_date(rec: dict) -> str:
+    """Best-effort 8-digit YYYYMMDD for grouping realtime records into rt-<date>.
+
+    Two record shapes reach this importer:
+
+    1. **Legacy** (pre-2026-06-21 `realtime_jvlink.py`): carries
+       ``race_key="YYYYMMDD<jyo><race>"`` and a bare-key ``raw_uri``.
+    2. **Current** (post-rescue `realtime_jvlink.py` on the capture-PC): drops
+       ``race_key``; ``raw_uri`` is the JV-Data filename
+       ``"0B30YYYYMMDD<jyo><race>.rtd"`` with the date at byte offset 4.
+
+    Without this fallback the current shape groups under ``rt-unknown``, which
+    makes the bronze unreadable by the silver builder (it expects rt-<date>).
+    """
+    for k in ("race_key", "published_time", "available_at"):
+        v = rec.get(k)
+        if isinstance(v, str) and len(v) >= 8 and v[:8].isdigit():
+            return v[:8]
+    raw_uri = rec.get("raw_uri")
+    # 0B30 filename shape: '0B30YYYYMMDD...rtd' — date at offset 4
+    if isinstance(raw_uri, str) and raw_uri.startswith("0B30") and len(raw_uri) >= 12:
+        cand = raw_uri[4:12]
+        if cand.isdigit():
+            return cand
+    return "unknown"
+
+
 def run_import(src: Path, lake_root: Path, *, dry_run: bool = False) -> dict:
     """Normalize the realtime tree under ``src`` into bronze at ``lake_root``.
 
@@ -80,8 +107,7 @@ def run_import(src: Path, lake_root: Path, *, dry_run: bool = False) -> dict:
     for rec in _iter_usb_records(realtime_root):
         rid = rec.get("record_id")
         ch = rec.get("content_hash")
-        key = rec.get("race_key") or rec.get("raw_uri") or ""
-        date = key[:8] if len(key) >= 8 and key[:8].isdigit() else "unknown"
+        date = _extract_date(rec)
         if not rid or not ch:
             continue
         by_date[date][rid][ch] = rec
