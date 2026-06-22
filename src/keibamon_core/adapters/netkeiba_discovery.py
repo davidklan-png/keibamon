@@ -33,6 +33,7 @@ fabricated (a wrong id silently captures the wrong race, unrecoverable).
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
@@ -100,22 +101,64 @@ class DiscoveredRace:
 
 
 def discover_card(
-    date_yyyymmdd: str, *, fetch_fn: Callable[[str], str] | None = None
+    date_yyyymmdd: str,
+    *,
+    fetch_fn: Callable[[str], str] | None = None,
+    attempts: int = 3,
+    sleep_s: float = 0.75,
 ) -> list[DiscoveredRace]:
-    """Fetch the day's race-list page once; return one ``DiscoveredRace`` per
-    linked race.
+    """Fetch the day's race-list page; retry on transient truncation.
 
-    Returns ``[]`` for a card with no published races (cancellation, future
-    date). Raises on network / parse failure — per ADR-0004, silent scrape
-    failure loses race days.
+    Returns one ``DiscoveredRace`` per linked race. Returns ``[]`` for a card
+    with no published races (cancellation, future date). Raises on network /
+    parse failure — per ADR-0004, silent scrape failure loses race days.
+
+    The race-list page is the most-observed producer failure point: netkeiba
+    occasionally omits late races (e.g. Tokyo R9-R12) on a single fetch,
+    then returns the full card on the next. A single-GET discover would
+    publish that truncation (and the R3 guard only catches shrinkage vs the
+    last publish, not first-publish truncation). We therefore fetch the
+    page ``attempts`` times and take the UNION by ``numeric_id`` — a
+    transient miss in any one response is recovered by another.
+
+    ``attempts=1`` reduces to the old single-fetch path (used by tests that
+    inject deterministic ``fetch_fn`` fixtures; the default fetch_fn ignores
+    ``sleep_s`` since there's no real wait between identical stub calls).
 
     ``fetch_fn`` is the test seam: tests inject a stub returning a fixture
     body and the network is never touched. Production leaves it ``None``
     and the polite-fetch path in :mod:`netkeiba_http` is used.
     """
     fetch_fn = fetch_fn or _default_fetch
-    html = fetch_fn(date_yyyymmdd)
-    return _parse_race_list(html, date_yyyymmdd)
+    if attempts < 1:
+        attempts = 1
+
+    merged: list[DiscoveredRace] = []
+    seen: set[str] = set()
+    last_exc: Exception | None = None
+    saw_any_success = False
+    for i in range(attempts):
+        try:
+            html = fetch_fn(date_yyyymmdd)
+            parsed = _parse_race_list(html, date_yyyymmdd)
+            saw_any_success = True
+            for r in parsed:
+                if r.numeric_id not in seen:
+                    seen.add(r.numeric_id)
+                    merged.append(r)
+        except Exception as exc:  # noqa: BLE001 -- one attempt must not abort the rest
+            last_exc = exc
+        if i < attempts - 1 and sleep_s > 0:
+            time.sleep(sleep_s)
+
+    # Empty result is legitimate (cancellation / future date) -- return [] only
+    # if at least one attempt succeeded. If every attempt raised, surface the
+    # last error (ADR-0004: silent scrape failure loses race days).
+    if not merged and not saw_any_success and last_exc is not None:
+        raise last_exc
+
+    merged.sort(key=lambda d: (d.venue_code, d.race_no))
+    return merged
 
 
 # --- internals ----------------------------------------------------------------

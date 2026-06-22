@@ -117,13 +117,32 @@ def build_live_snapshot(
     n_open = sum(1 for r in built if r["status"] == STATUS_OPEN)
     meta_status = "live" if n_open else ("standby" if not built else "registered")
 
+    # Per-(date, venue) counts -- the partial-publish guard's signal. A
+    # truncated card (e.g. one venue's R9-R12 missing on a transient
+    # discover_card miss) is visible here without re-deriving from .races.
+    # Sort by date then venue so the deployed JSON is stable for diffing.
+    by_venue: dict[str, int] = {}
+    for r in built:
+        rdate = str(r.get("date") or date or "")
+        rvenue = str(r.get("venue") or "")
+        if not rvenue:
+            continue
+        key = f"{rdate}|{rvenue}" if rdate else rvenue
+        by_venue[key] = by_venue.get(key, 0) + 1
+    by_venue = {k: by_venue[k] for k in sorted(by_venue)}
+
     return {
         "meta": {
             "venue": venue,
             "date": date,
             "status": meta_status,
             "source": source,
-            "counts": {"total": len(built), "registered": n_registered, "open": n_open},
+            "counts": {
+                "total": len(built),
+                "registered": n_registered,
+                "open": n_open,
+                "by_venue": by_venue,
+            },
             "message": message
             or "Races appear as soon as they are registered. Grayed = odds not "
             "open yet (estimated odds shown where available). Not betting advice.",
