@@ -1,6 +1,6 @@
 # ADR-0007: "My Tickets" — committed-bet log + social surface
 
-- **Status:** Accepted (2026-06-21); **Phase 4 IN REVIEW** (2026-06-21)
+- **Status:** Accepted (2026-06-21); **Phase 5 IN REVIEW** (2026-06-22)
 - **Date:** 2026-06-21
 - **Deciders:** David Klan
 - **Builds on:** the `/api/live` D1 projection from [[ADR-0003]]; the
@@ -18,6 +18,7 @@
 | 2 — Per-user persistence (social D1) | Merged | `workers/social/migrations/0002_tickets.sql`, `frontend/src/lib/settle.ts`, `frontend/src/auth/{socialClient,ticketQueue}.ts` |
 | 3 — Social (follows, cheers, profiles, feed, share) | Merged | `workers/social/migrations/0003_social.sql`, `frontend/src/lib/share.ts`, `frontend/src/auth/socialClient.ts`, `frontend/src/App.tsx` |
 | **4 — Hardening (settle sweep, dead-heat/scratch, block/report, fonts, snapshots)** | **In review** (`feat/adr-0007-phase4-hardening`) | `workers/social/{migrations/0004_blocks_reports.sql,src/{settle,sweep}.ts,wrangler.jsonc}`, `frontend/{public/fonts/,src/app.snapshot.test.tsx,src/styles.css}` |
+| **5 — Visual regression (App.tsx decomposition + Playwright)** | **In review** (`feat/adr-0007-phase5-visual-regression`) | `frontend/src/{screens/*,lib/{mytickets-view,format}.ts,components/Footer.tsx,auth/AuthProvider.tsx,App.tsx}`, `frontend/{playwright.config.ts,tests/visual/}` |
 
 ## Context
 
@@ -547,3 +548,94 @@ NOT touched: root `wrangler.jsonc`, `src/worker.js`, `/api/live`,
   surface them for review).
 - **Drive `/api/live` to emit result** (Phase 2 follow-up #1 — racing-tier
   dependency; the sweep has nothing to settle against without this).
+
+## Phase 5 — Decisions made in implementation (2026-06-22)
+
+Phase 5 closes the CSS-pixel gap left by Phase 4's HTML-string snapshots and
+un-blocks it by decomposing the 2.7k-line `App.tsx` monolith into per-screen
+components. **No new product surface, no behavior change.** Scope cuts: KV
+token bucket deferred again, server-side card renderer deferred again. The
+11 architecture decisions are documented in `docs/runbooks/phase5-visual-regression.md`
+and summarized here:
+
+1. **Extract pure helpers first; screens second; MyTickets last.** Pure
+   helpers (no closures over React state) are the safest move; the 4 legacy
+   screens have explicit props interfaces; the 1709-line MyTickets move is
+   highest-risk so it goes last.
+2. **Bundle byte-size as the behavior-preservation gate.** After each
+   extraction, `npm run build` produced identical `dist/assets/index-*.js`
+   size (364.17 kB) — strong evidence no code changed semantically. Visual
+   baselines are the second gate.
+3. **`MyTickets.tsx` stays as one file (not split into feed/new/detail).**
+   All three views share ~10 `useState` + ~10 `useEffect` and would balloon
+   props if separated. A single 1709-line component with internal
+   `render{Feed,New,Detail,Profile,ReportModal}` functions preserves the
+   closures exactly.
+4. **Test-only auth bypass env var (`VITE_PLAYWRIGHT_BYPASS_AUTH=1`).**
+   AuthProvider returns a fake signed-in session. Off in production builds
+   (env var unset → dead branch eliminated). Cheapest path to full MyTickets
+   coverage under Playwright.
+5. **`page.route()` mocks for `/api/live` + `/api/social/*`.** One fixture
+   race + two CommittedTickets (open quinella owned by "you", won win owned
+   by "Rin"). Deterministic shape → deterministic render.
+6. **Freeze `Date.now()` via `page.addInitScript`.** The countdown chip
+   (post_time=15:40 JST) ticks every second under wall-clock. Override
+   `Date.now` to `2026-06-21T13:00:00+09:00` → countdown renders
+   "2:40:00 to go" (en) / "開始まで 2:40:00" (ja) deterministically.
+7. **`maxDiffPixelRatio: 0`** — strictest possible. A single intentional
+   style change (`.mt-brand-name` font-size 17→22 px) failed the suite
+   during sign-off; reverting brought it green.
+8. **Walk forward via UI clicks, not URL deep-links.** `App.tsx` always
+   starts at `step="mine"`; each test lands on the feed, then clicks
+   `.mt-fab` → `.mt-back-head .lang-toggle` (Builder/詳細) → stepper.
+9. **`workers: 1, fullyParallel: false, retries: 0`.** Visual regression
+   can't be parallelized safely; no flaky retries hiding real regressions.
+10. **Self-hosted fonts (Phase 4) are critical infrastructure.** If the
+    runtime Google Fonts `@import` were still in `styles.css`, every visual
+    baseline would fail intermittently (network-dependent glyph
+    substitution). Phase 4 made Phase 5's strict threshold achievable.
+11. **KV token bucket: SKIP again.** Phase 4's D1 minute-bucket counter
+    covers current volume. Phase 6 backlog.
+
+### Phase 5 diff scope
+
+`git diff main...feat/adr-0007-phase5-visual-regression --stat` shows only
+`frontend/` and `docs/`. Highlights:
+
+- `frontend/src/App.tsx` — 2731 → 316 lines (state, effects, loadLive,
+  applyRace, recommend regen, stepper nav). Default export unchanged.
+- `frontend/src/screens/MyTickets.tsx` (new, 1709 lines) — `MyTicketsHome`
+  exported + internal `MyTickets` component with feed/new/detail/profile/
+  report-modal render functions.
+- `frontend/src/screens/{Race,Style,Tickets,Explain}Screen.tsx` (new) —
+  legacy 4-step builder, explicit props interfaces.
+- `frontend/src/lib/mytickets-view.ts` (new) — pure mt* view-model helpers.
+- `frontend/src/lib/format.ts` (new) — `yen`, `fmt` shared helpers.
+- `frontend/src/components/Footer.tsx` (new) — shared footer.
+- `frontend/src/auth/AuthProvider.tsx` (extended) — `PLAYWRIGHT_BYPASS`
+  branch; unreachable in prod builds.
+- `frontend/playwright.config.ts` (new) — vite dev on :5174 with the bypass
+  env var; `maxDiffPixelRatio: 0`; workers: 1.
+- `frontend/tests/visual/{fixtures,smoke.spec,visual.spec}.ts` (new) —
+  deterministic mocks + 14 baselines × {en, ja} + 1 smoke test.
+- `frontend/tests/visual/visual.spec.ts-snapshots/*.png` (14 new) —
+  chromium-darwin baselines for every screen.
+- `frontend/package.json` — `+@playwright/test`; new scripts
+  `test:visual` and `test:visual:update`.
+- `.gitignore` — `frontend/test-results/` added (Playwright runtime artifacts).
+- `docs/adr/0007-*.md`, `docs/runbooks/phase5-visual-regression.md` (new).
+
+NOT touched: root `wrangler.jsonc`, `src/worker.js`, `/api/live`,
+`tools/jravan/`, `ingestion/`, `src/keibamon_core/`, the racing D1,
+`workers/social/`.
+
+### Phase 6 backlog (carried forward)
+
+- **KV token bucket** for rate limits (carried from Phase 4).
+- **Server-side card renderer** for share image (carried from Phase 4).
+- **Moderation review queue UI** (carried from Phase 4).
+- **Drive `/api/live` to emit result** (carried from Phase 2 — the
+  racing-tier dependency that gates real settlement in prod).
+- **Multi-platform visual baselines** (chromium-darwin only in Phase 5;
+  WebKit/Firefox and Linux/Windows baselines if/when CI grows multi-platform
+  runners).
