@@ -424,6 +424,42 @@ DATA_TRAPS = {
         "be re-verified against live netkeiba BEFORE the capture PC is switched off "
         "(ADR-0004). The silver record-builder layer is pure and load-bearing; only the "
         "parser layer needs recalibration.",
+    "result_block.dead_heat_via_placings": "ADR-0007 R1 producer emits per-race `result` "
+        "blocks for the ticket-settlement resolver (workers/social/src/settle.ts). "
+        "Dead heats (同着) MUST be expressed via the `placings:[{pos, umabans}]` form -- "
+        "`finishers: number[]` (legacy) cannot carry a tie. live/result.build_result "
+        "groups the results parser's flat finish_position ints into the placings shape "
+        "and is the single conversion point; downstream consumers must NOT flatten it.",
+    "result_block.scratch_vs_dnf": "netkeiba's 着順 cell text encodes three refund-relevant "
+        "cases that parse_results_payload collapses to finish_position=None. "
+        "取消/除外 (scratched at gate) → refunded by JRA (返還); the producer surfaces "
+        "these in `result.scratched` so the resolver emits state:'refunded'. "
+        "中止 (DNF mid-race) → NO refund; the horse just isn't in placings. "
+        "失格 (DQ post-race) → placings stand at gate order (JRA pays at gate); the "
+        "parsed int placing MUST survive into `placings` and NOT be moved to scratched. "
+        "parse_results_payload now carries finish_position_raw so the producer can tell "
+        "the three apart; the silver jravan_race_results schema keeps finish_position "
+        "(None for all three) as the only placing column.",
+    "result_block.pool_vocabulary": "the resolver (workers/social/src/settle.ts) supports "
+        "exactly five BetTypes: quinella, wide, exacta, trio, trifecta. Silver's payouts "
+        "vocabulary has eight (adds win, place, bracket_quinella). live/result.build_result "
+        "filters to the five and passes the names through verbatim -- the two vocabularies "
+        "were designed to agree. If a future BetType is added, settle.ts and result.py "
+        "must move together.",
+    "result_block.provisional_under_shingi": "netkeiba result.html does NOT carry a "
+        "reliable 審議 (inquiry) / 降着 (demotion) status marker in its static HTML. "
+        "ADR-0007 R1 v1 attaches a result block whenever placings parse cleanly -- a "
+        "race under active 審議 with provisional placings COULD mis-settle if netkeiba "
+        "renders provisional numbers before the inquiry lifts. Mitigation: the launchd "
+        "race-window fire interval (120s) means a 審議 lift typically supersedes within "
+        "one cycle; the social Worker's cron sweep re-PATCHes on the next 5min tick. "
+        "Tightening this (e.g. scrape the 審議 banner) is a follow-up.",
+    "result_block.no_pit_leakage_pre_race": "the result block is scraped FROM the official "
+        "result page, never anything pre-race. _maybe_result in expose_live.py refuses to "
+        "fetch result.html while post_time is in the future (guards against a stale page "
+        "from a prior running of the same race_no). The block only attaches when placings "
+        "are present -- an empty parse leaves the race at status='open' and the UI keeps "
+        "showing the commit-time estimate.",
 }
 
 

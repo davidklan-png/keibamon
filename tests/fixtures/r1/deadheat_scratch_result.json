@@ -1,0 +1,24 @@
+{
+  "_comment": "Synthetic ADR-0007 R1 fixture — exercises the three correctness edge cases the resolver contract calls out: (1) dead heat at pos=2 (two placings entries share a pos, plus 2 quinella + 2 exacta payout rows that the resolver sums), (2) one scratch at the gate (umaban 4 marked 取消 — surfaces in `scratched`, triggers resolver state:'refunded' for any line containing 4), (3) one DNF mid-race (umaban 9 marked 中止 — NOT in `scratched`, no refund). This file is the build_result output; the producer would attach it verbatim to the race dict's `result` key. Feed to workers/social/src/settle.ts::resolveTicket to verify.",
+  "_placings_intended": "5 won; 16 and 7 dead-heated for 2nd; 1 alone at 3rd",
+  "_source_umabans_in_race": "1, 4, 5, 7, 9, 11, 16 (7-declared; 4 scratched at gate; 9 DNF mid-race; 5 placings paid)",
+  "placings": [
+    { "pos": 1, "umabans": [5] },
+    { "pos": 2, "umabans": [7, 16] },
+    { "pos": 3, "umabans": [1] }
+  ],
+  "scratched": [4],
+  "payouts": [
+    { "pool": "quinella", "combo": "5-16", "yen": 1840 },
+    { "pool": "quinella", "combo": "5-7",  "yen": 1840 },
+    { "pool": "wide",     "combo": "5-16", "yen": 620 },
+    { "pool": "wide",     "combo": "5-7",  "yen": 620 },
+    { "pool": "wide",     "combo": "7-16", "yen": 620 },
+    { "pool": "exacta",   "combo": "5-16", "yen": 3120 },
+    { "pool": "exacta",   "combo": "5-7",  "yen": 3120 },
+    { "pool": "trio",     "combo": "1-5-7",  "yen": 8900 },
+    { "pool": "trio",     "combo": "1-5-16", "yen": 8900 },
+    { "pool": "trifecta", "combo": "5-16-1", "yen": 41200 },
+    { "pool": "trifecta", "combo": "5-7-1",  "yen": 41200 }
+  ]
+}
