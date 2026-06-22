@@ -1,4 +1,4 @@
-"""ADR-0007 R1 — tests for ``keibamon_core.live.result.build_result``.
+"""ADR-0007 R1+R2 — tests for ``keibamon_core.live.result.build_result``.
 
 Pins the contract the producer emits against what
 ``workers/social/src/settle.ts`` (the canonical resolver) reads. The shape
@@ -6,17 +6,21 @@ is:
 
     { placings: [{pos, umabans}], scratched: [umabans], payouts: [{pool, combo, yen}] }
 
-The five test scenarios cover every code path in build_result:
+The test scenarios cover every code path in build_result:
 
   1. Clean race (the real 2026 宝塚記念 G1 fixture) — 18 runners, 17 with
      numeric placings, 1 中止 (DNF, no refund).
   2. Dead heat — two runners share pos=2.
   3. Scratch — 取消 / 除外 surface in `scratched`; resolver refunds.
   4. DNF (no refund) — 中止 does NOT surface in `scratched`.
-  5. DQ — 失格 keeps the parsed placing (gate order; JRA pays at gate).
+  5. DQ — 失格 keeps the parsed placing (POST-ADJUDICATION order; JRA
+     settles on the corrected cell int, not gate order — R2 Task 3 fix).
   6. Pool mapping — all 8 silver pools → 5 resolver BetTypes.
   7. Empty result — no placings → {} (race not official).
   8. Combo shape — dash-joined umabans, raw form preserved.
+  9. Official-confirmation gate (R2 Task 1) — provisional page (placings
+     but NO payouts) → {}; provisional→confirmed transition; win/place-
+     only page → {} (the five-pool filter leaves payouts_out empty).
 """
 from __future__ import annotations
 
@@ -127,7 +131,9 @@ def test_build_result_scratch_markers_go_to_scratched() -> None:
         {"horse_number": 4, "finish_position": None, "finish_position_raw": "取消"},
         {"horse_number": 11, "finish_position": None, "finish_position_raw": "除外"},
     ]
-    payouts: list[dict] = []
+    # One quinella row satisfies the R2 confirmation gate (審議 withholds
+    # payouts; a present payout row implies the order is 確定).
+    payouts = [{"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}]
     result = build_result(finishers, payouts)
 
     assert sorted(result["scratched"]) == [4, 11]
@@ -150,7 +156,8 @@ def test_build_result_dnf_does_not_trigger_refund() -> None:
         {"horse_number": 1, "finish_position": 3, "finish_position_raw": ""},
         {"horse_number": 15, "finish_position": None, "finish_position_raw": "中止"},
     ]
-    result = build_result(finishers, [])
+    # Quinella row passes the R2 confirmation gate; DNF behavior is orthogonal.
+    result = build_result(finishers, [{"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}])
 
     # The DNF horse is NOT in scratched -- no refund.
     assert result.get("scratched", []) == []
@@ -159,21 +166,25 @@ def test_build_result_dnf_does_not_trigger_refund() -> None:
     assert 15 not in flat
 
 
-# --- 5. DQ (失格) keeps the gate-order placing -------------------------------
+# --- 5. DQ (失格) / 降着 keep the post-adjudication placing -------------------
 
 
-def test_build_result_dq_keeps_gate_order_placing() -> None:
-    """失格 (disqualified post-race) keeps the original gate-order placing for
-    ticket settlement (JRA pays at gate, then applies DQ penalties separately).
-    The parsed int placing MUST survive into `placings`."""
+def test_build_result_dq_keeps_post_adjudication_placing() -> None:
+    """失格 (disqualified post-race): JRA settles tickets on the
+    POST-ADJUDICATION order, not the gate order. netkeiba's 着順 cell shows
+    the corrected int position; the parser reads it through unchanged.
+    (R1 originally documented this as "gate order" — corrected in R2 Task 3.)
+    Here horse 1's cell shows pos=3 (the post-DQ position) with the 失格
+    marker in finish_position_raw; build_result must carry pos=3 into
+    `placings` and NOT treat it as a scratch."""
     finishers = [
         {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
         {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
         {"horse_number": 1, "finish_position": 3, "finish_position_raw": "失格"},
     ]
-    result = build_result(finishers, [])
+    result = build_result(finishers, [{"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}])
 
-    # Horse 1 keeps pos=3 — placings stand at gate order.
+    # Horse 1 carries pos=3 — the post-adjudication position the cell shows.
     pos3 = next(p for p in result["placings"] if p["pos"] == 3)
     assert pos3 == {"pos": 3, "umabans": [1]}
     # DQ is NOT a scratch.
@@ -234,7 +245,7 @@ def test_build_result_omits_scratched_key_when_empty() -> None:
         {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
         {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
     ]
-    result = build_result(finishers, [])
+    result = build_result(finishers, [{"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}])
     assert "scratched" not in result
 
 
@@ -267,3 +278,89 @@ def test_build_result_combo_shape_preserves_source_order() -> None:
     assert by_pool["exacta"]["combo"] == "5-16"
     # Trifecta: source '5-16-1' (1st-2nd-3rd) passed through verbatim.
     assert by_pool["trifecta"]["combo"] == "5-16-1"
+
+
+# --- 9. Official-confirmation gate (R2 Task 1) --------------------------------
+#
+# JRA withholds exotic payouts until the order is 確定. netkeiba's static
+# result.html carries NO 確定 vs 審議 status marker (it's stamped by
+# client-side JS at runtime -- verified against the 4886-line
+# result_202609030411.html fixture). So "non-empty payouts_out" is the
+# only available proxy for 確定. build_result returns {} while payouts are
+# absent, even if provisional placings parsed cleanly.
+
+
+def test_build_result_provisional_page_returns_empty() -> None:
+    """審議 page: finishers have provisional placings, but no payouts
+    published. build_result must return {} so the producer omits the
+    result block; race stays "open" until the next cycle sees confirmed
+    payouts. Without this gate, a ticket could settle to "won", get
+    shared as a HIT card, and have its placings overturned on
+    adjudication."""
+    finishers = [
+        {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
+        {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
+        {"horse_number": 1, "finish_position": 3, "finish_position_raw": ""},
+    ]
+    # No payouts — JRA withholds them while the order is provisional.
+    # (In the wire format, the Payout_Detail_Table blocks would be absent
+    # and parse_payouts_payload returns [].)
+    result = build_result(finishers, [])
+    assert result == {}
+
+
+def test_build_result_win_place_payouts_only_returns_empty() -> None:
+    """A page that published only win/place (Tansho/Fukusho) payouts but
+    NONE of the five resolver-relevant exotics returns {}. Two cases:
+
+      1. Field-size cancellation: JRA doesn't offer trio/trifecta on small
+         fields (≤4 declared), and a mass-scratch fiasco can cancel the
+         whole exotic card. Safe: the resolver has nothing to settle.
+      2. A parser bug that missed the exotic Payout_Detail_Table blocks.
+         Safe: same outcome (no attach) — race stays "open" until the
+         parser is fixed.
+
+    Either way, no payouts_out ⟹ no attach.
+    """
+    finishers = [
+        {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
+        {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
+    ]
+    # Only win/place rows — both filtered out by the resolver BetType gate.
+    payouts = [
+        {"pool": "win", "combo_raw": "5", "payout_yen": 390},
+        {"pool": "place", "combo_raw": "5", "payout_yen": 130},
+        {"pool": "place", "combo_raw": "16", "payout_yen": 210},
+    ]
+    result = build_result(finishers, payouts)
+    assert result == {}
+
+
+def test_build_result_provisional_then_confirmed_transition() -> None:
+    """The same race across two publish cycles. Cycle 1: provisional
+    placings parsed, but payouts absent (審議) → {}. Cycle 2: payouts now
+    published (確定) → full block. Idempotent overwrite: the producer
+    re-publishes under key='current', so the cycle-2 block cleanly
+    replaces the cycle-1 absence. The resolver never sees a provisional
+    block."""
+    finishers = [
+        {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
+        {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
+        {"horse_number": 1, "finish_position": 3, "finish_position_raw": ""},
+    ]
+    quinella = {"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}
+
+    # Cycle 1: provisional (審議) — no payouts published yet.
+    cycle1 = build_result(finishers, [])
+    assert cycle1 == {}
+
+    # Cycle 2: confirmed (確定) — payouts now present.
+    cycle2 = build_result(finishers, [quinella])
+    assert cycle2["placings"] == [
+        {"pos": 1, "umabans": [5]},
+        {"pos": 2, "umabans": [16]},
+        {"pos": 3, "umabans": [1]},
+    ]
+    assert cycle2["payouts"] == [{"pool": "quinella", "combo": "5-16", "yen": 620}]
+    # Scratched key still omitted when empty.
+    assert "scratched" not in cycle2

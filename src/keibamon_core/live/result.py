@@ -52,14 +52,48 @@ Scratched detection (finish_position_raw from netkeiba_results):
     取消 / 出走取消 / 取消(発走前)  scratched -- 返還 (refund)
     除外                            scratched -- 返還
     中止                            NOT scratched -- finished mid-race, no refund
-    失格                            NOT scratched -- DQ; placings stand at gate order
+    失格 / 降着                     NOT scratched -- POST-ADJUDICATION position
+                                    shown in the 着順 cell (gate order is not
+                                    what JRA settles on); we keep the parsed int.
     "" / "0" / "00"                 omitted from placings, NOT scratched
 
 DNF horses (``中止``) don't get a placing and don't trigger refund -- they're
 effectively non-top-3 finishers, so no exotic line can hit them. DQ
-(``失格``) keeps the gate-order placing for ticket settlement (JRA pays on
-the original finish, then applies DQ penalties separately); we keep the
-parsed int placing. Only 取消/除外 refund.
+(``失格``) and demotion (``降着``) reorder the field for ticket settlement --
+JRA pays on the POST-ADJUDICATION order, not the gate order. netkeiba's
+着順 cell carries the corrected int position, which the parser reads
+through unchanged. Only 取消/除外 refund.
+
+OFFICIAL-CONFIRMATION GATE (ADR-0007 R2 Task 1). The producer must NOT
+attach a ``result`` block while the race is still provisional (審議 /
+保留) -- doing so would let a ticket auto-settle to "won", get shared as
+a HIT card, and then have its placings overturned on adjudication. That
+is the only path to a visibly-wrong, shareable settlement.
+
+The ideal signal is an explicit 確定 vs 審議 marker on the page. The
+netkeiba result.html static HTML carries NO such marker -- the 確定時刻
+is stamped by client-side JS at runtime, so a server-rendered scrape
+cannot see it (verified against
+``tests/fixtures/netkeiba/result_202609030411.html``: grepping the
+4886-line page for 審議|確定|保留 yields only the post-time string
+"15:40発走"). The fallback signal is **confirmed payouts present**:
+JRA withholds all exotic payout rows until the order is official, so a
+non-empty ``payouts`` block (after the five-pool filter) is a strong
+proxy for 確定. ``build_result`` returns ``{}`` when no resolver-relevant
+payouts are present, regardless of whether placings parsed -- this is
+the 審議 gate.
+
+Limitations of the payouts-present proxy (acknowledged):
+
+  - A confirmed race whose ENTIRE exotic card was cancelled (e.g. mass
+    scratches leaving one runner) emits no payouts_out and is treated
+    as provisional. Safe: the resolver has nothing to settle, so the
+    race staying "open" is correct.
+  - A parse failure on the Payout_Detail_Table blocks looks identical
+    to a 審議 page. Safe: same outcome (no attach).
+  - A page format change that MOVES the status marker into the static
+    HTML would let us reinstate the preferred signal. Re-check before
+    the capture-PC handoff (ADR-0004).
 """
 from __future__ import annotations
 
@@ -85,7 +119,18 @@ def build_result(
 ) -> dict[str, Any]:
     """Assemble the resolver's ``result`` block from flat parser outputs.
 
-    Returns ``{}`` when the race isn't yet official (no placings extracted).
+    Returns ``{}`` when the race isn't yet official. Two gates, in order:
+
+      1. **Placings gate** -- no parsed top-3 finishers (race not yet run,
+         under 審議 with no provisional placings, or parse failed).
+      2. **Confirmation gate (R2 Task 1)** -- no resolver-relevant payouts
+         present. JRA withholds exotic payouts until the order is 確定, so
+         an empty ``payouts_out`` means the race is still provisional even
+         if provisional placings parsed cleanly. Without this gate, a
+         審議 page would attach placings that get overturned on
+         adjudication -- the only path to a visibly-wrong, shareable
+         settlement. See the module docstring for the signal-choice note.
+
     The producer checks for emptiness and omits the ``result`` key from the
     race dict -- snapshot.build_race then leaves status at ``open``.
 
@@ -157,6 +202,16 @@ def build_result(
                 "yen": int(yen),
             }
         )
+
+    if not payouts_out:
+        # Confirmation gate (R2 Task 1). JRA withholds exotic payouts until
+        # the order is 確定. Empty payouts_out ⟹ race is still provisional
+        # (審議 / 保留 / page parse missed the Payout_Detail_Table blocks)
+        # even if provisional placings parsed cleanly. Attaching now would
+        # let a ticket settle to "won" and then get overturned. Producer
+        # omits the block; race stays "open" until the next cycle sees the
+        # payouts. See module docstring for the signal-choice rationale.
+        return {}
 
     out: dict[str, Any] = {"placings": placings, "payouts": payouts_out}
     if scratched:

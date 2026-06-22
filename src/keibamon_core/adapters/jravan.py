@@ -435,31 +435,42 @@ DATA_TRAPS = {
         "取消/除外 (scratched at gate) → refunded by JRA (返還); the producer surfaces "
         "these in `result.scratched` so the resolver emits state:'refunded'. "
         "中止 (DNF mid-race) → NO refund; the horse just isn't in placings. "
-        "失格 (DQ post-race) → placings stand at gate order (JRA pays at gate); the "
-        "parsed int placing MUST survive into `placings` and NOT be moved to scratched. "
-        "parse_results_payload now carries finish_position_raw so the producer can tell "
-        "the three apart; the silver jravan_race_results schema keeps finish_position "
-        "(None for all three) as the only placing column.",
+        "失格/降着 (DQ/demotion post-race) → JRA settles tickets on the POST-ADJUDICATION "
+        "order; netkeiba's 着順 cell carries the corrected int position (e.g. the demoted "
+        "horse's new placing, or the DQ'd horse's last-place position), which the parser "
+        "reads through unchanged. The R1 docstring's 'gate order' claim was wrong and is "
+        "corrected in R2 Task 3. parse_results_payload carries finish_position_raw so the "
+        "producer can tell the three apart; the silver jravan_race_results schema keeps "
+        "finish_position (None for 取消/中止/除外, the int for 失格/降着) as the placing column.",
     "result_block.pool_vocabulary": "the resolver (workers/social/src/settle.ts) supports "
         "exactly five BetTypes: quinella, wide, exacta, trio, trifecta. Silver's payouts "
         "vocabulary has eight (adds win, place, bracket_quinella). live/result.build_result "
         "filters to the five and passes the names through verbatim -- the two vocabularies "
         "were designed to agree. If a future BetType is added, settle.ts and result.py "
         "must move together.",
-    "result_block.provisional_under_shingi": "netkeiba result.html does NOT carry a "
-        "reliable 審議 (inquiry) / 降着 (demotion) status marker in its static HTML. "
-        "ADR-0007 R1 v1 attaches a result block whenever placings parse cleanly -- a "
-        "race under active 審議 with provisional placings COULD mis-settle if netkeiba "
-        "renders provisional numbers before the inquiry lifts. Mitigation: the launchd "
-        "race-window fire interval (120s) means a 審議 lift typically supersedes within "
-        "one cycle; the social Worker's cron sweep re-PATCHes on the next 5min tick. "
-        "Tightening this (e.g. scrape the 審議 banner) is a follow-up.",
+    "result_block.official_via_payouts": "ADR-0007 R2 Task 1 gate. build_result returns {} "
+        "when no resolver-relevant payouts are present, EVEN IF placings parsed cleanly -- "
+        "the producer-side fix for the 審議 (inquiry) hole R1 v1 had. netkeiba's static "
+        "result.html carries NO 確定 vs 審議 status marker (verified against the 4886-line "
+        "result_202609030411.html fixture: grepping for 審議|確定|保留 yields only the "
+        "post-time string '15:40発走'; the 確定時刻 is stamped by client-side JS at runtime "
+        "and a server-rendered scrape cannot see it). JRA withholds exotic payouts until "
+        "the order is official, so a non-empty payouts_out (after the five-pool filter) is "
+        "the strongest available proxy for 確定. Idempotent: when 審議 → 確定 across "
+        "cycles, the later confirmed block overwrites the earlier absence cleanly under "
+        "key='current'. Limitations: (a) a confirmed race whose entire exotic card was "
+        "cancelled (mass-scratch fiasco) emits no payouts_out and is treated as "
+        "provisional -- safe, the resolver has nothing to settle; (b) a parse failure on "
+        "the Payout_Detail_Table blocks looks identical to a 審議 page -- same outcome; "
+        "(c) if a future page-format change MOVES the status marker into static HTML, "
+        "reinstating the preferred explicit signal should be re-evaluated.",
     "result_block.no_pit_leakage_pre_race": "the result block is scraped FROM the official "
         "result page, never anything pre-race. _maybe_result in expose_live.py refuses to "
         "fetch result.html while post_time is in the future (guards against a stale page "
         "from a prior running of the same race_no). The block only attaches when placings "
-        "are present -- an empty parse leaves the race at status='open' and the UI keeps "
-        "showing the commit-time estimate.",
+        "AND resolver-relevant payouts are present (R2 Task 1 confirmation gate) -- "
+        "anything less leaves the race at status='open' and the UI keeps showing the "
+        "commit-time estimate.",
 }
 
 
