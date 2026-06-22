@@ -59,9 +59,33 @@ export const useAuth = (): AuthState => useContext(AuthContext);
 
 export const CLERK_ENABLED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
+// ADR-0007 Phase 5 — Playwright visual-regression bypass.
+// Active ONLY when VITE_PLAYWRIGHT_BYPASS_AUTH=1 is set at build/dev time.
+// Production builds never set this, so the branch is dead code in prod.
+// Lets Playwright reach the auth-gated MyTickets surface (feed/new/detail/
+// profile) without standing up a real Clerk session — the visual layer is
+// what the regression suite asserts on; social-Worker calls fail silently.
+const PLAYWRIGHT_BYPASS = import.meta.env.VITE_PLAYWRIGHT_BYPASS_AUTH === "1";
+
+const PLAYWRIGHT_VALUE: AuthState = {
+  isSignedIn: true,
+  userId: "playwright-fake-user",
+  ageVerified: true,
+  getToken: async () => "playwright-fake-token",
+  openSignIn: () => {
+    /* no-op in bypass mode */
+  },
+  setAgeVerified: async () => {
+    /* no-op in bypass mode */
+  },
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Constant at module load — same branch every render, so the conditional
   // return below does not violate the Rules of Hooks.
+  if (PLAYWRIGHT_BYPASS) {
+    return <AuthContext.Provider value={PLAYWRIGHT_VALUE}>{children}</AuthContext.Provider>;
+  }
   if (!CLERK_ENABLED) {
     return <AuthContext.Provider value={NOOP_VALUE}>{children}</AuthContext.Provider>;
   }
