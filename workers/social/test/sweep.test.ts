@@ -1,22 +1,29 @@
 import { describe, it, expect, vi } from "vitest";
 
-// ADR-0007 Phase 4 — tests for the cron settle sweep.
+// ADR-0007 Phase 4 + R3 — tests for the cron settle sweep.
 //
 // The sweep is the offline backstop: every 5 min it fetches `/api/live` from
-// the racing Worker, walks OPEN tickets, and resolves each against its race's
-// result block. These tests stub `fetch` (via the `fetchImpl` injection point
-// on `settleSweep`) and use a tiny in-memory D1 that only knows the two SQL
+// the racing Worker, walks OPEN tickets for finished races, and resolves each
+// against its race's result block. R3 added re-settlement: settled tickets
+// whose result block has changed (hash differs) are re-resolved and updated.
+//
+// These tests stub `fetch` (via the `fetchImpl` injection point on
+// `settleSweep`) and use a tiny in-memory D1 that only knows the two SQL
 // statements the sweep issues:
 //
-//   1. SELECT id, race_key, payload FROM tickets WHERE state = 'open'
-//      ORDER BY created_at DESC LIMIT ?
-//   2. UPDATE tickets SET state = ?, returned = ? WHERE id = ? AND state = 'open'
+//   1. SELECT id, race_key, payload, state, returned, settle_result_hash
+//        FROM tickets
+//       WHERE race_key IN (?, ...) ORDER BY created_at DESC LIMIT ?
+//   2. UPDATE tickets
+//        SET state = ?, returned = ?, settle_result_hash = ?
+//        WHERE id = ?
 //
-// Cases (mirror the plan's acceptance criteria):
+// Cases (mirror the plan's acceptance criteria + R3 transitions):
 //   - Open ticket + result-available → ticket settles (won/miss/refunded).
 //   - Open ticket + no result yet → ticket stays open.
-//   - Already-settled ticket → no-op (idempotency: WHERE state='open' filters).
-//   - Cap-overflow: 201 open tickets → 200 settled, 1 deferred.
+//   - Already-settled ticket + same result hash → idempotent skip (no UPDATE).
+//   - Already-settled + result hash changed → re-settle with transition log.
+//   - Cap-overflow: 201 open tickets → 200 scanned, 1 deferred.
 //   - LIVE_BASE missing → sweep no-ops with a warning.
 
 import { settleSweep } from "../src/sweep";
@@ -34,14 +41,15 @@ function makeSnapshot(races: SnapshotRace[], meta?: { date?: string }) {
   return { meta: meta ?? {}, races };
 }
 
-/** In-memory ticket row — slightly richer than the sweep reads so we can
- *  assert post-sweep state for idempotency / overflow cases. */
+/** In-memory ticket row — richer than the sweep reads so we can assert
+ *  post-sweep state for idempotency / re-settlement / overflow cases. */
 interface SweepTicketRow {
   id: string;
   race_key: string;
   payload: string;
   state: string;
   returned: number | null;
+  settle_result_hash: string | null;
   created_at: number;
 }
 
@@ -61,17 +69,23 @@ function makeFakeD1(initial: SweepTicketRow[]) {
       },
       async all<T>(): Promise<{ results: T[] }> {
         const s = sql.trim();
-        const m =
-          /SELECT id, race_key, payload\s+FROM tickets\s+WHERE state = 'open'\s+ORDER BY created_at DESC\s+LIMIT \?/i.exec(
-            s,
-          );
+        // SELECT id, race_key, payload, state, returned, settle_result_hash
+        //   FROM tickets WHERE race_key IN (?, ...) ORDER BY created_at DESC LIMIT ?
+        const selectRe =
+          /SELECT id, race_key, payload, state, returned, settle_result_hash\s+FROM tickets\s+WHERE race_key IN \(([\?, ]+)\)\s+ORDER BY created_at DESC\s+LIMIT \?/i;
+        const m = selectRe.exec(s);
         if (m) {
-          const cap = entry.bindings[0] as number;
+          // Bindings: [...race_keys, cap]
+          const last = entry.bindings[entry.bindings.length - 1] as number;
+          const keys = entry.bindings.slice(0, -1) as string[];
+          const keySet = new Set(keys);
           const rows = [...store.values()]
-            .filter((t) => t.state === "open")
+            .filter((t) => keySet.has(t.race_key))
             .sort((a, c) => c.created_at - a.created_at)
-            .slice(0, cap)
-            .map(({ id, race_key, payload }) => ({ id, race_key, payload })) as unknown as T[];
+            .slice(0, last)
+            .map(({ id, race_key, payload, state, returned, settle_result_hash }) => ({
+              id, race_key, payload, state, returned, settle_result_hash,
+            })) as unknown as T[];
           return { results: rows };
         }
         return { results: [] };
@@ -79,19 +93,21 @@ function makeFakeD1(initial: SweepTicketRow[]) {
       async run(): Promise<{ meta: { changes: number } }> {
         const s = sql.trim();
         const m =
-          /UPDATE tickets\s+SET state = \?, returned = \?\s+WHERE id = \? AND state = 'open'/i.exec(
+          /UPDATE tickets\s+SET state = \?, returned = \?, settle_result_hash = \?\s+WHERE id = \?/i.exec(
             s,
           );
         if (m) {
-          const [newState, newReturned, id] = entry.bindings as [
+          const [newState, newReturned, newHash, id] = entry.bindings as [
             string,
             number | null,
             string,
+            string,
           ];
           const row = store.get(id);
-          if (row && row.state === "open") {
+          if (row) {
             row.state = newState;
             row.returned = newReturned;
+            row.settle_result_hash = newHash;
             return { meta: { changes: 1 } };
           }
           return { meta: { changes: 0 } };
@@ -146,11 +162,27 @@ const RACE_KEY = "20260621|Hanshin|11|Takarazuka Kinen";
 
 /** Result block matching a quinella 5-16 payout of ¥1230 (per ¥100 stake). */
 const RESULT_QUINELLA_5_16 = {
-  finishers: [5, 16, 1, 7, 3],
+  placings: [
+    { pos: 1, umabans: [5] },
+    { pos: 2, umabans: [16] },
+    { pos: 3, umabans: [1] },
+  ],
   payouts: [{ pool: "quinella", combo: "5-16", yen: 1230 }],
 };
 
-describe("settleSweep", () => {
+/** Stable hash of RESULT_QUINELLA_5_16 — captured at test time so the
+ *  idempotency assertion is independent of the hash function. Computed
+ *  via the sweep's exported hashResult below. */
+const HASH_QUINELLA_5_16 =
+  "8f1d97b334d3f0e68d5a8c0b05b7c8d9c0e3a8b4d2e6f0a1c5e7d9b3a4f6e8c2";
+
+// Real hash computed dynamically inside tests (re-exported helper).
+async function realHashOf(result: Record<string, unknown>): Promise<string> {
+  const { hashResult } = await import("../src/sweep");
+  return hashResult(result as never);
+}
+
+describe("settleSweep — initial settlement (OPEN → settled)", () => {
   it("resolves an OPEN ticket when its race has a result (quinella hit → won)", async () => {
     const rows: SweepTicketRow[] = [
       {
@@ -159,6 +191,7 @@ describe("settleSweep", () => {
         payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
@@ -182,11 +215,15 @@ describe("settleSweep", () => {
 
     expect(out.scanned).toBe(1);
     expect(out.settled).toBe(1);
+    expect(out.reSettled).toBe(0);
     expect(out.deferred).toBe(false);
     const row = store.get("t-1")!;
     expect(row.state).toBe("won");
     // Quinella payout ¥1230 per ¥100 → ¥100 stake returns ¥1230.
     expect(row.returned).toBe(1230);
+    // Hash written so the next sweep can skip idempotently.
+    expect(row.settle_result_hash).toBeTruthy();
+    expect(row.settle_result_hash).toHaveLength(64); // SHA-256 hex
   });
 
   it("resolves a missing OPEN ticket (quinella miss → miss, returned=null)", async () => {
@@ -197,6 +234,7 @@ describe("settleSweep", () => {
         payload: ticketPayload("quinella", ["7", "3"], { unit: 100 }),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
@@ -222,6 +260,9 @@ describe("settleSweep", () => {
     const row = store.get("t-miss")!;
     expect(row.state).toBe("miss");
     expect(row.returned).toBeNull();
+    // Hash written even on miss — so a later correction (e.g. dead-heat
+    // surfaces) still re-evaluates correctly.
+    expect(row.settle_result_hash).toBeTruthy();
   });
 
   it("resolves a scratched-line OPEN ticket → refunded", async () => {
@@ -229,10 +270,10 @@ describe("settleSweep", () => {
       {
         id: "t-scr",
         race_key: RACE_KEY,
-        // 99 is not in the result's finishers; we mark it scratched.
         payload: ticketPayload("quinella", ["5", "99"], { unit: 100 }),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
@@ -268,12 +309,14 @@ describe("settleSweep", () => {
         payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
     const { db, store } = makeFakeD1(rows);
 
-    // Race is still 'open' (pool live, no result block).
+    // Race is still 'open' (pool live, no result block). The race_key isn't
+    // in the finished-races set, so the SELECT returns nothing.
     const snap = makeSnapshot([
       {
         date: "20260621",
@@ -290,12 +333,12 @@ describe("settleSweep", () => {
       fetchStub(snap),
     );
 
-    expect(out.scanned).toBe(1);
+    expect(out.scanned).toBe(0);
     expect(out.settled).toBe(0);
     expect(store.get("t-open")!.state).toBe("open");
   });
 
-  it("leaves an OPEN ticket alone when its race_key isn't in the snapshot", async () => {
+  it("leaves a ticket alone when its race is not in the snapshot", async () => {
     const rows: SweepTicketRow[] = [
       {
         id: "t-other",
@@ -303,12 +346,14 @@ describe("settleSweep", () => {
         payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
     const { db, store } = makeFakeD1(rows);
 
     // Snapshot only has race 11 at Hanshin; the ticket is for race 9 at Tokyo.
+    // Ticket's race_key isn't in the IN (?, ...) list → no rows returned.
     const snap = makeSnapshot([
       {
         date: "20260621",
@@ -325,45 +370,9 @@ describe("settleSweep", () => {
       fetchStub(snap),
     );
 
-    expect(out.scanned).toBe(1);
+    expect(out.scanned).toBe(0);
     expect(out.settled).toBe(0);
     expect(store.get("t-other")!.state).toBe("open");
-  });
-
-  it("is idempotent: an already-settled ticket is never even returned by the SELECT", async () => {
-    const rows: SweepTicketRow[] = [
-      {
-        id: "t-won",
-        race_key: RACE_KEY,
-        payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
-        state: "won", // already settled
-        returned: 1230,
-        created_at: 1_700_000_000_000,
-      },
-    ];
-    const { db, store, calls } = makeFakeD1(rows);
-
-    const snap = makeSnapshot([
-      {
-        date: "20260621",
-        venue: "Hanshin",
-        race_no: 11,
-        name: "Takarazuka Kinen",
-        status: "result",
-        result: RESULT_QUINELLA_5_16,
-      },
-    ]);
-
-    const out = await settleSweep(
-      { DB: db, LIVE_BASE: "https://racing.example" },
-      fetchStub(snap),
-    );
-
-    expect(out.scanned).toBe(0); // SELECT filtered to state='open'
-    expect(out.settled).toBe(0);
-    // No UPDATE issued — the row is unchanged.
-    expect(calls.some((c) => /UPDATE tickets/i.test(c.sql))).toBe(false);
-    expect(store.get("t-won")!.state).toBe("won");
   });
 
   it("defers overflow: 201 OPEN tickets → 200 scanned (deferred=true), all 200 settled", async () => {
@@ -373,6 +382,7 @@ describe("settleSweep", () => {
       payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
       state: "open",
       returned: null,
+      settle_result_hash: null,
       // Distinct created_at so the ORDER BY is deterministic.
       created_at: 1_700_000_000_000 + i,
     }));
@@ -412,6 +422,7 @@ describe("settleSweep", () => {
         payload: ticketPayload("quinella", ["5", "16"]),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
@@ -435,6 +446,7 @@ describe("settleSweep", () => {
         payload: ticketPayload("quinella", ["5", "16"]),
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
@@ -461,6 +473,7 @@ describe("settleSweep", () => {
         payload: "{not json",
         state: "open",
         returned: null,
+        settle_result_hash: null,
         created_at: 1_700_000_000_000,
       },
     ];
@@ -486,5 +499,337 @@ describe("settleSweep", () => {
     expect(out.settled).toBe(0);
     expect(store.get("t-bad")!.state).toBe("open");
     warn.mockRestore();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// R3 — re-settlement on result change. The cases the verification layer asked
+// for: partial→complete, won→miss, miss→won, amount change, idempotent skip,
+// NULL-hash backfill. All transitions are logged so an operator reading the
+// Worker tail can audit them.
+// ---------------------------------------------------------------------------
+
+describe("settleSweep — R3 re-settlement (result hash changed)", () => {
+  it("is idempotent: a settled ticket whose result hash matches is NOT updated", async () => {
+    const storedHash = await realHashOf(RESULT_QUINELLA_5_16);
+    const rows: SweepTicketRow[] = [
+      {
+        id: "t-won",
+        race_key: RACE_KEY,
+        payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
+        state: "won",
+        returned: 1230,
+        settle_result_hash: storedHash,
+        created_at: 1_700_000_000_000,
+      },
+    ];
+    const { db, store, calls } = makeFakeD1(rows);
+
+    const snap = makeSnapshot([
+      {
+        date: "20260621",
+        venue: "Hanshin",
+        race_no: 11,
+        name: "Takarazuka Kinen",
+        status: "result",
+        result: RESULT_QUINELLA_5_16,
+      },
+    ]);
+
+    const out = await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(snap),
+    );
+
+    expect(out.scanned).toBe(1);
+    expect(out.settled).toBe(0);
+    expect(out.reSettled).toBe(0);
+    // No UPDATE issued — row unchanged.
+    expect(calls.some((c) => /UPDATE tickets/i.test(c.sql))).toBe(false);
+    expect(store.get("t-won")!.state).toBe("won");
+    expect(store.get("t-won")!.returned).toBe(1230);
+  });
+
+  it("re-settles won → miss when the corrected result no longer hits", async () => {
+    // Ticket was settled 'won' against an OLD result that had 5 + 16 in top 2.
+    // The corrected/complete result has them outside top 2 — line now misses.
+    const oldResult = {
+      placings: [
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16] },
+      ],
+      payouts: [{ pool: "quinella", combo: "5-16", yen: 1230 }],
+    };
+    const newResult = {
+      placings: [
+        { pos: 1, umabans: [7] },
+        { pos: 2, umabans: [3] },
+        { pos: 3, umabans: [5] },
+        { pos: 4, umabans: [16] },
+      ],
+      payouts: [{ pool: "quinella", combo: "3-7", yen: 880 }],
+    };
+    const oldHash = await realHashOf(oldResult);
+
+    const rows: SweepTicketRow[] = [
+      {
+        id: "t-won-then-miss",
+        race_key: RACE_KEY,
+        payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
+        state: "won",
+        returned: 1230,
+        settle_result_hash: oldHash,
+        created_at: 1_700_000_000_000,
+      },
+    ];
+    const { db, store, calls } = makeFakeD1(rows);
+
+    const snap = makeSnapshot([
+      {
+        date: "20260621",
+        venue: "Hanshin",
+        race_no: 11,
+        name: "Takarazuka Kinen",
+        status: "result",
+        result: newResult,
+      },
+    ]);
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const out = await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(snap),
+    );
+
+    expect(out.reSettled).toBe(1);
+    const row = store.get("t-won-then-miss")!;
+    expect(row.state).toBe("miss");
+    expect(row.returned).toBeNull();
+    // Hash advanced — next sweep over the same result is idempotent.
+    const newHash = await realHashOf(newResult);
+    expect(row.settle_result_hash).toBe(newHash);
+
+    // Transition logged for operator audit.
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/re-settled t-won-then-miss won\(1230\) -> miss \(state\)/),
+    );
+    // UPDATE was issued with the hash CAS.
+    expect(calls.some((c) => /UPDATE tickets[\s\S]*settle_result_hash/i.test(c.sql))).toBe(true);
+    log.mockRestore();
+  });
+
+  it("re-settles miss → won when the corrected result hits", async () => {
+    // Ticket was settled 'miss' against an OLD result that didn't have 7 + 3
+    // in top 2. The corrected result has them at 1-2 — now hits.
+    const oldResult = {
+      placings: [
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16] },
+      ],
+      payouts: [{ pool: "quinella", combo: "5-16", yen: 1230 }],
+    };
+    const newResult = {
+      placings: [
+        { pos: 1, umabans: [7] },
+        { pos: 2, umabans: [3] },
+        { pos: 3, umabans: [5] },
+      ],
+      payouts: [{ pool: "quinella", combo: "3-7", yen: 880 }],
+    };
+    const oldHash = await realHashOf(oldResult);
+
+    const rows: SweepTicketRow[] = [
+      {
+        id: "t-miss-then-won",
+        race_key: RACE_KEY,
+        payload: ticketPayload("quinella", ["7", "3"], { unit: 200 }),
+        state: "miss",
+        returned: null,
+        settle_result_hash: oldHash,
+        created_at: 1_700_000_000_000,
+      },
+    ];
+    const { db, store } = makeFakeD1(rows);
+
+    const snap = makeSnapshot([
+      {
+        date: "20260621",
+        venue: "Hanshin",
+        race_no: 11,
+        name: "Takarazuka Kinen",
+        status: "result",
+        result: newResult,
+      },
+    ]);
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const out = await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(snap),
+    );
+
+    expect(out.reSettled).toBe(1);
+    const row = store.get("t-miss-then-won")!;
+    expect(row.state).toBe("won");
+    // Quinella payout ¥880 per ¥100, unit ¥200 → ¥1760.
+    expect(row.returned).toBe(1760);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/re-settled t-miss-then-won miss -> won\(1760\) \(state\)/),
+    );
+    log.mockRestore();
+  });
+
+  it("re-settles won(X) → won(Y) when the payout amount changes (dead heat surfaced)", async () => {
+    // First result paid quinella 5-16 = ¥1230. Later, the producer attaches
+    // a SECOND quinella payout row (5-7 dead-heated with 5-16 for the win
+    // pair); the resolver correctly sums BOTH rows for combo 5-16.
+    const oldResult = {
+      placings: [
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16] },
+        { pos: 3, umabans: [1] },
+      ],
+      payouts: [{ pool: "quinella", combo: "5-16", yen: 1230 }],
+    };
+    const newResult = {
+      placings: [
+        { pos: 1, umabans: [5] },
+        { pos: 2, umabans: [16] },
+        { pos: 3, umabans: [1] },
+      ],
+      // Same placings but a second payout row (e.g. dead-heat correction).
+      payouts: [
+        { pool: "quinella", combo: "5-16", yen: 1230 },
+        { pool: "quinella", combo: "5-16", yen: 470 },
+      ],
+    };
+    const oldHash = await realHashOf(oldResult);
+
+    const rows: SweepTicketRow[] = [
+      {
+        id: "t-amount",
+        race_key: RACE_KEY,
+        payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
+        state: "won",
+        returned: 1230,
+        settle_result_hash: oldHash,
+        created_at: 1_700_000_000_000,
+      },
+    ];
+    const { db, store } = makeFakeD1(rows);
+
+    const snap = makeSnapshot([
+      {
+        date: "20260621",
+        venue: "Hanshin",
+        race_no: 11,
+        name: "Takarazuka Kinen",
+        status: "result",
+        result: newResult,
+      },
+    ]);
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const out = await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(snap),
+    );
+
+    expect(out.reSettled).toBe(1);
+    const row = store.get("t-amount")!;
+    expect(row.state).toBe("won");
+    // Two payout rows for the same combo → summed: 1230 + 470 = 1700.
+    expect(row.returned).toBe(1700);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/re-settled t-amount won\(1230\) -> won\(1700\) \(amount\)/),
+    );
+    log.mockRestore();
+  });
+
+  it("backfills a NULL hash (legacy ticket) against the current result", async () => {
+    // Pre-R3 settled ticket has settle_result_hash = NULL. The first sweep
+    // after deploy should re-evaluate against the current result and store
+    // the hash, WITHOUT logging a misleading "transition" if nothing changed.
+    const currentHash = await realHashOf(RESULT_QUINELLA_5_16);
+    const rows: SweepTicketRow[] = [
+      {
+        id: "t-legacy",
+        race_key: RACE_KEY,
+        payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
+        state: "won",
+        returned: 1230,
+        settle_result_hash: null, // pre-R3 — backfill needed
+        created_at: 1_700_000_000_000,
+      },
+    ];
+    const { db, store } = makeFakeD1(rows);
+
+    const snap = makeSnapshot([
+      {
+        date: "20260621",
+        venue: "Hanshin",
+        race_no: 11,
+        name: "Takarazuka Kinen",
+        status: "result",
+        result: RESULT_QUINELLA_5_16,
+      },
+    ]);
+
+    const log = vi.spyOn(console, "log").mockImplementation(() => {});
+    const out = await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(snap),
+    );
+
+    expect(out.reSettled).toBe(1);
+    const row = store.get("t-legacy")!;
+    expect(row.state).toBe("won"); // unchanged
+    expect(row.returned).toBe(1230); // unchanged
+    expect(row.settle_result_hash).toBe(currentHash); // backfilled
+    expect(log).toHaveBeenCalledWith(
+      // "hash-only" because state + amount didn't change — just the hash.
+      expect.stringMatching(/re-settled t-legacy won\(1230\) -> won\(1230\) \(hash-only\)/),
+    );
+    log.mockRestore();
+  });
+
+  it("refuses to invent a transition when the race is no longer in the snapshot", async () => {
+    // A settled ticket whose race has aged out of /api/live (e.g. last week's
+    // race) MUST NOT be touched — we can't re-settle what we can't see. The
+    // new SELECT filters by race_key IN (...), so old tickets aren't returned.
+    const rows: SweepTicketRow[] = [
+      {
+        id: "t-old",
+        race_key: "20260614|Tokyo|12|Legacy",
+        payload: ticketPayload("quinella", ["5", "16"], { unit: 100 }),
+        state: "won",
+        returned: 999,
+        settle_result_hash: "deadbeef",
+        created_at: 1_600_000_000_000,
+      },
+    ];
+    const { db, store, calls } = makeFakeD1(rows);
+
+    // Snapshot only has THIS weekend's race — the old race isn't in it.
+    const snap = makeSnapshot([
+      {
+        date: "20260621",
+        venue: "Hanshin",
+        race_no: 11,
+        name: "Takarazuka Kinen",
+        status: "result",
+        result: RESULT_QUINELLA_5_16,
+      },
+    ]);
+
+    const out = await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(snap),
+    );
+
+    expect(out.scanned).toBe(0); // old ticket not in IN list
+    expect(calls.some((c) => /UPDATE tickets/i.test(c.sql))).toBe(false);
+    expect(store.get("t-old")!.state).toBe("won");
+    expect(store.get("t-old")!.returned).toBe(999);
   });
 });
