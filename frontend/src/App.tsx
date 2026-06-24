@@ -120,6 +120,11 @@ function App() {
       uma: String(r.umaban),
       name: r.name ?? null,
       odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
+      // Milestone 4 form panel (jockey-gap option a): carry jockey fields
+      // through so the FormPanel can query /api/jockeys/{id}/form. Absent on
+      // legacy/manual runners; the panel then hides the jockey block.
+      jockey_id: r.jockey_id ?? null,
+      jockey_name: r.jockey_name ?? null,
     }));
     setRunners(next);
     setRaceLabel(race.name || `${t("race.placeholderRace")} ${race.race_no}`);
@@ -275,6 +280,17 @@ function App() {
           onStandard={standardTickets}
           onRefine={() => setStep("style")}
           raceStatus={raceStatus}
+          intuition={intuition}
+          onIntuition={(uma, next) => {
+            // Toggle/clear a mark: replace or delete the entry so the
+            // recommender sees a clean Record each time.
+            setIntuition((prev) => {
+              const copy = { ...prev };
+              if (next === null) delete copy[uma];
+              else copy[uma] = next;
+              return copy;
+            });
+          }}
         />
       )}
 
@@ -305,6 +321,16 @@ function App() {
           ticket={tickets.find((x) => x.id === activeTicketId) ?? null}
           style={style}
           onBack={() => setStep("tickets")}
+          runners={runners}
+          intuition={intuition}
+          onIntuition={(uma, next) => {
+            setIntuition((prev) => {
+              const copy = { ...prev };
+              if (next === null) delete copy[uma];
+              else copy[uma] = next;
+              return copy;
+            });
+          }}
         />
       )}
 

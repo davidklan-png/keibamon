@@ -216,4 +216,53 @@ export const en = {
       "Recreational ticket-structure tool. Not betting advice, not a winning method, not a profit guarantee. Under-20 betting is prohibited by law.",
     back: "Keibamon home",
   },
+  // Milestone 4: form/context panel — recreational context to shape
+  // intuition, NOT an edge claim, tip, or advice. Copy stays descriptive
+  // (starts / win% / splits / market-vs-result note). Guardrail words
+  // "guaranteed / sure thing / lock / beat the market" are BANNED and
+  // checked by guardrails.test.ts. "anchor" is the user's mark label, not
+  // the betting sense of "lock".
+  form: {
+    title: "Form",
+    subtitle: "Context to shape your intuition — not betting advice.",
+    contextNote: "Form context — not betting advice.",
+    career: "Career",
+    starts: "{n} starts",
+    record: "{wins}-{top3} (win {win}% · top3 {top3Pct}%)",
+    noStarts: "No recorded starts yet.",
+    recentTitle: "Recent finishes",
+    splitsTitle: "Splits",
+    surface: "Surface",
+    distance: "Distance",
+    going: "Going",
+    wet: "Wet",
+    dry: "Dry",
+    styleTitle: "Running style",
+    styleNote: "A rough proxy from finish + closing split.",
+    marketTitle: "Market vs result",
+    marketNote: {
+      outrun: "Tends to outrun the market odds.",
+      runsToOdds: "Tends to run to the market odds.",
+      neutral: "Around the market odds.",
+    },
+    jockeyTitle: "Jockey",
+    jockeyCareer: "Jockey career",
+    jockeyCombos: "Top combos",
+    jockeyNoId: "Jockey context coming soon.",
+    noHistory: "No past form on record for this runner.",
+    loadError: "Couldn't load form — try again.",
+    retry: "Retry",
+    close: "Close",
+    tapHint: "Tap a runner for form context.",
+    takeoutReminder: "Pool takeout applies as always.",
+    intuitionTitle: "Your mark",
+    intuition: {
+      like: "Like",
+      distrust: "Distrust",
+      priceHorse: "Price horse",
+      avoid: "Avoid",
+      anchor: "Anchor",
+    },
+    intuitionHint: "Marks shape your ticket — they don't predict outcomes.",
+  },
 };

@@ -3,21 +3,29 @@
 // Behavior-preserving move. The "why this ticket" view: lead sentence + a
 // details dl + combos + an optional math disclosure with the house-edge line.
 // ============================================================================
+import { useState } from "react";
 import { useI18n } from "../i18n";
-import { RET, type BetType } from "../lib/fairvalue";
-import type { Ticket, StyleState } from "../lib/types";
+import { RET, type BetType, type Runner } from "../lib/fairvalue";
+import type { Ticket, StyleState, IntuitionState } from "../lib/types";
 import { moodKey } from "../lib/types";
 import { yen, fmt } from "../lib/format";
+import { FormPanel } from "./FormPanel";
 
 export interface ExplainScreenProps {
   ticket: Ticket | null;
   style: StyleState;
   onBack: () => void;
+  /** Milestone 4: runners for the current race, so the Explain screen can
+   * surface a form/context panel for each horse on the ticket. */
+  runners: Runner[];
+  intuition: Record<string, IntuitionState>;
+  onIntuition: (uma: string, next: IntuitionState) => void;
 }
 
 export function ExplainScreen(props: ExplainScreenProps) {
   const { t, tFmt } = useI18n();
-  const { ticket, style, onBack } = props;
+  const { ticket, style, onBack, runners, intuition, onIntuition } = props;
+  const [openUma, setOpenUma] = useState<string | null>(null);
   if (!ticket) {
     return (
       <section className="section">
@@ -107,6 +115,49 @@ export function ExplainScreen(props: ExplainScreenProps) {
             {t("explain.takeoutReminder")}
           </p>
         </details>
+
+        {/* Milestone 4: form/context for the horses on this ticket. Recreational
+         * context — NOT a tip or edge claim. The takeout reminder still applies. */}
+        {ticket.core.length > 0 && runners.length > 0 && (
+          <details className="form-disclosure">
+            <summary>{t("form.title")} · {t("form.tapHint")}</summary>
+            <div className="form-runner-list">
+              {ticket.core
+                .map((uma) => runners.find((r) => r.uma === uma))
+                .filter((r): r is Runner => !!r)
+                .map((r) => (
+                  <button
+                    key={r.uma}
+                    type="button"
+                    className={`runner runner-tappable ${openUma === r.uma ? "on" : ""}`}
+                    onClick={() => setOpenUma(openUma === r.uma ? null : r.uma)}
+                  >
+                    <span className="uma">{r.uma}</span>
+                    <span>
+                      <span className="nm">{r.name || `#${r.uma}`}</span>
+                      <span className="odds-line">
+                        <span className="odds-value">{fmt(r.odds, 1)}</span>
+                      </span>
+                    </span>
+                  </button>
+                ))}
+            </div>
+            {openUma && (() => {
+              const r = runners.find((x) => x.uma === openUma);
+              if (!r) return null;
+              return (
+                <FormPanel
+                  horseName={r.name || `#${r.uma}`}
+                  jockeyId={r.jockey_id ?? null}
+                  jockeyName={r.jockey_name ?? null}
+                  intuition={intuition[r.uma] ?? null}
+                  onIntuition={(next) => onIntuition(r.uma, next)}
+                  onClose={() => setOpenUma(null)}
+                />
+              );
+            })()}
+          </details>
+        )}
       </section>
       <button className="btn primary" style={{ width: "100%" }} onClick={onBack}>
         ← {t("explain.back")}

@@ -2045,3 +2045,196 @@ select:focus {
   font-weight: 700;
   font-size: 14px;
 }
+
+/* ---------- Milestone 4: form/context panel ---------- */
+/* Recreational context. Copy stays descriptive (career / splits / style proxy
+ * / market-vs-result). No "lock/guarantee/beat the market" language anywhere. */
+
+.runner-tappable {
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.runner-tappable.on {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(245, 196, 76, 0.18), var(--tint-2) 60%);
+}
+
+.runner-tappable:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.form-panel {
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--tint-2);
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.form-panel .form-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 6px;
+}
+
+.form-panel .form-head h2 {
+  margin: 0;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.form-panel .form-head small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.form-close {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.form-context-note {
+  margin: 0 0 10px;
+  padding: 6px 10px;
+  background: var(--tint);
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.form-block {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+}
+
+.form-block h3 {
+  margin: 0 0 4px;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.form-block h4 {
+  margin: 12px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.form-line {
+  margin: 0;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.form-recent {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.form-recent-row {
+  display: grid;
+  grid-template-columns: 56px 1fr 32px 56px 1fr;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.form-recent-row .fr-pos {
+  font-weight: 800;
+  color: var(--gold);
+  text-align: right;
+}
+
+.form-recent-row .fr-odds {
+  font: 700 11px/1 ui-monospace, monospace;
+  color: var(--muted);
+}
+
+.form-recent-row .fr-style {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.form-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.form-chips .combo-chip {
+  font-size: 11px;
+}
+
+.intuition-mark {
+  cursor: pointer;
+  font: inherit;
+  color: var(--ink);
+  background: var(--tint);
+  border: 1px solid var(--line);
+  padding: 4px 10px;
+}
+
+.intuition-mark.on {
+  background: var(--gold);
+  color: #fff;
+  border-color: var(--gold);
+}
+
+.form-intuition .hint {
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+.form-takeout {
+  margin-top: 10px;
+  font-size: 11px;
+}
+
+.form-error {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.form-error .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.form-runner-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 8px 0;
+}
+
+.form-disclosure {
+  margin-top: 14px;
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
+
+.form-disclosure summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--ink);
+  font-weight: 700;
+}
+

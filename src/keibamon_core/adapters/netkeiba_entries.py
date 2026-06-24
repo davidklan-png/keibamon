@@ -99,6 +99,11 @@ def parse_entries_payload(
             "horse_id": _extract_horse_id(row_html),
             "horse_name": _extract_horse_name(row_html),
             "jockey_id": _extract_jockey_id(row_html),
+            # Jockey NAME (anchor text) -- NOT written to silver (the jravan
+            # silver schema has jockey_id only, no name). It rides along in the
+            # in-memory entry dict so the live snapshot can carry a jockey label
+            # for the Milestone-4 form panel (option-a JOCKEY GAP passthrough).
+            "jockey_name": _extract_jockey_name(row_html),
             "trainer_id": _extract_trainer_id(row_html),
             "carried_weight_kg": _extract_carried_weight(row_html),
             "body_weight_kg": _extract_body_weight(row_html),
@@ -311,6 +316,21 @@ def _extract_jockey_id(row: str) -> str | None:
     -- the 5-digit jockey code."""
     m = re.search(r'db\.netkeiba\.com/jockey/result/recent/([0-9]{5})/', row)
     return m.group(1) if m else None
+
+
+def _extract_jockey_name(row: str) -> str | None:
+    """Jockey display name -- the anchor text of the jockey link:
+    ``<a href=".../jockey/result/recent/CODE/"> NAME </a>``.
+
+    Silver has ``jockey_id`` but no jockey NAME; this carries the name solely
+    through the live snapshot so the form panel can label a runner's jockey and
+    look up its history by id. Returns None when the cell has no link.
+    """
+    m = re.search(
+        r'db\.netkeiba\.com/jockey/result/recent/[0-9]{5}/">\s*([^<]+?)\s*</a>',
+        row,
+    )
+    return m.group(1).strip() if m and m.group(1).strip() else None
 
 
 def _extract_trainer_id(row: str) -> str | None:

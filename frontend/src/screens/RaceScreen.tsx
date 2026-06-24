@@ -3,11 +3,14 @@
 // Behavior-preserving move; no logic changes. Lists the live card, lets the
 // user pick a race, seeds runners, and offers standard/refine CTAs.
 // ============================================================================
+import { useState } from "react";
 import { useI18n } from "../i18n";
 import type { Runner } from "../lib/fairvalue";
+import type { IntuitionState } from "../lib/types";
 import type { LiveSnapshot, LiveRace } from "../api";
 import { raceHasLiveOdds } from "../lib/mytickets-view";
 import { fmt } from "../lib/format";
+import { FormPanel } from "./FormPanel";
 
 export interface RaceScreenProps {
   runners: Runner[];
@@ -23,6 +26,10 @@ export interface RaceScreenProps {
   onStandard: () => void;
   onRefine: () => void;
   raceStatus: string;
+  /** Per-uma intuition marks (Milestone 4 form panel). */
+  intuition: Record<string, IntuitionState>;
+  /** Set or clear an intuition mark from the form panel. */
+  onIntuition: (uma: string, next: IntuitionState) => void;
 }
 
 export function RaceScreen(props: RaceScreenProps) {
@@ -41,7 +48,13 @@ export function RaceScreen(props: RaceScreenProps) {
     onStandard,
     onRefine,
     raceStatus,
+    intuition,
+    onIntuition,
   } = props;
+
+  // Milestone 4: which runner's form panel is open. null = closed.
+  const [openUma, setOpenUma] = useState<string | null>(null);
+  const openRunner = openUma ? runners.find((r) => r.uma === openUma) ?? null : null;
 
   // ADR-0006: list every registered race, not just ones with live odds.
   const cardRaces = (snap?.races || []).filter(
@@ -240,29 +253,49 @@ export function RaceScreen(props: RaceScreenProps) {
       <section className={`section ${pending ? "is-pending" : ""}`}>
         <div className="section-title">
           <h2>{t("race.runners")}</h2>
-          <small>{t("race.oddsLabel")}</small>
+          <small>
+            {t("race.oddsLabel")}
+            {runners.length > 0 && ` · ${t("form.tapHint")}`}
+          </small>
         </div>
         {runners.length === 0 ? (
           <p className="empty">{t("tickets.noRunners")}</p>
         ) : (
-          <div className="runners">
-            {runners.map((r) => {
-              return (
-                <div key={r.uma} className="runner">
-                  <span className="uma">{r.uma}</span>
-                  <span>
-                    <span className="nm">{r.name || `#${r.uma}`}</span>
-                    <span className="odds-line">
-                      <span className="odds-value">
-                        {fmt(r.odds, 1)}
+          <>
+            {openRunner && (
+              <FormPanel
+                horseName={openRunner.name || `#${openRunner.uma}`}
+                jockeyId={openRunner.jockey_id ?? null}
+                jockeyName={openRunner.jockey_name ?? null}
+                intuition={intuition[openRunner.uma] ?? null}
+                onIntuition={(next) => onIntuition(openRunner.uma, next)}
+                onClose={() => setOpenUma(null)}
+              />
+            )}
+            <div className="runners">
+              {runners.map((r) => {
+                const isOpen = openUma === r.uma;
+                return (
+                  <button
+                    key={r.uma}
+                    type="button"
+                    className={`runner runner-tappable ${isOpen ? "on" : ""}`}
+                    onClick={() => setOpenUma(isOpen ? null : r.uma)}
+                    aria-pressed={isOpen}
+                  >
+                    <span className="uma">{r.uma}</span>
+                    <span>
+                      <span className="nm">{r.name || `#${r.uma}`}</span>
+                      <span className="odds-line">
+                        <span className="odds-value">{fmt(r.odds, 1)}</span>
+                        {pending && <span className="pc">{t("race.estOdds")}</span>}
                       </span>
-                      {pending && <span className="pc">{t("race.estOdds")}</span>}
                     </span>
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+                  </button>
+                );
+              })}
+            </div>
+          </>
         )}
       </section>
 
