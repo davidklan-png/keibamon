@@ -1,20 +1,24 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "./i18n";
 import { winProbs, type Runner } from "./lib/fairvalue";
-import { recommend } from "./lib/recommender";
+import { recommend, recommendDiverse } from "./lib/recommender";
 import type {
   StyleState,
   IntuitionState,
   Ticket,
+  CommittedTicket,
 } from "./lib/types";
-import { DEFAULT_STYLE } from "./lib/types";
+import { DEFAULT_STYLE, moodKey } from "./lib/types";
 import {
   fetchLiveSnapshot,
   seedManualRunners,
   type LiveSnapshot,
   type LiveRace,
 } from "./api";
-import { raceHasLiveOdds } from "./lib/mytickets-view";
+import { raceHasLiveOdds, snapshotRace } from "./lib/mytickets-view";
+import { useAuth } from "./auth/AuthProvider";
+import { postTicket } from "./auth/socialClient";
+import { pushPending } from "./auth/ticketQueue";
 import { RaceScreen } from "./screens/RaceScreen";
 import { StyleScreen } from "./screens/StyleScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
@@ -22,15 +26,22 @@ import { ExplainScreen } from "./screens/ExplainScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
 import { Footer } from "./components/Footer";
 
-type Step = "mine" | "race" | "style" | "tickets" | "explain";
+type Step = "race" | "style" | "tickets" | "explain";
+type View = "browse" | "mine";
 
 function App() {
   const i18n = useI18n();
   const { t, tFmt, lang, setLang } = i18n;
+  // Lift auth into App so the header's "My Tickets" tab can trigger Clerk's
+  // sign-in modal directly, and so placeTicket() can commit on the signed-in
+  // user without re-reading the context inside the handler.
+  const { isSignedIn, userId, getToken, openSignIn } = useAuth();
 
-  // ADR-0007: My Tickets is the home/landing; the classic builder is reached
-  // via the New-bet flow (and an "advanced builder" affordance).
-  const [step, setStep] = useState<Step>("mine");
+  // Race-first UX: the race browser is the landing. "My Tickets" is a separate
+  // top-level view toggled from the header (auth-gated). The classic 4-step
+  // builder (race → style → tickets → explain) lives under view === "browse".
+  const [view, setView] = useState<View>("browse");
+  const [step, setStep] = useState<Step>("race");
   const [runners, setRunners] = useState<Runner[]>([]);
   const [raceLabel, setRaceLabel] = useState<string>("");
   const [selectedRaceDate, setSelectedRaceDate] = useState<string>("");
@@ -48,6 +59,8 @@ function App() {
   );
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
+  // Transient status line on the Tickets screen (marks-applied / place result).
+  const [toast, setToast] = useState<string>("");
 
   // ---------- Live snapshot ----------
   useEffect(() => {
@@ -79,18 +92,21 @@ function App() {
       const s = await fetchLiveSnapshot();
       setSnap(s);
       setSnapError("");
-      // ADR-0006: a race is shown as soon as it is REGISTERED (has runners),
-      // not only once odds open. Prefer an open race; otherwise surface a
-      // registered one (grayed, estimated odds).
-      const races = (s.races || []).filter(
-        (r) => (r.runners || []).length > 0,
-      );
-      if (races.length > 0) {
-        const open = races.filter((r) => raceHasLiveOdds(r));
-        const pool = open.length > 0 ? open : races;
+      // Race-first UX: don't gate the snapshot on having runners. Prefer a
+      // playable (has-runners) race for the auto-apply so the user lands on
+      // something they can build tickets for; if every race is still 0-runner
+      // (mid-week, shutuba finalizes Thu ~14:00 JST), fall back to surfacing
+      // a registered one so the weekend G3s are visible instead of collapsing
+      // to "No live card available."
+      const all = s.races || [];
+      const withRunners = all.filter((r) => (r.runners || []).length > 0);
+      const pool = withRunners.length > 0 ? withRunners : all;
+      if (pool.length > 0) {
+        const open = pool.filter((r) => raceHasLiveOdds(r));
+        const live = open.length > 0 ? open : pool;
         const feature =
-          pool.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
-          pool[pool.length - 1];
+          live.find((r) => /g1|takarazuka/i.test(r.name || "")) ||
+          live[live.length - 1];
         applyRace(feature, s.meta?.date);
       } else {
         if (runners.length === 0) seedManual();
@@ -158,7 +174,16 @@ function App() {
   function regenerate(overrideStyle?: StyleState, overrideIntuition?: Record<string, IntuitionState>) {
     const s = overrideStyle ?? style;
     const i = overrideIntuition ?? intuition;
-    const out = recommend({ allUmas, p, style: s, intuition: i });
+    // Default diverse; personality refines: on the beginner path (DEFAULT_STYLE
+    // + no intuition), surface one safer / balanced / spicier ticket each so
+    // the user reaches 3 ideas in ≤2 decisions. The moment a personality is
+    // picked OR any intuition is marked, switch to single-personality mode.
+    const beginnerPath =
+      s.personality === DEFAULT_STYLE.personality &&
+      Object.keys(i).length === 0;
+    const out = beginnerPath
+      ? recommendDiverse({ allUmas, p, style: s, intuition: i })
+      : recommend({ allUmas, p, style: s, intuition: i });
     setTickets(out);
     setActiveTicketId(out[0]?.id ?? null);
   }
@@ -178,6 +203,22 @@ function App() {
     regenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runners, style, intuition]);
+
+  // "Updated with your marks" toast: flashes once when intuition changes while
+  // the user is viewing the Tickets step, so the auto-regen reshape is visible.
+  // Tracked against its own ref so runner/style changes don't trigger it.
+  const prevIntuition = useRef(intuition);
+  useEffect(() => {
+    const prev = prevIntuition.current;
+    prevIntuition.current = intuition;
+    if (prev === intuition) return;
+    if (Object.keys(intuition).length === 0) return; // cleared, not a mark
+    if (step !== "tickets") return;
+    setToast(t("tickets.updatedMarks"));
+    const id = window.setTimeout(() => setToast(""), 1800);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [intuition, step]);
 
   /** "Standard tickets" CTA — apply DEFAULT_STYLE + empty intuition, jump. */
   function standardTickets() {
@@ -200,9 +241,56 @@ function App() {
     regenerate(DEFAULT_STYLE, {});
   }
 
-  // ---------- Step nav ----------
+  /**
+   * Place (commit) a single ticket from the Tickets screen — mirrors
+   * MyTickets.commit(). If not signed in, open Clerk's sign-in modal and stop
+   * (the user returns to the same TicketsScreen and taps Place again). On a
+   * successful POST, drop into the My Tickets view; on failure, queue the
+   * ticket offline and flash the offline-queued copy.
+   */
+  async function placeTicket(tk: Ticket) {
+    if (!isSignedIn) {
+      openSignIn();
+      return;
+    }
+    const race = (snap?.races || []).find(
+      (r) => raceKey(r, snap?.meta?.date) === selectedRaceKey,
+    );
+    if (!race) return; // no race to snapshot — can't commit
+    const id = "kb-" + Date.now().toString(36);
+    const serial = "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
+    const committed: CommittedTicket = {
+      id,
+      serial,
+      ticket: tk,
+      unit: style.unit,
+      mood: moodKey(tk),
+      state: "open",
+      payoutBase: tk.avgPayout,
+      race: snapshotRace(race, snap?.meta?.date),
+      owner: "you",
+      claps: 0,
+      createdAt: Date.now(),
+    };
+    const token = await getToken();
+    if (!token) {
+      if (userId) pushPending(userId, committed);
+      setToast(t("mine.offlineQueued"));
+      setView("mine");
+      return;
+    }
+    const r = await postTicket(token, committed);
+    if (r.ok) {
+      setToast("");
+      setView("mine");
+    } else {
+      if (userId) pushPending(userId, committed);
+      setToast(t("mine.offlineQueued"));
+    }
+  }
+
+  // ---------- Step nav (classic builder, under view === "browse") ----------
   const steps: { id: Step; label: string; enabled: boolean }[] = [
-    { id: "mine", label: t("mine.home"), enabled: true },
     { id: "race", label: t("nav.race"), enabled: true },
     { id: "style", label: t("nav.style"), enabled: runners.length >= 2 },
     {
@@ -213,14 +301,14 @@ function App() {
     { id: "explain", label: t("nav.explain"), enabled: !!activeTicketId },
   ];
 
-  // ADR-0007: My Tickets surface is its own full-screen home (own header). The
-  // classic 4-step builder remains reachable via onClassic. Phase 1 wraps it
-  // in AuthGate + AgeGate so identity + 20+ self-attestation precede the feed.
-  if (step === "mine") {
+  // ADR-0007: My Tickets is its own full-screen home (own header). "Browse
+  // races" (onClassic) returns here. AuthGate + AgeGate stay wrapped inside
+  // MyTicketsHome as defense-in-depth (harmless when already authed).
+  if (view === "mine") {
     return (
       <MyTicketsHome
         snap={snap}
-        onClassic={() => setStep("race")}
+        onClassic={() => setView("browse")}
         onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
       />
     );
@@ -248,6 +336,22 @@ function App() {
           aria-label="toggle language"
         >
           {t("app.langToggle")}
+        </button>
+        {/* My Tickets tab — auth-gated. Triggers Clerk's sign-in modal when
+            signed out (or age not yet self-attested) instead of navigating
+            into the AuthGate full-screen. Non-dominant placement. */}
+        <button
+          className="lang-toggle mine-tab"
+          onClick={() => {
+            // Signed-in → drop into My Tickets (AgeGate inside MyTicketsHome
+            // catches the not-yet-age-verified case at the right screen).
+            // Signed-out → open Clerk's sign-in modal in place.
+            if (isSignedIn) setView("mine");
+            else openSignIn();
+          }}
+          aria-label={t("mine.home")}
+        >
+          {t("mine.home")}
         </button>
       </header>
 
@@ -313,6 +417,9 @@ function App() {
             setActiveTicketId(id);
             setStep("explain");
           }}
+          onPlace={placeTicket}
+          placeLabel={isSignedIn ? t("tickets.placeCta") : t("tickets.placeSignIn")}
+          toast={toast}
         />
       )}
 

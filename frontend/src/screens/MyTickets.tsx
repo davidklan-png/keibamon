@@ -19,7 +19,6 @@ import type {
   Ticket,
   CommittedTicket,
   CommittedState,
-  RaceSnapshot,
 } from "../lib/types";
 import { DEFAULT_STYLE, applyPersonality, moodKey } from "../lib/types";
 import type { LiveSnapshot, LiveRace } from "../api";
@@ -64,6 +63,7 @@ import {
   mtPickFeature,
   mtRunnersOf,
   mtLoadStored,
+  snapshotRace,
   type MtView,
   type DriftDir,
 } from "../lib/mytickets-view";
@@ -279,27 +279,8 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap]);
 
-  function snapshotRace(race: LiveRace): RaceSnapshot {
-    const date = race.date ?? fallbackDate ?? "";
-    return {
-      raceKey: mtRaceKey(race, fallbackDate),
-      grade: race.grade_label ?? "",
-      nameEn: race.name ?? "",
-      nameJa: race.name ?? "",
-      venueEn: race.venue ?? "",
-      venueJa: race.venue ?? "",
-      raceNo: race.race_no,
-      dateEn: mtFmtDate(date, "en"),
-      dateJa: mtFmtDate(date, "ja"),
-      post: race.post_time ?? "",
-      runners: (race.runners || []).map((r) => ({
-        num: r.umaban,
-        en: r.name ?? "",
-        ja: r.name ?? "",
-        odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
-      })),
-    };
-  }
+  // snapshotRace lives in lib/mytickets-view.ts (shared with App.placeTicket).
+  // Call sites pass this component's `fallbackDate` (snap?.meta?.date).
 
   // ---- Vibe options from the REAL recommender (do not hand-author lines) ----
   const featRunners = useMemo(
@@ -327,7 +308,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     if (userId) return; // signed-in: server is source of truth, no seed.
     if (seeded.current || !storageEmpty.current || !feature) return;
     if (featUmas.length < 2) return;
-    const rs = snapshotRace(feature);
+    const rs = snapshotRace(feature, fallbackDate);
     const mk = (pid: PersonalityId) =>
       recommend({
         allUmas: featUmas,
@@ -779,7 +760,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       mood: opt.mood,
       state: "open",
       payoutBase: opt.ticket.avgPayout,
-      race: snapshotRace(feature),
+      race: snapshotRace(feature, fallbackDate),
       owner: "you",
       claps: 0,
       createdAt: Date.now(),
@@ -853,6 +834,16 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             <div className="mt-brand-name">{t("app.title")}</div>
             <div className="mt-brand-eyebrow">KEIBAMON · 競馬モン</div>
           </div>
+          {/* "Browse races" — promoted out of the new-bet header so the loop
+              between the race browser and My Tickets is closed in both
+              directions (no dead-end either way). */}
+          <button
+            className="lang-toggle mine-tab"
+            onClick={onClassic}
+            aria-label={t("mine.browseRaces")}
+          >
+            {t("mine.browseRaces")}
+          </button>
           <button
             className="lang-toggle"
             onClick={onToggleLang}
@@ -1097,13 +1088,6 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             ‹
           </button>
           <div className="mt-back-title">{t("mine.newTitle")}</div>
-          <button
-            className="lang-toggle"
-            onClick={onClassic}
-            style={{ marginLeft: "auto" }}
-          >
-            {ja ? "詳細" : "Builder"}
-          </button>
         </div>
 
         <div className="mt-new">

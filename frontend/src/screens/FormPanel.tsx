@@ -47,10 +47,11 @@ export interface FormPanelViewProps {
   loading: boolean;
   err: string;
   /**
-   * True when the form endpoints are not deployed (all attempted fetches
-   * returned 404). The panel degrades to a localized "Coming this weekend"
-   * block — visually present but not interactive. Distinct from `err` (a real
-   * network/5xx failure that warrants a Retry).
+   * Reserved for a deliberate feature gate (e.g. an env flag that turns the
+   * form panel off in a given deploy). The natural empty state — a known
+   * entity with no recorded starts — now renders the no_history copy below,
+   * NOT this block. Kept so a future flag can reach it without re-plumbing
+   * the view; load() no longer sets it from the both-missing case.
    */
   comingSoon: boolean;
   horse: HorseFormCard | null;
@@ -59,6 +60,13 @@ export interface FormPanelViewProps {
   onIntuition: (next: IntuitionState) => void;
   onClose: () => void;
   onRetry: () => void;
+  /**
+   * Optional "Back to tickets" affordance in the intuition block — closes the
+   * panel AND routes to the Tickets step so the research→tickets return path
+   * is explicit. Absent on the test render and when the panel is opened
+   * outside the race→tickets loop.
+   */
+  onReturnToTickets?: () => void;
 }
 
 export function FormPanelView(props: FormPanelViewProps) {
@@ -76,6 +84,7 @@ export function FormPanelView(props: FormPanelViewProps) {
     onIntuition,
     onClose,
     onRetry,
+    onReturnToTickets,
   } = props;
 
   return (
@@ -125,7 +134,11 @@ export function FormPanelView(props: FormPanelViewProps) {
             jockeyId={jockeyId ?? null}
             jockeyName={jockeyName ?? null}
           />
-          <IntuitionMarks intuition={intuition} onIntuition={onIntuition} />
+          <IntuitionMarks
+            intuition={intuition}
+            onIntuition={onIntuition}
+            onReturnToTickets={onReturnToTickets}
+          />
           <p className="hint form-takeout">{t("form.takeoutReminder")}</p>
         </>
       )}
@@ -136,7 +149,7 @@ export function FormPanelView(props: FormPanelViewProps) {
 
   function HorseContext({ horse }: { horse: HorseFormCard | null }) {
     if (!horse || horse.status !== "ok" || !horse.career) {
-      return <p className="empty">{t("form.noHistory")}</p>;
+      return <p className="empty">{t("form.horseNoHistory")}</p>;
     }
     const c = horse.career;
     return (
@@ -252,7 +265,7 @@ export function FormPanelView(props: FormPanelViewProps) {
       return (
         <div className="form-block">
           <h3>{t("form.jockeyTitle")}</h3>
-          <p className="empty">{t("form.noHistory")}</p>
+          <p className="empty">{t("form.jockeyNoHistory")}</p>
         </div>
       );
     }
@@ -292,9 +305,11 @@ export function FormPanelView(props: FormPanelViewProps) {
   function IntuitionMarks({
     intuition,
     onIntuition,
+    onReturnToTickets,
   }: {
     intuition: IntuitionState;
     onIntuition: (next: IntuitionState) => void;
+    onReturnToTickets?: () => void;
   }) {
     return (
       <div className="form-block form-intuition">
@@ -315,6 +330,14 @@ export function FormPanelView(props: FormPanelViewProps) {
           })}
         </div>
         <p className="hint">{t("form.intuitionHint")}</p>
+        {onReturnToTickets && (
+          <button
+            className="btn ghost form-back-tickets"
+            onClick={onReturnToTickets}
+          >
+            ← {t("form.backToTickets")}
+          </button>
+        )}
       </div>
     );
   }
@@ -335,11 +358,22 @@ export interface FormPanelProps {
   /** Set or clear the intuition mark. */
   onIntuition: (next: IntuitionState) => void;
   onClose: () => void;
+  /** Optional "Back to tickets" affordance (closes panel + routes to tickets). */
+  onReturnToTickets?: () => void;
 }
 
 export function FormPanel(props: FormPanelProps) {
   const { t } = useI18n();
-  const { horseName, jockeyId, jockeyName, asOf, intuition, onIntuition, onClose } = props;
+  const {
+    horseName,
+    jockeyId,
+    jockeyName,
+    asOf,
+    intuition,
+    onIntuition,
+    onClose,
+    onReturnToTickets,
+  } = props;
   const [horse, setHorse] = useState<HorseFormCard | null>(null);
   const [jockey, setJockey] = useState<JockeyFormCard | null>(null);
   const [err, setErr] = useState<string>("");
@@ -372,16 +406,11 @@ export function FormPanel(props: FormPanelProps) {
           setErr(t("form.loadError"));
           return;
         }
-        // "Coming this weekend" — the genuinely-empty case. Horse returned
-        // no_history AND (jockey returned no_history OR no jockey id to look
-        // up). Distinct from a load error: nothing to show, but the panel
-        // stays present.
-        const jockeyMissingOrSkipped =
-          j.kind === "missing" || (j.kind === "ok" && j.card === null);
-        if (h.kind === "missing" && jockeyMissingOrSkipped) {
-          setComingSoon(true);
-          return;
-        }
+        // The both-missing case used to route to the "Coming this weekend"
+        // block. It no longer does — the form endpoints are live, so a
+        // no_history body is the genuinely-empty state and the view renders
+        // the distinct horseNoHistory / jockeyNoHistory copy. `comingSoon`
+        // stays reserved for a deliberate future gate (see FormPanelViewProps).
         setHorse(h.kind === "ok" ? h.card : null);
         setJockey(j.kind === "ok" ? j.card : null);
       })
@@ -415,6 +444,7 @@ export function FormPanel(props: FormPanelProps) {
       onIntuition={onIntuition}
       onClose={onClose}
       onRetry={load}
+      onReturnToTickets={onReturnToTickets}
     />
   );
 }

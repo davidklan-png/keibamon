@@ -176,19 +176,18 @@ describe("FormPanel view", () => {
     expect(html).toMatch(/retry/i);
   });
 
-  it("renders 'Coming this weekend' when BOTH horse+jockey come back no_history", () => {
-    // Production as of 2026-06-25: the form endpoints ARE wired into the
-    // deployed Worker. FormPanel treats {status:"no_history"} 200 OK bodies as
-    // the "genuinely empty" branch — only when BOTH horse AND jockey (or no
-    // jockey_id) come back no_history does this block render. A 404 or 5xx is
-    // a real load error now (see toOutcome tests below), not this stub.
-    const html = render(null, null, { comingSoon: true });
-    expect(html).toMatch(/coming this weekend/i);
-    // No error/retry affordance in the degraded state.
-    expect(html).not.toMatch(/try again/i);
-    expect(html).not.toMatch(/retry/i);
-    // No career line / horse data rendered.
-    expect(html).not.toContain("starts");
+  it("renders the no_history copy (NOT 'Coming this weekend') when BOTH horse+jockey are empty", () => {
+    // Race-first UX: the both-missing case used to route to the "Coming this
+    // weekend" stub. The form endpoints are live now, so a no_history body is
+    // the genuinely-empty state — the view renders the distinct
+    // horseNoHistory / jockeyNoHistory copy. `comingSoon` is reserved for a
+    // deliberate future gate; load() no longer sets it from this case.
+    const html = render(null, null, { comingSoon: false });
+    // Distinct no-history copy for horse + jockey.
+    expect(html).toMatch(/no past form on record for this horse/i);
+    expect(html).toMatch(/no past form on record for this jockey/i);
+    // The old "Coming this weekend" stub must NOT render.
+    expect(html).not.toMatch(/coming this weekend/i);
     // The guardrail context note is still visible.
     expect(html).toMatch(/not betting advice/i);
   });

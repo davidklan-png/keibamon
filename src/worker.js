@@ -23,6 +23,15 @@ export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
+    // /app (no trailing slash) → /app/. The racing app shell lives at /app/;
+    // without this the assets binding serves blank for the bare path. 308 so
+    // the redirect preserves method (GET→GET) and caches permanently.
+    if (url.pathname === "/app") {
+      const redirect = new URL(url);
+      redirect.pathname = "/app/";
+      return Response.redirect(redirect.toString(), 308);
+    }
+
     if (url.pathname === "/helper") {
       return env.ASSETS.fetch(new Request(new URL("/helper.html", url), request));
     }

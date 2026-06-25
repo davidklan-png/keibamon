@@ -8,6 +8,7 @@ import type {
   CommittedState,
   CommittedTicket,
   PersonalityId,
+  RaceSnapshot,
 } from "./types";
 import type { BetType, Runner } from "./fairvalue";
 import type { LiveSnapshot, LiveRace } from "../api";
@@ -92,6 +93,34 @@ export function mtRunnersOf(race: LiveRace): Runner[] {
     name: r.name ?? null,
     odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
   }));
+}
+
+/**
+ * Freeze a race into a RaceSnapshot at commit time. Extracted here so the
+ * TicketsScreen "Place" CTA and the MyTickets "commit" path share one
+ * definition (ADR-0007 race-first loop). `fallbackDate` is the snapshot's
+ * meta.date, used when the race row doesn't carry its own date.
+ */
+export function snapshotRace(race: LiveRace, fallbackDate?: string): RaceSnapshot {
+  const date = race.date ?? fallbackDate ?? "";
+  return {
+    raceKey: mtRaceKey(race, fallbackDate),
+    grade: race.grade_label ?? "",
+    nameEn: race.name ?? "",
+    nameJa: race.name ?? "",
+    venueEn: race.venue ?? "",
+    venueJa: race.venue ?? "",
+    raceNo: race.race_no,
+    dateEn: mtFmtDate(date, "en"),
+    dateJa: mtFmtDate(date, "ja"),
+    post: race.post_time ?? "",
+    runners: (race.runners || []).map((r) => ({
+      num: r.umaban,
+      en: r.name ?? "",
+      ja: r.name ?? "",
+      odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
+    })),
+  };
 }
 
 export function mtLoadStored(lang: string, userId: string | null): CommittedTicket[] {

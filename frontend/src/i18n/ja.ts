@@ -39,6 +39,7 @@ export const ja = {
     statusOpen: "発売中",
     statusRegistered: "登録済み",
     statusResult: "結果",
+    entriesPending: "出走馬 木曜",
   },
   style: {
     title: "スタイルを選ぶ",
@@ -83,6 +84,9 @@ export const ja = {
     estReturnLine: "¥100あたり期待返還 ¥{ret}（控除率相当 {edge}）",
     houseEdgeNote: "プールの控除率は消えません。",
     whyTicket: "この馬券の理由",
+    placeCta: "馬券を登録",
+    placeSignIn: "登録にはサインイン",
+    updatedMarks: "メモを反映しました",
   },
   mood: {
     safer: "堅め",
@@ -177,6 +181,7 @@ export const ja = {
     you: "あなた",
     communityCard: "今日のカードに友だち{n}人が参戦中",
     friendsOnRace: "このレースに友だち{n}人",
+    browseRaces: "レースを見る",
   },
   // ADR-0007 Phase 3 — 公開プロフィール + フォローグラフ。
   profile: {
@@ -201,6 +206,7 @@ export const ja = {
   auth: {
     signInTitle: "ケイバモンにサインイン",
     signInCta: "メールまたはSNSで続行",
+    signInSubtitle: "週末のレースを、自分の好みで楽しむ。",
     signInLegal: "レクリエーション用です。20歳未満の投票は法律で禁止されています。",
     ageTitle: "続行する前に",
     ageConfirm: "20歳以上です",
@@ -243,7 +249,10 @@ export const ja = {
     jockeyCareer: "騎手通算",
     jockeyCombos: "相性",
     jockeyNoId: "騎手データは順次追加予定です。",
-    noHistory: "この馬の過去成績はありません。",
+    noHistory: "この出走馬の過去成績はありません。",
+    horseNoHistory: "この馬の過去成績はありません。",
+    jockeyNoHistory: "この騎手の過去成績はありません。",
+    backToTickets: "馬券に戻る",
     loadError: "成績を読み込めませんでした — 再試行してください。",
     retry: "再試行",
     // フォーム エンドポイント未デプロイ時 (2026-06-25 時点で本番は 404)。

@@ -15,11 +15,14 @@ export function SignInScreen() {
   return (
     <main className="auth-screen">
       <div className="auth-card" aria-labelledby="auth-title">
-        <div className="auth-mark" aria-hidden="true">
-          <span className="ja">ケイバモン</span>
+        <div className="auth-mark-wrap" aria-hidden="true">
+          <img className="auth-mascot" src="/keibamon.png" width={56} height={56} alt="" />
+          <div className="auth-mark">
+            <span className="ja">ケイバモン</span>
+          </div>
         </div>
         <h1 id="auth-title">{t("auth.signInTitle")}</h1>
-        <p className="auth-cta">{t("auth.signInCta")}</p>
+        <p className="auth-cta">{t("auth.signInSubtitle")}</p>
         <button className="auth-primary" onClick={openSignIn} type="button">
           {t("auth.signInCta")}
         </button>

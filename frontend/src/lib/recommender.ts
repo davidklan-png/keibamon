@@ -29,6 +29,7 @@ import type {
   TicketLine,
   IntuitionState,
 } from "./types";
+import { applyPersonality } from "./types";
 
 const MAX_BUDGET_LINES = 120;
 
@@ -356,6 +357,36 @@ export function recommend(input: RecommendInput): Ticket[] {
   if (out.length > 0) out[0].id = out[0].id.replace(/-\d+$/, "-top");
 
   return out;
+}
+
+/**
+ * Default diverse set — one top ticket for each of safe / balanced / longshot.
+ *
+ * Surfaced on the beginner path (DEFAULT_STYLE + no intuition) so a brand-new
+ * user reaches a risk-tier spread — safer / balanced / spicier — in ≤2
+ * decisions. The moment the user picks a personality on Style OR marks any
+ * intuition, App.regenerate() switches to the single-personality recommend().
+ *
+ * Each returned ticket keeps its own `moodKey()`, so the set spans
+ * safer→spicier. Reuses recommend() unchanged — no scoring math is forked.
+ * Deduped by ticket `core` (the distinct umas) and capped at 3.
+ */
+export function recommendDiverse(input: RecommendInput): Ticket[] {
+  const personalities: PersonalityId[] = ["safe", "balanced", "longshot"];
+  const picks: Ticket[] = [];
+  const seenCores = new Set<string>();
+  for (const pid of personalities) {
+    const forced = applyPersonality(input.style, pid);
+    const out = recommend({ ...input, style: forced });
+    const top = out[0];
+    if (!top) continue;
+    const coreKey = top.core.slice().sort().join(",");
+    if (seenCores.has(coreKey)) continue;
+    seenCores.add(coreKey);
+    picks.push(top);
+    if (picks.length >= 3) break;
+  }
+  return picks;
 }
 
 function ticketCoherenceScore(t: Ticket, input: RecommendInput): number {
