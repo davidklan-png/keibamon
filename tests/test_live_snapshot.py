@@ -113,12 +113,42 @@ def test_empty_day_is_standby():
 
 def test_merge_entries_and_odds_by_umaban():
     entries = [
-        {"horse_number": 1, "horse_name": "A", "est_odds": 4.0},
+        {"horse_number": 1, "horse_name": "A", "est_odds": 4.0,
+         "jockey_id": "05201", "jockey_name": "Takeshi"},
         {"horse_number": 2, "horse_name": "B", "est_odds": None},
     ]
     merged = merge_entries_and_odds(entries, {1: 2.8})
-    assert merged[0] == {"umaban": 1, "name": "A", "win_odds": 2.8, "est_odds": 4.0}
-    assert merged[1]["win_odds"] is None  # no live price for #2 yet
+    # Milestone-4 form panel: jockey id + name ride along (option-a JOCKEY GAP).
+    assert merged[0] == {"umaban": 1, "name": "A", "win_odds": 2.8, "est_odds": 4.0,
+                         "jockey_id": "05201", "jockey_name": "Takeshi"}
+    assert merged[1] == {"umaban": 2, "name": "B", "win_odds": None, "est_odds": None,
+                         "jockey_id": None, "jockey_name": None}
+
+
+def test_build_runner_passes_jockey_through():
+    """build_runner carries jockey_id/jockey_name so the form panel can look up
+    jockey history by id. None when absent (legacy/manual runners)."""
+    r = build_runner({"umaban": 3, "name": "X", "jockey_id": "05201", "jockey_name": "Y"})
+    assert r["jockey_id"] == "05201"
+    assert r["jockey_name"] == "Y"
+    bare = build_runner({"umaban": 3, "name": "X"})
+    assert bare["jockey_id"] is None
+    assert bare["jockey_name"] is None
+
+
+def test_jockey_name_extracted_from_shutuba_row():
+    """The shutuba parser pulls the jockey NAME (anchor text) alongside the id;
+    it lives only in the in-memory entry dict (silver keeps jockey_id only)."""
+    row = (
+        '<tr class="HorseList" id="tr_1">'
+        '<td class="Umaban1 Txt_C">1</td>'
+        '<td class="Jockey"><a href="https://db.netkeiba.com/jockey/result/recent/05201/">武 豊</a></td>'
+        "</tr>"
+    )
+    runners = parse_entries_payload(row, "202605030611")
+    assert len(runners) == 1
+    assert runners[0]["jockey_id"] == "05201"
+    assert runners[0]["jockey_name"] == "武 豊"
 
 
 def test_est_odds_parser_returns_none_for_placeholder():

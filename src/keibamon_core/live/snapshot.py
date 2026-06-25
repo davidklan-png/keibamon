@@ -61,6 +61,12 @@ def build_runner(raw: dict[str, Any]) -> dict[str, Any]:
         "win_odds": live,
         "win_odds_est": est if live is None else None,
         "odds_is_live": live is not None,
+        # Milestone-4 form panel (option-a JOCKEY GAP): carry the jockey id +
+        # label so the panel can look up jockey history by id. Both None until
+        # the entries scrape populates them; additive -- the app ignores fields
+        # it doesn't read, and the social Worker selects runner fields by name.
+        "jockey_id": raw.get("jockey_id"),
+        "jockey_name": raw.get("jockey_name"),
     }
 
 
@@ -172,6 +178,10 @@ def merge_entries_and_odds(
                 "name": e.get("horse_name") or e.get("name"),
                 "win_odds": odds_by_umaban.get(uma),
                 "est_odds": e.get("est_odds"),
+                # Pass-through for the form panel (option-a JOCKEY GAP). The
+                # entries scrape carries both; absent on legacy/manual runners.
+                "jockey_id": e.get("jockey_id"),
+                "jockey_name": e.get("jockey_name"),
             }
         )
     return out

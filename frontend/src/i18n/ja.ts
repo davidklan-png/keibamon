@@ -213,4 +213,55 @@ export const ja = {
       "レクリエーション用の馬券構成ツールです。投票助言・必勝法・利益保証ではありません。20歳未満の投票は法律で禁止されています。",
     back: "ケイバモン トップへ",
   },
+  // Milestone 4: フォーム/コンテキストパネル。直感を形作るための娯楽コンテキストであり、
+  // エッジ・助言・必勝法ではありません。グイドレール: "guaranteed / sure thing / lock /
+  // beat the market" 系の表現は guardrails.test.ts で禁止。「軸」はユーザーのマーク表示。
+  form: {
+    title: "成績",
+    subtitle: "直感を形作るための参考 — 投票助言ではありません。",
+    contextNote: "成績は参考です — 投票助言ではありません。",
+    career: "通算",
+    starts: "{n}戦",
+    record: "{wins}勝・3着内{top3}回（勝率{win}%・連対帯{top3Pct}%）",
+    noStarts: "出走履歴はまだありません。",
+    recentTitle: "最近の成績",
+    splitsTitle: "内訳",
+    surface: "馬場",
+    distance: "距離",
+    going: "馬場状態",
+    wet: "重",
+    dry: "良",
+    styleTitle: "脚質",
+    styleNote: "着順と上がり3ハロンからの大まかな目安です。",
+    marketTitle: "オッズとの対比",
+    marketNote: {
+      outrun: "オッズを上回る着順が多い傾向。",
+      runsToOdds: "オッズどおりの着順が多い傾向。",
+      neutral: "オッズ前後の着順。",
+    },
+    jockeyTitle: "騎手",
+    jockeyCareer: "騎手通算",
+    jockeyCombos: "相性",
+    jockeyNoId: "騎手データは順次追加予定です。",
+    noHistory: "この馬の過去成績はありません。",
+    loadError: "成績を読み込めませんでした — 再試行してください。",
+    retry: "再試行",
+    // フォーム エンドポイント未デプロイ時 (2026-06-25 時点で本番は 404)。
+    // loadError とは別 — 再試行ボタンは出さず、補足のみ。
+    comingSoonTitle: "今週末予定",
+    comingSoonBody:
+      "成績コンテキストは近日追加予定です。馬券ループはいつもの通り使えます。",
+    close: "閉じる",
+    tapHint: "出走馬をタップして成績を見る。",
+    takeoutReminder: "控除率はいつものとおり効きます。",
+    intuitionTitle: "あなたのメモ",
+    intuition: {
+      like: "好感触",
+      distrust: "信頼できない",
+      priceHorse: "穴狙い",
+      avoid: "外す",
+      anchor: "軸",
+    },
+    intuitionHint: "メモは馬券の形を整えるためのもの — 結果を予言するものではありません。",
+  },
 };

@@ -49,6 +49,13 @@ export interface Runner {
   name?: string | null;
   /** Decimal win odds (>= 1.0). Runners with odds <= 0 are treated as scratched. */
   odds: number;
+  /**
+   * Milestone 4 form panel (jockey-gap option a): passthrough from the live
+   * snapshot so the FormPanel can fetch jockey context. Absent on manual /
+   * legacy runners. The recommender ignores these — only fairvalue + form use.
+   */
+  jockey_id?: string | null;
+  jockey_name?: string | null;
 }
 
 /** A de-vigged win-probability map plus the raw book sum (overround). */
