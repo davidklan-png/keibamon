@@ -34,6 +34,10 @@ frontend/test-results/
 # Vite build output (SPA lives at /app/ via the existing ASSETS binding)
 splash/app/
 
+# Root test harness (racing Worker parity suite)
+node_modules/
+.cache/
+
 
 # wrangler files
 .wrangler

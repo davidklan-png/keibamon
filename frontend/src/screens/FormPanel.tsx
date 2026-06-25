@@ -22,7 +22,6 @@ import { fmt } from "../lib/format";
 import {
   fetchHorseForm,
   fetchJockeyForm,
-  FormFetchError,
   type FormSplit,
   type HorseFormCard,
   type JockeyFormCard,
@@ -355,9 +354,12 @@ export function FormPanel(props: FormPanelProps) {
     setHorse(null);
     setJockey(null);
 
-    // Each attempted fetch resolves to an Outcome: ok | missing (404) | error.
-    // 404 means the endpoint isn't deployed yet → degrade to "Coming this
-    // weekend" rather than the load-error UI. Any other failure stays a retry.
+    // Each attempted fetch resolves to an Outcome:
+    //   - ok        → status:"ok" body, render the card
+    //   - missing   → status:"no_history" body, the entity genuinely has no
+    //                 recorded starts (or no jockey id to look up)
+    //   - error     → network/HTTP failure (incl 404 since the routes are now
+    //                 wired into the racing Worker); warrants a Retry
     const horseP = toOutcome(fetchHorseForm(horseName, asOf));
     const jockeyP: Promise<FormOutcome<JockeyFormCard | null>> = jockeyId
       ? toOutcome(fetchJockeyForm(jockeyId, asOf))
@@ -370,9 +372,10 @@ export function FormPanel(props: FormPanelProps) {
           setErr(t("form.loadError"));
           return;
         }
-        // Endpoints not deployed: horse 404'd AND (jockey 404'd OR no jockey
-        // id to look up). Show "Coming this weekend" — visually present, not
-        // interactive.
+        // "Coming this weekend" — the genuinely-empty case. Horse returned
+        // no_history AND (jockey returned no_history OR no jockey id to look
+        // up). Distinct from a load error: nothing to show, but the panel
+        // stays present.
         const jockeyMissingOrSkipped =
           j.kind === "missing" || (j.kind === "ok" && j.card === null);
         if (h.kind === "missing" && jockeyMissingOrSkipped) {
@@ -419,21 +422,30 @@ export function FormPanel(props: FormPanelProps) {
 // --- pure helpers -------------------------------------------------------
 
 /**
- * Outcome of a form fetch: ok with a card, missing (endpoint returned 404 —
- * not deployed yet), or error (network / 5xx — warrants a Retry).
+ * Outcome of a form fetch:
+ *   - ok      — status:"ok" body, with the rich card to render
+ *   - missing — status:"no_history" body, the entity has no recorded starts
+ *   - error   — any fetch failure (network, non-2xx incl 404 since the routes
+ *               are wired into the racing Worker now); warrants a Retry
+ *
+ * Exported so the semantic gate (FormPanel.test.tsx) can pin the three arms
+ * without spinning up jsdom: this function is the entire 404-vs-no_history
+ * dispatch and the surface area where regressions would hide.
  */
-type FormOutcome<T> =
+export type FormOutcome<T> =
   | { kind: "ok"; card: T }
   | { kind: "missing" }
   | { kind: "error" };
 
-function toOutcome<T>(p: Promise<T>): Promise<FormOutcome<T>> {
+export function toOutcome<T extends { status: "ok" | "no_history" }>(
+  p: Promise<T>,
+): Promise<FormOutcome<T>> {
   return p.then(
-    (card) => ({ kind: "ok" as const, card }),
-    (e: unknown) =>
-      e instanceof FormFetchError && e.status === 404
+    (card) =>
+      card.status === "no_history"
         ? { kind: "missing" as const }
-        : { kind: "error" as const },
+        : { kind: "ok" as const, card },
+    () => ({ kind: "error" as const }),
   );
 }
 

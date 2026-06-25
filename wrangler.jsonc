@@ -18,6 +18,11 @@
       "binding": "DB",
       "database_name": "keibamon-live",
       "database_id": "7b3cf063-a19a-4a6a-a42a-61d4879b2582"
+    },
+    {
+      "binding": "FORM",
+      "database_name": "keibamon_form",
+      "database_id": "PLACEHOLDER_STAGE_2_RUN_WRANGLER_D1_CREATE"
     }
   ],
   "compatibility_flags": [

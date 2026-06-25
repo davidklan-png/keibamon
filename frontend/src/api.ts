@@ -90,11 +90,11 @@ export function seedManualRunners(n: number) {
 // the target race and anything after it are excluded. Missing entity ->
 // { status: "no_history" } — never a 500.
 //
-// DEPLOY NOTE: the FastAPI endpoints backing this panel are dev-only as of
-// 2026-06-25 — they are NOT wired into the deployed racing Worker. FormPanel
-// detects a 404 (FormFetchError with status 404) and degrades to a localized
-// "Coming this weekend" message instead of the load-error UI, so the panel
-// ships visually without a broken-UX weekend.
+// PRODUCTION: the racing Worker (src/worker.js) serves these three routes
+// (GET /api/horses/:name/form, /api/jockeys/:id/form, /api/races/:race_id/form)
+// from the keibamon_form D1. FormPanel treats {status:"no_history"} as the
+// "genuinely empty" branch (→ "Coming this weekend" only when BOTH horse AND
+// jockey come back no_history); a 404 or 5xx is a real load error (→ Retry).
 // ---------------------------------------------------------------------------
 
 /**

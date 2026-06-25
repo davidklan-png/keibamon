@@ -1,0 +1,82 @@
+{
+  "status": "ok",
+  "jockey_id": "j01",
+  "as_of": "2026-06-28T06:30:00Z",
+  "context_note": "Jockey context, not betting advice.",
+  "career": {
+    "starts": 3,
+    "wins": 1,
+    "top3": 3,
+    "win_pct": 0.333,
+    "top3_pct": 1.0
+  },
+  "by_course": {
+    "Tokyo": {
+      "starts": 3,
+      "wins": 1,
+      "top3": 3,
+      "win_pct": 0.333,
+      "top3_pct": 1.0
+    }
+  },
+  "recent": [
+    {
+      "available_at": "2026-06-08T06:00:00Z",
+      "race_date": "2026-06-08",
+      "racecourse": "Tokyo",
+      "horse_name": "Beta",
+      "finish_position": 3,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "grade_label": null
+    },
+    {
+      "available_at": "2026-06-01T06:00:00Z",
+      "race_date": "2026-06-01",
+      "racecourse": "Tokyo",
+      "horse_name": "Alpha",
+      "finish_position": 1,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "grade_label": null
+    },
+    {
+      "available_at": "2026-05-20T06:00:00Z",
+      "race_date": "2026-05-20",
+      "racecourse": "Tokyo",
+      "horse_name": "Alpha",
+      "finish_position": 2,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "grade_label": null
+    }
+  ],
+  "combos": {
+    "by_horse": [
+      {
+        "horse_name_key": "Alpha",
+        "starts": 2,
+        "wins": 1,
+        "horse_name": "Alpha"
+      },
+      {
+        "horse_name_key": "Beta",
+        "starts": 1,
+        "wins": 0,
+        "horse_name": "Beta"
+      }
+    ],
+    "by_trainer": [
+      {
+        "trainer_id": "tA",
+        "starts": 2,
+        "wins": 1
+      },
+      {
+        "trainer_id": "tB",
+        "starts": 1,
+        "wins": 0
+      }
+    ]
+  }
+}

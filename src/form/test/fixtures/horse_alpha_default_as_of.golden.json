@@ -1,0 +1,96 @@
+{
+  "status": "ok",
+  "horse_name": "Alpha",
+  "as_of": null,
+  "context_note": "Form context, not betting advice.",
+  "career": {
+    "starts": 2,
+    "wins": 1,
+    "top3": 2,
+    "win_pct": 0.5,
+    "top3_pct": 1.0
+  },
+  "recent_finishes": [
+    {
+      "available_at": "2026-06-01T06:00:00Z",
+      "race_date": "2026-06-01",
+      "racecourse": "Tokyo",
+      "surface": "turf",
+      "distance_m": 2000,
+      "going": "good",
+      "grade_label": null,
+      "field_size": 2,
+      "finish_position": 1,
+      "margin": "1",
+      "last_3f_seconds": 33.5,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "style_signal": "presser"
+    },
+    {
+      "available_at": "2026-05-20T06:00:00Z",
+      "race_date": "2026-05-20",
+      "racecourse": "Tokyo",
+      "surface": "turf",
+      "distance_m": 1600,
+      "going": "good",
+      "grade_label": null,
+      "field_size": 1,
+      "finish_position": 2,
+      "margin": "1",
+      "last_3f_seconds": 33.5,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "style_signal": "presser"
+    }
+  ],
+  "by_surface": {
+    "turf": {
+      "starts": 2,
+      "wins": 1,
+      "top3": 2,
+      "win_pct": 0.5,
+      "top3_pct": 1.0
+    }
+  },
+  "by_distance_band": {
+    "intermediate": {
+      "starts": 1,
+      "wins": 1,
+      "top3": 1,
+      "win_pct": 1.0,
+      "top3_pct": 1.0
+    },
+    "mile": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    }
+  },
+  "by_wet": {
+    "wet": {
+      "starts": 1,
+      "wins": 1,
+      "top3": 1,
+      "win_pct": 1.0,
+      "top3_pct": 1.0
+    },
+    "dry": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    }
+  },
+  "style_profile": {
+    "presser": 2
+  },
+  "style_note": "Running style is a rough proxy from finish + closing split.",
+  "market_vs_result": {
+    "avg_beat_market": -0.5,
+    "note": null
+  }
+}

@@ -1,0 +1,73 @@
+{
+  "status": "ok",
+  "horse_name": "Beta",
+  "as_of": "2026-06-28T06:30:00Z",
+  "context_note": "Form context, not betting advice.",
+  "career": {
+    "starts": 1,
+    "wins": 0,
+    "top3": 1,
+    "win_pct": 0.0,
+    "top3_pct": 1.0
+  },
+  "recent_finishes": [
+    {
+      "available_at": "2026-06-08T06:00:00Z",
+      "race_date": "2026-06-08",
+      "racecourse": "Tokyo",
+      "surface": "turf",
+      "distance_m": 2400,
+      "going": "good",
+      "grade_label": null,
+      "field_size": 1,
+      "finish_position": 3,
+      "margin": "1",
+      "last_3f_seconds": 33.5,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "style_signal": "presser"
+    }
+  ],
+  "by_surface": {
+    "turf": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    }
+  },
+  "by_distance_band": {
+    "staying": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    }
+  },
+  "by_wet": {
+    "wet": {
+      "starts": 0,
+      "wins": 0,
+      "top3": 0,
+      "win_pct": null,
+      "top3_pct": null
+    },
+    "dry": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    }
+  },
+  "style_profile": {
+    "presser": 1
+  },
+  "style_note": "Running style is a rough proxy from finish + closing split.",
+  "market_vs_result": {
+    "avg_beat_market": -2.0,
+    "note": "tends to run to odds"
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "status": "ok",
+  "jockey_id": "j03",
+  "as_of": "2026-06-28T06:30:00Z",
+  "context_note": "Jockey context, not betting advice.",
+  "career": {
+    "starts": 1,
+    "wins": 0,
+    "top3": 1,
+    "win_pct": 0.0,
+    "top3_pct": 1.0
+  },
+  "by_course": {
+    "Tokyo": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    }
+  },
+  "recent": [
+    {
+      "available_at": "2026-06-01T06:00:00Z",
+      "race_date": "2026-06-01",
+      "racecourse": "Tokyo",
+      "horse_name": "Gamma",
+      "finish_position": 2,
+      "win_odds": 3.0,
+      "popularity": 1,
+      "grade_label": null
+    }
+  ],
+  "combos": {
+    "by_horse": [
+      {
+        "horse_name_key": "Gamma",
+        "starts": 1,
+        "wins": 0,
+        "horse_name": "Gamma"
+      }
+    ],
+    "by_trainer": [
+      {
+        "trainer_id": "tC",
+        "starts": 1,
+        "wins": 0
+      }
+    ]
+  }
+}

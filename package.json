@@ -1,0 +1,20 @@
+{
+  "name": "keibamon-root",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Root test harness for the racing Worker (form routes + parity suite).",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "tsc": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20250101.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "better-sqlite3": "^11.7.0",
+    "typescript": "^5.8.0",
+    "vitest": "^3.0.0",
+    "wrangler": "^4.0.0"
+  }
+}
