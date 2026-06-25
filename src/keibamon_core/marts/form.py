@@ -113,9 +113,12 @@ def style_signal(
     return "pace_following"
 
 
-# Source-preference rank for entry de-dup: JV-Link ('jravan') wins over the
+# Source-preference rank for de-dup: JV-Link ('jravan') wins over the
 # netkeiba scrape so a cross-validated race counts each start once.
-_SRC_RANK = "CASE e.source_name WHEN 'jravan' THEN 0 ELSE 1 END"
+# Parameterized by table alias so the same rank expression applies to BOTH
+# the results dedup (alias r) and the entries dedup (alias e).
+def _src_rank(alias: str) -> str:
+    return f"CASE {alias}.source_name WHEN 'jravan' THEN 0 ELSE 1 END"
 
 
 def _silver_path(lake: LakePaths, table: str) -> Path | None:
@@ -131,13 +134,38 @@ def _silver_path(lake: LakePaths, table: str) -> Path | None:
 # One row per completed start: results joined to (de-duplicated) entries for
 # the horse's name/jockey/trainer, and to races for context. Windows add
 # field_size and the within-race last-3F rank the style proxy uses.
+#
+# BOTH results and entries are de-duplicated on (race_id, horse_number) before
+# the join. Silver jravan_race_results carries ~1,500 duplicate
+# (race_id, horse_number) groups (re-ingestion with different content_hash;
+# cross-source jravan+netkeiba writes), and joining those raw inflated
+# career.starts / wins / top3 in the panel's headline numbers (verifier
+# finding 2026-06-25). Dedup order prefers the JV-Link ``jravan`` source, a
+# non-NULL finish_position, the latest available_at, then content_hash for
+# determinism — so a real start is never dropped even if one of its silver
+# rows has a NULL finish_position (DNF / un-resulted). The PIT filter still
+# applies at read time, never here.
 _BASE_STARTS_SQL = """
-WITH dedup_entries AS (
+WITH dedup_results AS (
+  SELECT * FROM (
+    SELECT r.*,
+           ROW_NUMBER() OVER (
+             PARTITION BY r.race_id, r.horse_number
+             ORDER BY
+               {src_rank_r},
+               CASE WHEN r.finish_position IS NULL THEN 1 ELSE 0 END,
+               r.available_at DESC NULLS LAST,
+               r.content_hash
+           ) AS _rrn
+    FROM {results} r
+  ) WHERE _rrn = 1
+),
+dedup_entries AS (
   SELECT * FROM (
     SELECT e.*,
            ROW_NUMBER() OVER (
              PARTITION BY e.race_id, e.horse_number
-             ORDER BY {src_rank}
+             ORDER BY {src_rank_e}
            ) AS _ern
     FROM {entries} e
   ) WHERE _ern = 1
@@ -172,12 +200,11 @@ SELECT
     PARTITION BY r.race_id
     ORDER BY r.last_3f_seconds NULLS LAST
   )                    AS last_3f_rank
-FROM {results} r
+FROM dedup_results r
 LEFT JOIN dedup_entries e
   ON e.race_id = r.race_id AND e.horse_number = r.horse_number
 LEFT JOIN {races} ra ON ra.race_id = r.race_id
 LEFT JOIN field f ON f.race_id = r.race_id
-WHERE r.finish_position IS NOT NULL
 """
 
 
@@ -202,7 +229,8 @@ def _build_rows(lake: LakePaths) -> list[dict[str, Any]]:
     try:
         sql = _BASE_STARTS_SQL.format(
             entries=src(entries_p), results=src(results_p), races=src(races_p),
-            src_rank=_SRC_RANK,
+            src_rank_r=_src_rank("r"),
+            src_rank_e=_src_rank("e"),
         )
         result = con.execute(sql)
         to_arrow = getattr(result, "to_arrow_table", None) or result.fetch_arrow_table

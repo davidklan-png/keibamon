@@ -238,6 +238,126 @@ def test_horse_form_groups_by_name_not_horse_id_placeholder(lake):
     assert len(by_key["Beta"]) == 1   # R2 only
 
 
+# --- duplicate-result dedup regression (verifier finding 2026-06-25) --------
+#
+# Silver jravan_race_results has ~1,500 dup (race_id, horse_number) groups
+# (re-ingestion with different content_hash; cross-source jravan+netkeiba
+# writes). Joining raw inflated career.starts / wins / top3 in the panel.
+# These tests pin the dedup invariant + the NULL-finish off-by-one fix.
+
+
+def test_mart_invariant_no_duplicate_pairs(lake):
+    """Every (horse_name_key, race_id) appears exactly once in horse_form;
+    every (jockey_id, race_id, horse_number) appears once in jockey_form.
+
+    Pins the dedup invariant so a future join change can't reintroduce the
+    double-count. Note: (jockey_id, race_id) alone is NOT unique — the
+    placeholder jockey_id='00000' (DATA_TRAPS sibling of horse_id
+    '0000000000') legitimately appears on multiple horses in the same race
+    when entries lack a real jockey, and a real jockey substitution is
+    possible. The unique-per-start key is (jockey_id, race_id, horse_number)."""
+    from collections import Counter
+
+    build_form_marts(lake)
+    horse = read_parquet(lake.mart(HORSE_FORM_MART))
+    jockey = read_parquet(lake.mart(JOCKEY_FORM_MART))
+
+    hcounts = Counter((r["horse_name_key"], r["race_id"]) for r in horse if r.get("horse_name_key"))
+    hdups = {k: v for k, v in hcounts.items() if v > 1}
+    assert not hdups, (
+        f"horse_form has {len(hdups)} duplicated (horse_name_key, race_id) "
+        f"pairs; sample: {list(hdups.items())[:3]}"
+    )
+
+    jcounts = Counter(
+        (r["jockey_id"], r["race_id"], r["horse_number"])
+        for r in jockey
+        if r.get("jockey_id")
+    )
+    jdups = {k: v for k, v in jcounts.items() if v > 1}
+    assert not jdups, (
+        f"jockey_form has {len(jdups)} duplicated (jockey_id, race_id, "
+        f"horse_number) triples; sample: {list(jdups.items())[:3]}"
+    )
+
+
+def test_dedup_results_collapses_duplicate_result_rows(tmp_path: Path):
+    """Golden dup fixture: a race whose results row was ingested twice
+    (different content_hash + available_at — the re-ingestion signature)
+    must count as ONE start, not two. Both rows agree it was a win; the
+    mart should report 1 start / 1 win / 100%."""
+    lake = LakePaths(root=tmp_path)
+    lake.ensure()
+    rid = "jra-20260601-05-01"
+    post = datetime(2026, 6, 1, 6, tzinfo=timezone.utc)
+    races = [_race_row(rid, post=post)]
+    entries = [_entry_row(rid, 1, name="Dup", jockey="j99")]
+    base = _result_row(rid, 1, pos=1, available=post, pop=1, win_odds=2.0)
+    results = [
+        base,
+        # Re-ingestion: same payload, different content_hash + later available_at.
+        {**base, "content_hash": "h-r-DUP2", "available_at": post.replace(hour=7)},
+    ]
+    write_dataset(races, lake.silver_dataset("jravan_races"))
+    write_dataset(entries, lake.silver_dataset("jravan_race_entries"))
+    write_dataset(results, lake.silver_dataset("jravan_race_results"))
+
+    counts = build_form_marts(lake)
+    assert counts[HORSE_FORM_MART] == 1, (
+        "duplicate result rows must collapse to 1 start in horse_form"
+    )
+
+    horse = read_parquet(lake.mart(HORSE_FORM_MART))
+    assert len(horse) == 1
+    only = horse[0]
+    assert only["horse_name_key"] == "Dup"
+    assert only["race_id"] == rid
+    assert only["finish_position"] == 1
+
+    card = build_horse_card(horse, horse_name="Dup", as_of=None)
+    assert card["status"] == "ok"
+    assert card["career"]["starts"] == 1
+    assert card["career"]["wins"] == 1
+    assert card["career"]["win_pct"] == 1.0
+
+
+def test_null_finish_position_still_counts_as_start(tmp_path: Path):
+    """A result row with finish_position=None represents a real start whose
+    official finish wasn't recorded (the off-by-one drop case for
+    ダノンデサイル race jra-20240414-06-11). The mart must include it so
+    career.starts matches silver truth; wins/top3 degrade to 0 for that
+    start, and style_signal returns None."""
+    lake = LakePaths(root=tmp_path)
+    lake.ensure()
+    rid = "jra-20260601-05-01"
+    post = datetime(2026, 6, 1, 6, tzinfo=timezone.utc)
+    races = [_race_row(rid, post=post)]
+    entries = [_entry_row(rid, 1, name="Unresulted", jockey="j99")]
+    results = [{**_result_row(rid, 1, pos=1, available=post), "finish_position": None}]
+    write_dataset(races, lake.silver_dataset("jravan_races"))
+    write_dataset(entries, lake.silver_dataset("jravan_race_entries"))
+    write_dataset(results, lake.silver_dataset("jravan_race_results"))
+
+    counts = build_form_marts(lake)
+    assert counts[HORSE_FORM_MART] == 1, (
+        "null-finish result must still land in horse_form as a start"
+    )
+
+    horse = read_parquet(lake.mart(HORSE_FORM_MART))
+    assert len(horse) == 1
+    assert horse[0]["finish_position"] is None
+    assert horse[0]["style_signal"] is None  # degrades cleanly
+    assert horse[0]["beat_market"] is None
+
+    card = build_horse_card(horse, horse_name="Unresulted", as_of=None)
+    assert card["status"] == "ok"
+    assert card["career"]["starts"] == 1   # counted as a start
+    assert card["career"]["wins"] == 0     # but NOT as a win
+    assert card["career"]["top3"] == 0
+    assert card["career"]["win_pct"] == 0.0   # _pct(0, 1) -> 0.0 (None only when starts=0)
+    assert card["career"]["top3_pct"] == 0.0
+
+
 # --- point-in-time read path -----------------------------------------------
 
 
