@@ -96,9 +96,12 @@ CREATE INDEX IF NOT EXISTS ix_fs_jockey ON form_starts (jockey_id, available_at)
 CREATE INDEX IF NOT EXISTS ix_fs_race   ON form_starts (race_id);
 """
 
-# Chunked INSERTs for the remote (wrangler) path only. Wrangler's d1 execute
-# chokes on multi-100MB SQL files; keep each INSERT well under D1's per-stmt cap.
-REMOTE_BATCH_SIZE = 1000
+# Chunked INSERTs for the remote (wrangler) path only. Each batch becomes ONE
+# INSERT statement with N value tuples; D1 rejects individual statements that
+# cross SQLITE_TOOBIG (~1MB). At batch=1000 with our 26 cols, some batches
+# tripped the limit. batch=100 keeps each statement well under the cap while
+# still amortizing the per-statement overhead (4,604 statements total).
+REMOTE_BATCH_SIZE = 100
 
 
 def parse_args() -> argparse.Namespace:
