@@ -103,6 +103,7 @@ function render(
     intuition?: IntuitionState;
     loading?: boolean;
     err?: string;
+    comingSoon?: boolean;
   } = {},
 ): string {
   const noop = () => {};
@@ -115,6 +116,7 @@ function render(
       jockeyName={has("jockeyName") ? overrides.jockeyName! : "J. Rider"}
       loading={overrides.loading ?? false}
       err={overrides.err ?? ""}
+      comingSoon={overrides.comingSoon ?? false}
       horse={horse}
       jockey={jockey}
       intuition={overrides.intuition ?? null}
@@ -172,6 +174,22 @@ describe("FormPanel view", () => {
     expect(html).toContain("load form");
     expect(html).toContain("try again");
     expect(html).toMatch(/retry/i);
+  });
+
+  it("degrades to a 'Coming this weekend' message when endpoints 404", () => {
+    // Production as of 2026-06-25: the FastAPI form endpoints are dev-only and
+    // not wired into the deployed Worker. FormPanel detects the 404 and shows
+    // this block instead of the load-error UI — visually present, not
+    // interactive, no Retry button.
+    const html = render(null, null, { comingSoon: true });
+    expect(html).toMatch(/coming this weekend/i);
+    // No error/retry affordance in the degraded state.
+    expect(html).not.toMatch(/try again/i);
+    expect(html).not.toMatch(/retry/i);
+    // No career line / horse data rendered.
+    expect(html).not.toContain("starts");
+    // The guardrail context note is still visible.
+    expect(html).toMatch(/not betting advice/i);
   });
 
   it("contains no banned honesty words in the rendered output", () => {

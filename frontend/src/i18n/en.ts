@@ -252,6 +252,11 @@ export const en = {
     noHistory: "No past form on record for this runner.",
     loadError: "Couldn't load form — try again.",
     retry: "Retry",
+    // When the form endpoints aren't deployed yet (404 in production as of
+    // 2026-06-25). Distinct from loadError — no Retry, just context.
+    comingSoonTitle: "Coming this weekend",
+    comingSoonBody:
+      "Form context lands soon — the betting loop works as usual.",
     close: "Close",
     tapHint: "Tap a runner for form context.",
     takeoutReminder: "Pool takeout applies as always.",

@@ -22,6 +22,7 @@ import { fmt } from "../lib/format";
 import {
   fetchHorseForm,
   fetchJockeyForm,
+  FormFetchError,
   type FormSplit,
   type HorseFormCard,
   type JockeyFormCard,
@@ -46,6 +47,13 @@ export interface FormPanelViewProps {
   jockeyName?: string | null;
   loading: boolean;
   err: string;
+  /**
+   * True when the form endpoints are not deployed (all attempted fetches
+   * returned 404). The panel degrades to a localized "Coming this weekend"
+   * block — visually present but not interactive. Distinct from `err` (a real
+   * network/5xx failure that warrants a Retry).
+   */
+  comingSoon: boolean;
   horse: HorseFormCard | null;
   jockey: JockeyFormCard | null;
   intuition: IntuitionState;
@@ -62,6 +70,7 @@ export function FormPanelView(props: FormPanelViewProps) {
     jockeyName,
     loading,
     err,
+    comingSoon,
     horse,
     jockey,
     intuition,
@@ -102,7 +111,14 @@ export function FormPanelView(props: FormPanelViewProps) {
         </div>
       )}
 
-      {!loading && !err && (
+      {!loading && !err && comingSoon && (
+        <div className="form-block form-coming-soon">
+          <h3>{t("form.comingSoonTitle")}</h3>
+          <p className="hint">{t("form.comingSoonBody")}</p>
+        </div>
+      )}
+
+      {!loading && !err && !comingSoon && (
         <>
           <HorseContext horse={horse} />
           <JockeyContext
@@ -328,24 +344,43 @@ export function FormPanel(props: FormPanelProps) {
   const [horse, setHorse] = useState<HorseFormCard | null>(null);
   const [jockey, setJockey] = useState<JockeyFormCard | null>(null);
   const [err, setErr] = useState<string>("");
+  const [comingSoon, setComingSoon] = useState(false);
   const [loading, setLoading] = useState(true);
 
   function load() {
     let cancelled = false;
     setLoading(true);
     setErr("");
+    setComingSoon(false);
     setHorse(null);
     setJockey(null);
-    const horseP = fetchHorseForm(horseName, asOf).catch(() => null);
-    const jockeyP = jockeyId
-      ? fetchJockeyForm(jockeyId, asOf).catch(() => null)
-      : Promise.resolve<JockeyFormCard | null>(null);
+
+    // Each attempted fetch resolves to an Outcome: ok | missing (404) | error.
+    // 404 means the endpoint isn't deployed yet → degrade to "Coming this
+    // weekend" rather than the load-error UI. Any other failure stays a retry.
+    const horseP = toOutcome(fetchHorseForm(horseName, asOf));
+    const jockeyP: Promise<FormOutcome<JockeyFormCard | null>> = jockeyId
+      ? toOutcome(fetchJockeyForm(jockeyId, asOf))
+      : Promise.resolve({ kind: "ok", card: null });
+
     Promise.all([horseP, jockeyP])
       .then(([h, j]) => {
         if (cancelled) return;
-        if (!h && !j) setErr(t("form.loadError"));
-        setHorse(h);
-        setJockey(j);
+        if (h.kind === "error" || j.kind === "error") {
+          setErr(t("form.loadError"));
+          return;
+        }
+        // Endpoints not deployed: horse 404'd AND (jockey 404'd OR no jockey
+        // id to look up). Show "Coming this weekend" — visually present, not
+        // interactive.
+        const jockeyMissingOrSkipped =
+          j.kind === "missing" || (j.kind === "ok" && j.card === null);
+        if (h.kind === "missing" && jockeyMissingOrSkipped) {
+          setComingSoon(true);
+          return;
+        }
+        setHorse(h.kind === "ok" ? h.card : null);
+        setJockey(j.kind === "ok" ? j.card : null);
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -370,6 +405,7 @@ export function FormPanel(props: FormPanelProps) {
       jockeyName={jockeyName ?? null}
       loading={loading}
       err={err}
+      comingSoon={comingSoon}
       horse={horse}
       jockey={jockey}
       intuition={intuition}
@@ -381,6 +417,25 @@ export function FormPanel(props: FormPanelProps) {
 }
 
 // --- pure helpers -------------------------------------------------------
+
+/**
+ * Outcome of a form fetch: ok with a card, missing (endpoint returned 404 —
+ * not deployed yet), or error (network / 5xx — warrants a Retry).
+ */
+type FormOutcome<T> =
+  | { kind: "ok"; card: T }
+  | { kind: "missing" }
+  | { kind: "error" };
+
+function toOutcome<T>(p: Promise<T>): Promise<FormOutcome<T>> {
+  return p.then(
+    (card) => ({ kind: "ok" as const, card }),
+    (e: unknown) =>
+      e instanceof FormFetchError && e.status === 404
+        ? { kind: "missing" as const }
+        : { kind: "error" as const },
+  );
+}
 
 function fmtPct(p: number | null | undefined): string {
   if (p == null || !isFinite(p)) return "-";

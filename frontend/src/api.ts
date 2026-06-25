@@ -89,7 +89,25 @@ export function seedManualRunners(n: number) {
 // pre-built PIT-correct marts; the read path filters `available_at < as_of` so
 // the target race and anything after it are excluded. Missing entity ->
 // { status: "no_history" } — never a 500.
+//
+// DEPLOY NOTE: the FastAPI endpoints backing this panel are dev-only as of
+// 2026-06-25 — they are NOT wired into the deployed racing Worker. FormPanel
+// detects a 404 (FormFetchError with status 404) and degrades to a localized
+// "Coming this weekend" message instead of the load-error UI, so the panel
+// ships visually without a broken-UX weekend.
 // ---------------------------------------------------------------------------
+
+/**
+ * Error thrown by the form fetchers on non-2xx. Carries the HTTP status so the
+ * caller can distinguish "endpoint not deployed" (404) from a real failure
+ * (network / 5xx) and degrade gracefully.
+ */
+export class FormFetchError extends Error {
+  constructor(public status: number, message: string) {
+    super(message);
+    this.name = "FormFetchError";
+  }
+}
 
 export interface FormSplit {
   starts: number;
@@ -175,7 +193,7 @@ export async function fetchHorseForm(
     `/api/horses/${encodeURIComponent(horseName)}/form${q}`,
     { cache: "no-store" },
   );
-  if (!res.ok) throw new Error(`horse form HTTP ${res.status}`);
+  if (!res.ok) throw new FormFetchError(res.status, `horse form HTTP ${res.status}`);
   return (await res.json()) as HorseFormCard;
 }
 
@@ -189,6 +207,6 @@ export async function fetchJockeyForm(
     `/api/jockeys/${encodeURIComponent(jockeyId)}/form${q}`,
     { cache: "no-store" },
   );
-  if (!res.ok) throw new Error(`jockey form HTTP ${res.status}`);
+  if (!res.ok) throw new FormFetchError(res.status, `jockey form HTTP ${res.status}`);
   return (await res.json()) as JockeyFormCard;
 }
