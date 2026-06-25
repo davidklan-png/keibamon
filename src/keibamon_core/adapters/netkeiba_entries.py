@@ -270,8 +270,22 @@ def _stamp_partition_keys(records: list[dict[str, Any]], race_id: str) -> None:
 def _extract_umaban(row: str) -> int | None:
     """``<td class="UmabanN Txt_C">N</td>`` -- the second cell. The class name
     encodes the umaban (defensive: parse the cell TEXT not the class, since
-    we key everything else off the text too)."""
+    we key everything else off the text too).
+
+    Layout drift 2026-06-25 (Thursday roster capture): the Thursday-before-race
+    shutuba page renders an EMPTY Umaban cell server-side -- the cell text and
+    the digit suffix on the class are filled client-side by JS. The umaban is
+    stable by then (declarations closed); we recover it from the row's
+    bookmark/select control (``<select ... id="mark_N" name="N">``), which IS
+    server-rendered and carries the same number. The race-week fixture still
+    has the populated cell, so the original regex runs first and the fallback
+    is only hit on the pre-entries layout. """
     m = re.search(r'class="Umaban[0-9]+ Txt_C">\s*([0-9]{1,2})\s*<', row)
+    if not m:
+        # Pre-entries fallback: empty Umaban cell, recover from the row's
+        # select id (mark_N). Same number netkeiba's JS would write into the
+        # cell on the client; no fabrication.
+        m = re.search(r'id="mark_(\d{1,2})"', row)
     if not m:
         return None
     try:
@@ -319,15 +333,31 @@ def _extract_jockey_id(row: str) -> str | None:
 
 
 def _extract_jockey_name(row: str) -> str | None:
-    """Jockey display name -- the anchor text of the jockey link:
-    ``<a href=".../jockey/result/recent/CODE/"> NAME </a>``.
+    """Jockey display name -- the ``title=`` attribute of the jockey link.
+
+    Real netkeiba layout (verified on both the 2026-06-21 fixture AND the
+    2026-06-25 live page): ``<a href=".../jockey/result/recent/CODE/"
+    target="_blank" title="NAME"> NAME </a>``. The earlier regex required the
+    href to terminate at ``">`` and missed every real anchor (which carries
+    ``target="_blank" title="..."`` between the href and the ``>``) -- the
+    jockey name was always ``None`` from this parser, regardless of the
+    window gate. Reading the ``title=`` attribute is robust to attribute
+    reordering and is the same approach ``_extract_horse_name`` already uses.
 
     Silver has ``jockey_id`` but no jockey NAME; this carries the name solely
     through the live snapshot so the form panel can label a runner's jockey and
     look up its history by id. Returns None when the cell has no link.
     """
     m = re.search(
-        r'db\.netkeiba\.com/jockey/result/recent/[0-9]{5}/">\s*([^<]+?)\s*</a>',
+        r'db\.netkeiba\.com/jockey/result/recent/[0-9]{5}/"[^>]*\btitle="([^"]+)"',
+        row,
+    )
+    if m:
+        return m.group(1).strip()
+    # Defensive fallback: anchor text after the href (covers a future layout
+    # that drops the title attribute).
+    m = re.search(
+        r'db\.netkeiba\.com/jockey/result/recent/[0-9]{5}/"[^>]*>\s*([^<]+?)\s*</a>',
         row,
     )
     return m.group(1).strip() if m and m.group(1).strip() else None

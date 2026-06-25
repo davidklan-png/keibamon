@@ -57,10 +57,11 @@ export function RaceScreen(props: RaceScreenProps) {
   const openRunner = openUma ? runners.find((r) => r.uma === openUma) ?? null : null;
 
   // Race-first UX: list EVERY race in the snapshot, including registered races
-  // that haven't finalized entries (0 runners until shutuba on Thu). The
-  // 0-runner ones render grayed + an "Entries Thu" chip and are non-tappable
-  // (visible but not yet playable) rather than collapsing the card to "no
-  // live card available".
+  // that haven't finalized entries. A 0-runner registered race is OPENABLE
+  // (tapping it sets it as the selected race and surfaces a "roster pending"
+  // state in the runners section) but stays visually gray + "not yet
+  // playable" — the build-tickets CTAs stay disabled at <2 runners. This
+  // replaces the earlier "dead tile" behavior (disabled + non-tappable).
   const cardRaces = snap?.races || [];
   const hasRunners = (r: LiveRace) => (r.runners || []).length > 0;
   const fallbackDate = snap?.meta?.date ?? "";
@@ -190,8 +191,7 @@ export function RaceScreen(props: RaceScreenProps) {
                     <button
                       key={keyFor(r)}
                       className={`race-card ${selected ? "on" : ""} ${pending ? "is-pending" : ""}`}
-                      disabled={pending}
-                      onClick={() => !pending && onApplyRace(r, fallbackDate)}
+                      onClick={() => onApplyRace(r, fallbackDate)}
                     >
                       <span className="race-card-top">
                         <span>R{r.race_no}</span>
@@ -220,8 +220,7 @@ export function RaceScreen(props: RaceScreenProps) {
                             <button
                               key={keyFor(r)}
                               className={`race-row ${keyFor(r) === activeRaceKey ? "on" : ""} ${pending ? "is-pending" : ""}`}
-                              disabled={pending}
-                              onClick={() => !pending && onApplyRace(r, fallbackDate)}
+                              onClick={() => onApplyRace(r, fallbackDate)}
                             >
                               <span className="race-row-no">R{r.race_no}</span>
                               <span className="race-row-name">{raceTitle(r)}</span>
@@ -276,7 +275,13 @@ export function RaceScreen(props: RaceScreenProps) {
           </small>
         </div>
         {runners.length === 0 ? (
-          <p className="empty">{t("tickets.noRunners")}</p>
+          // 0-runner state: a registered race with entries not yet declared
+          // shows the "roster pending" copy; manual entry mode shows the
+          // "add runners" hint. Both are non-fatal — the user lands on a
+          // meaningful next step instead of an unexplained blank panel.
+          <p className="empty">
+            {pending ? t("race.rosterPending") : t("tickets.noRunners")}
+          </p>
         ) : (
           <>
             {openRunner && (
