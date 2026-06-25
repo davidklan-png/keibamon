@@ -1,0 +1,202 @@
+{
+  "status": "ok",
+  "horse_name": "ダノンデサイル",
+  "as_of": null,
+  "context_note": "Form context, not betting advice.",
+  "career": {
+    "starts": 15,
+    "wins": 5,
+    "top3": 10,
+    "win_pct": 0.333,
+    "top3_pct": 0.667
+  },
+  "recent_finishes": [
+    {
+      "available_at": "2026-06-14T00:00:00Z",
+      "race_date": "2026-06-14",
+      "racecourse": "Hanshin",
+      "surface": "turf",
+      "distance_m": 2200,
+      "going": "soft",
+      "grade_label": "G1",
+      "field_size": 18,
+      "finish_position": 3,
+      "margin": "212",
+      "last_3f_seconds": 35.0,
+      "win_odds": 7.0,
+      "popularity": 3,
+      "style_signal": "presser"
+    },
+    {
+      "available_at": "2026-04-05T00:00:00Z",
+      "race_date": "2026-04-05",
+      "racecourse": "Hanshin",
+      "surface": "turf",
+      "distance_m": 2000,
+      "going": "firm",
+      "grade_label": "G1",
+      "field_size": 15,
+      "finish_position": 3,
+      "margin": "1",
+      "last_3f_seconds": 34.9,
+      "win_odds": 3.9,
+      "popularity": 2,
+      "style_signal": "presser"
+    },
+    {
+      "available_at": "2025-12-28T00:00:00Z",
+      "race_date": "2025-12-28",
+      "racecourse": "Nakayama",
+      "surface": "turf",
+      "distance_m": 2500,
+      "going": "firm",
+      "grade_label": "G1",
+      "field_size": 16,
+      "finish_position": 3,
+      "margin": "K",
+      "last_3f_seconds": 35.0,
+      "win_odds": 3.8,
+      "popularity": 2,
+      "style_signal": "pace_following"
+    },
+    {
+      "available_at": "2025-11-30T00:00:00Z",
+      "race_date": "2025-11-30",
+      "racecourse": "Tokyo",
+      "surface": "turf",
+      "distance_m": 2400,
+      "going": "firm",
+      "grade_label": "G1",
+      "field_size": 18,
+      "finish_position": 3,
+      "margin": "212",
+      "last_3f_seconds": 33.8,
+      "win_odds": 5.0,
+      "popularity": 3,
+      "style_signal": "pace_following"
+    },
+    {
+      "available_at": "2025-08-20T00:00:00Z",
+      "race_date": "2025-08-20",
+      "racecourse": "A6",
+      "surface": "turf",
+      "distance_m": 2050,
+      "going": "firm",
+      "grade_label": "G1",
+      "field_size": 6,
+      "finish_position": 5,
+      "margin": "5",
+      "last_3f_seconds": null,
+      "win_odds": null,
+      "popularity": 0,
+      "style_signal": "deep_closer"
+    },
+    {
+      "available_at": "2025-04-05T00:00:00Z",
+      "race_date": "2025-04-05",
+      "racecourse": "C7",
+      "surface": "turf",
+      "distance_m": 2410,
+      "going": "firm",
+      "grade_label": "G1",
+      "field_size": 9,
+      "finish_position": 1,
+      "margin": null,
+      "last_3f_seconds": null,
+      "win_odds": null,
+      "popularity": 0,
+      "style_signal": "presser"
+    },
+    {
+      "available_at": "2025-01-26T00:00:00Z",
+      "race_date": "2025-01-26",
+      "racecourse": "Nakayama",
+      "surface": "turf",
+      "distance_m": 2200,
+      "going": "firm",
+      "grade_label": "G2",
+      "field_size": 18,
+      "finish_position": 1,
+      "margin": null,
+      "last_3f_seconds": 36.0,
+      "win_odds": 2.6,
+      "popularity": 1,
+      "style_signal": "presser"
+    },
+    {
+      "available_at": "2024-12-22T00:00:00Z",
+      "race_date": "2024-12-22",
+      "racecourse": "Nakayama",
+      "surface": "turf",
+      "distance_m": 2500,
+      "going": "firm",
+      "grade_label": "G1",
+      "field_size": 16,
+      "finish_position": 3,
+      "margin": "112",
+      "last_3f_seconds": 35.4,
+      "win_odds": 4.0,
+      "popularity": 2,
+      "style_signal": "pace_following"
+    }
+  ],
+  "by_surface": {
+    "turf": {
+      "starts": 15,
+      "wins": 5,
+      "top3": 10,
+      "win_pct": 0.333,
+      "top3_pct": 0.667
+    }
+  },
+  "by_distance_band": {
+    "staying": {
+      "starts": 8,
+      "wins": 3,
+      "top3": 7,
+      "win_pct": 0.375,
+      "top3_pct": 0.875
+    },
+    "intermediate": {
+      "starts": 6,
+      "wins": 2,
+      "top3": 3,
+      "win_pct": 0.333,
+      "top3_pct": 0.5
+    },
+    "mile": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 0,
+      "win_pct": 0.0,
+      "top3_pct": 0.0
+    }
+  },
+  "by_wet": {
+    "wet": {
+      "starts": 1,
+      "wins": 0,
+      "top3": 1,
+      "win_pct": 0.0,
+      "top3_pct": 1.0
+    },
+    "dry": {
+      "starts": 14,
+      "wins": 5,
+      "top3": 9,
+      "win_pct": 0.357,
+      "top3_pct": 0.643
+    }
+  },
+  "style_profile": {
+    "presser": 4,
+    "pace_following": 3,
+    "deep_closer": 2,
+    "speed": 1
+  },
+  "style_note": "Running style is a rough proxy from finish + closing split.",
+  "market_vs_result": {
+    "avg_beat_market": 0.57,
+    "note": "tends to outrun odds"
+  }
+}

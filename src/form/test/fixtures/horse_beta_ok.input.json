@@ -1,0 +1,30 @@
+[
+  {
+    "horse_name_key": "Beta",
+    "horse_name": "Beta",
+    "jockey_id": "j01",
+    "trainer_id": "tB",
+    "race_id": "jra-20260608-05-01",
+    "horse_number": 3,
+    "available_at": "2026-06-08T06:00:00Z",
+    "race_date": "2026-06-08",
+    "racecourse": "Tokyo",
+    "surface": "turf",
+    "distance_m": 2400,
+    "distance_band": "staying",
+    "going": "good",
+    "going_wetness": 1,
+    "is_wet": 0,
+    "grade_label": null,
+    "field_size": 1,
+    "finish_position": 3,
+    "finish_time_seconds": 95.0,
+    "margin": "1",
+    "last_3f_seconds": 33.5,
+    "last_3f_rank": 1,
+    "win_odds": 3.0,
+    "popularity": 1,
+    "beat_market": -2,
+    "style_signal": "presser"
+  }
+]

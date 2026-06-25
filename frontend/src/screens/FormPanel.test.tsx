@@ -17,7 +17,7 @@ import { describe, it, expect, beforeEach } from "vitest";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { setLang } from "../i18n";
-import { FormPanelView } from "./FormPanel";
+import { FormPanelView, toOutcome } from "./FormPanel";
 import type {
   HorseFormCard,
   JockeyFormCard,
@@ -176,11 +176,12 @@ describe("FormPanel view", () => {
     expect(html).toMatch(/retry/i);
   });
 
-  it("degrades to a 'Coming this weekend' message when endpoints 404", () => {
-    // Production as of 2026-06-25: the FastAPI form endpoints are dev-only and
-    // not wired into the deployed Worker. FormPanel detects the 404 and shows
-    // this block instead of the load-error UI — visually present, not
-    // interactive, no Retry button.
+  it("renders 'Coming this weekend' when BOTH horse+jockey come back no_history", () => {
+    // Production as of 2026-06-25: the form endpoints ARE wired into the
+    // deployed Worker. FormPanel treats {status:"no_history"} 200 OK bodies as
+    // the "genuinely empty" branch — only when BOTH horse AND jockey (or no
+    // jockey_id) come back no_history does this block render. A 404 or 5xx is
+    // a real load error now (see toOutcome tests below), not this stub.
     const html = render(null, null, { comingSoon: true });
     expect(html).toMatch(/coming this weekend/i);
     // No error/retry affordance in the degraded state.
@@ -195,5 +196,52 @@ describe("FormPanel view", () => {
   it("contains no banned honesty words in the rendered output", () => {
     const html = render(HORSE_CARD_OK, JOCKEY_CARD_OK, { intuition: "anchor" });
     for (const re of BANNED) expect(html).not.toMatch(re);
+  });
+});
+
+// ============================================================================
+// toOutcome semantic gate (Step 5).
+//
+// load() dispatches to one of three UI branches:
+//   - ok       → render the card
+//   - missing  → "Coming this weekend" stub (only when BOTH horse AND jockey
+//                land here, or jockey has no id)
+//   - error    → "Couldn't load form — try again." + Retry button
+//
+// The dispatch lives entirely in `toOutcome`. Pinning it directly is the
+// narrowest regression gate for "404 is now a real error, not the stub" — the
+// behavior change introduced when the form routes were wired into the Worker.
+// ============================================================================
+
+describe("toOutcome — the 404-vs-no_history dispatch", () => {
+  it("an ok card resolves to {kind:'ok', card}", async () => {
+    const card = { status: "ok" as const, x: 7 };
+    const out = await toOutcome(Promise.resolve(card));
+    expect(out).toEqual({ kind: "ok", card });
+  });
+
+  it("a no_history body resolves to {kind:'missing'} — the Coming Soon arm", async () => {
+    const card = { status: "no_history" as const };
+    const out = await toOutcome(Promise.resolve(card));
+    expect(out).toEqual({ kind: "missing" });
+  });
+
+  it("a fetch rejection (HTTP 404 / 5xx / network) resolves to {kind:'error'} — Retry arm", async () => {
+    // fetchHorseForm / fetchJockeyForm throw FormFetchError on any non-2xx,
+    // including 404 (the route IS wired into the Worker now — a 404 means a
+    // real routing/publish failure, not the "endpoint not deployed" case the
+    // old Coming Soon stub used to cover).
+    const out = await toOutcome(Promise.reject(new Error("HTTP 404")));
+    expect(out).toEqual({ kind: "error" });
+  });
+
+  it("the error arm swallows the rejection value (no leakage to the UI)", async () => {
+    // Whatever the fetcher threw — status code, network message — must NOT
+    // surface in the resolved FormOutcome. load() renders a generic localized
+    // error string; the rejection's payload never crosses the boundary.
+    const out = await toOutcome(
+      Promise.reject({ status: 500, body: "internal panic" }),
+    );
+    expect(out).toEqual({ kind: "error" });
   });
 });
