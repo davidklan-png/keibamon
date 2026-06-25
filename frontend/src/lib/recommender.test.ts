@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
-import { recommend } from "./recommender";
+import { recommend, recommendDiverse } from "./recommender";
 import { winProbs, type Runner } from "./fairvalue";
+import { moodKey, DEFAULT_STYLE } from "./types";
 import type { RecommendInput, IntuitionState, StyleState } from "./types";
 
 const RUNNERS: Runner[] = [
@@ -100,5 +101,39 @@ describe("recommender", () => {
       intuition: {},
     });
     expect(out.length).toBe(0);
+  });
+});
+
+// ============================================================================
+// recommendDiverse — default risk-tier spread (safer / balanced / spicier).
+// ============================================================================
+
+describe("recommendDiverse", () => {
+  it("returns ≤3 tickets spanning ≥2 distinct moods on a full field", () => {
+    const out = recommendDiverse(mkInput({ ...DEFAULT_STYLE }));
+    expect(out.length).toBeGreaterThanOrEqual(1);
+    expect(out.length).toBeLessThanOrEqual(3);
+    // On an 8-horse field the safe/balanced/longshot top picks land at
+    // different variance/tag combinations → ≥2 distinct mood keys.
+    const moods = new Set(out.map(moodKey));
+    expect(moods.size).toBeGreaterThanOrEqual(2);
+  });
+
+  it("does not duplicate the same contender core across the set", () => {
+    const out = recommendDiverse(mkInput({ ...DEFAULT_STYLE }));
+    const cores = out.map((t) => t.core.slice().sort().join(","));
+    expect(new Set(cores).size).toBe(cores.length);
+  });
+
+  it("respects intuition (single-personality input still filters)", () => {
+    // When intuition is present the caller is expected to use recommend()
+    // directly; recommendDiverse must still honor hard constraints (avoid)
+    // if it is invoked — the avoid horse must not appear in any pick.
+    const out = recommendDiverse(
+      mkInput({ ...DEFAULT_STYLE }, { "5": "avoid" }),
+    );
+    for (const t of out) {
+      expect(t.core).not.toContain("5");
+    }
   });
 });

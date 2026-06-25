@@ -75,6 +75,27 @@ describe("app HTML snapshots", () => {
       const html = renderToStaticMarkup(withProvider(<SignInScreen />));
       await expect(html).toMatchFileSnapshot("__snapshots__/SignInScreen.en.html");
     });
+
+    // Race-first UX polish — pin the three intentional changes so a regression
+    // (mascot dropped, subtitle re-merged with the button, a banned word) fails
+    // here regardless of the snapshot file.
+    it("renders the mascot image and a subtitle distinct from the button", () => {
+      setLang("en");
+      const html = renderToStaticMarkup(withProvider(<SignInScreen />));
+      // Mascot image carries the brand.
+      expect(html).toContain('src="/keibamon.png"');
+      // Subtitle is a value line, NOT the CTA button label.
+      expect(html).toContain("Recreational ticket ideas");
+      // The button still carries the CTA copy.
+      expect(html).toContain("Continue with email or social");
+    });
+
+    it("contains no banned honesty words", () => {
+      setLang("en");
+      const html = renderToStaticMarkup(withProvider(<SignInScreen />));
+      const banned = [/\bguaranteed\b/i, /\bsure thing\b/i, /\block\b/i, /\bbeat the market\b/i];
+      for (const re of banned) expect(html).not.toMatch(re);
+    });
   });
 
   describe("AgeGate", () => {

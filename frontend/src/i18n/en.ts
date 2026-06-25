@@ -40,6 +40,7 @@ export const en = {
     statusOpen: "odds open",
     statusRegistered: "registered",
     statusResult: "result",
+    entriesPending: "Entries Thu",
   },
   style: {
     title: "Choose your style",
@@ -84,6 +85,9 @@ export const en = {
     estReturnLine: "Expected return per ¥100: ¥{ret} ({edge} house edge).",
     houseEdgeNote: "Pool takeout doesn't go away.",
     whyTicket: "Why this ticket",
+    placeCta: "Place ticket",
+    placeSignIn: "Sign in to place",
+    updatedMarks: "Updated with your marks",
   },
   mood: {
     safer: "Safer",
@@ -179,6 +183,7 @@ export const en = {
     you: "You",
     communityCard: "{n} friends are on today’s card",
     friendsOnRace: "{n} friends on this race",
+    browseRaces: "Browse races",
   },
   // ADR-0007 Phase 3 — public profiles + follow graph.
   profile: {
@@ -203,6 +208,8 @@ export const en = {
   auth: {
     signInTitle: "Sign in to Keibamon",
     signInCta: "Continue with email or social",
+    signInSubtitle:
+      "Recreational ticket ideas for the weekend's card.",
     signInLegal:
       "Recreational use only. Under-20 betting is prohibited by law.",
     ageTitle: "Before you continue",
@@ -250,6 +257,9 @@ export const en = {
     jockeyCombos: "Top combos",
     jockeyNoId: "Jockey context coming soon.",
     noHistory: "No past form on record for this runner.",
+    horseNoHistory: "No past form on record for this horse.",
+    jockeyNoHistory: "No past form on record for this jockey.",
+    backToTickets: "Back to tickets",
     loadError: "Couldn't load form — try again.",
     retry: "Retry",
     // When the form endpoints aren't deployed yet (404 in production as of

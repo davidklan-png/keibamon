@@ -221,6 +221,24 @@ a {
   letter-spacing: 0.1em;
 }
 
+/* "My Tickets" / "Browse races" tab — non-dominant pill next to the lang
+   toggle, same shape so the header stays compact on phone-width. */
+.mine-tab {
+  text-transform: none;
+  letter-spacing: 0.02em;
+}
+
+/* Transient status line above the ticket list (marks-applied / place result). */
+.marks-toast {
+  margin: 4px 0 0;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background: var(--soft);
+  color: var(--turf-deep);
+  font-weight: 700;
+  text-align: center;
+}
+
 /* ---------- Step tabs ---------- */
 .stepper {
   display: flex;
@@ -389,6 +407,27 @@ a {
 .race-meta {
   color: var(--muted);
   font-size: 12px;
+}
+
+/* Registered race whose entries haven't finalized (0 runners until shutuba
+   on Thu). Inline chip so it reads cleanly inside RaceMeta next to venue/R#. */
+.entries-pending-chip {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+/* 0-runner registered race cards: grayed + non-interactive (visible but not
+   yet playable). Reuses the existing is-pending treatment. */
+.race-card.is-pending,
+.race-row.is-pending {
+  opacity: 0.55;
+  cursor: not-allowed;
 }
 
 .all-races {
@@ -1962,12 +2001,33 @@ select:focus {
   border: 1px solid var(--line);
   color: var(--turf-deep);
   font-weight: 800;
-  font-size: 13px;
+  font-size: 11px;
   letter-spacing: 0;
+  white-space: nowrap;
+  overflow: hidden;
 }
 
 .auth-mark .ja {
   color: var(--gold-deep);
+}
+
+/* Race-first UX: mascot carries the brand; the text badge is a small caption
+   beneath it so ケイバモン no longer wraps mid-word in the 64px badge. */
+.auth-mark-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  margin: 0 auto 14px;
+}
+
+.auth-mascot {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  object-fit: cover;
+  border: 1px solid var(--line);
+  background: var(--paper);
 }
 
 .auth-card h1 {

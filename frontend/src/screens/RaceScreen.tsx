@@ -56,10 +56,13 @@ export function RaceScreen(props: RaceScreenProps) {
   const [openUma, setOpenUma] = useState<string | null>(null);
   const openRunner = openUma ? runners.find((r) => r.uma === openUma) ?? null : null;
 
-  // ADR-0006: list every registered race, not just ones with live odds.
-  const cardRaces = (snap?.races || []).filter(
-    (r) => (r.runners || []).length > 0,
-  );
+  // Race-first UX: list EVERY race in the snapshot, including registered races
+  // that haven't finalized entries (0 runners until shutuba on Thu). The
+  // 0-runner ones render grayed + an "Entries Thu" chip and are non-tappable
+  // (visible but not yet playable) rather than collapsing the card to "no
+  // live card available".
+  const cardRaces = snap?.races || [];
+  const hasRunners = (r: LiveRace) => (r.runners || []).length > 0;
   const fallbackDate = snap?.meta?.date ?? "";
   const dateFor = (race: LiveRace) => race.date ?? fallbackDate;
   const keyFor = (race: LiveRace) =>
@@ -128,10 +131,15 @@ export function RaceScreen(props: RaceScreenProps) {
   }
 
   function RaceMeta({ race }: { race: LiveRace }) {
+    const runnerCount = race.runners?.length || 0;
     return (
       <span className="race-meta">
         {race.venue || "-"} · R{race.race_no} ·{" "}
-        {tFmt("race.runnersCount", { count: race.runners?.length || 0 })}
+        {runnerCount === 0 ? (
+          <span className="entries-pending-chip">{t("race.entriesPending")}</span>
+        ) : (
+          tFmt("race.runnersCount", { count: runnerCount })
+        )}
       </span>
     );
   }
@@ -157,7 +165,10 @@ export function RaceScreen(props: RaceScreenProps) {
                       key={date || "race-day"}
                       className={`date-chip ${activeDate === date ? "on" : ""}`}
                       onClick={() => {
-                        if (firstForDate) onApplyRace(firstForDate, fallbackDate);
+                        // Only auto-apply a playable (has-runners) race; a
+                        // 0-runner registered race is list-only.
+                        if (firstForDate && hasRunners(firstForDate))
+                          onApplyRace(firstForDate, fallbackDate);
                       }}
                       role="option"
                       aria-selected={activeDate === date}
@@ -174,11 +185,13 @@ export function RaceScreen(props: RaceScreenProps) {
               <div className="popular-races">
                 {popularRaces.map((r) => {
                   const selected = keyFor(r) === activeRaceKey;
+                  const pending = !hasRunners(r);
                   return (
                     <button
                       key={keyFor(r)}
-                      className={`race-card ${selected ? "on" : ""}`}
-                      onClick={() => onApplyRace(r, fallbackDate)}
+                      className={`race-card ${selected ? "on" : ""} ${pending ? "is-pending" : ""}`}
+                      disabled={pending}
+                      onClick={() => !pending && onApplyRace(r, fallbackDate)}
                     >
                       <span className="race-card-top">
                         <span>R{r.race_no}</span>
@@ -201,17 +214,21 @@ export function RaceScreen(props: RaceScreenProps) {
                     <div className="race-list">
                       {[...races]
                         .sort((a, b) => a.race_no - b.race_no)
-                        .map((r) => (
-                          <button
-                            key={keyFor(r)}
-                            className={`race-row ${keyFor(r) === activeRaceKey ? "on" : ""}`}
-                            onClick={() => onApplyRace(r, fallbackDate)}
-                          >
-                            <span className="race-row-no">R{r.race_no}</span>
-                            <span className="race-row-name">{raceTitle(r)}</span>
-                            <span className="race-row-status">{statusLabel(r)}</span>
-                          </button>
-                        ))}
+                        .map((r) => {
+                          const pending = !hasRunners(r);
+                          return (
+                            <button
+                              key={keyFor(r)}
+                              className={`race-row ${keyFor(r) === activeRaceKey ? "on" : ""} ${pending ? "is-pending" : ""}`}
+                              disabled={pending}
+                              onClick={() => !pending && onApplyRace(r, fallbackDate)}
+                            >
+                              <span className="race-row-no">R{r.race_no}</span>
+                              <span className="race-row-name">{raceTitle(r)}</span>
+                              <span className="race-row-status">{statusLabel(r)}</span>
+                            </button>
+                          );
+                        })}
                     </div>
                   </div>
                 ))}
@@ -270,6 +287,13 @@ export function RaceScreen(props: RaceScreenProps) {
                 intuition={intuition[openRunner.uma] ?? null}
                 onIntuition={(next) => onIntuition(openRunner.uma, next)}
                 onClose={() => setOpenUma(null)}
+                onReturnToTickets={() => {
+                  // Close the panel AND route to tickets so the
+                  // research→tickets return path is explicit. onStandard
+                  // generates default tickets and setSteps to "tickets".
+                  setOpenUma(null);
+                  onStandard();
+                }}
               />
             )}
             <div className="runners">

@@ -14,11 +14,30 @@ export interface TicketsScreenProps {
   onReset: () => void;
   onBackStyle: () => void;
   onExplain: (id: string) => void;
+  /**
+   * Place (commit) a single ticket. Mirrors MyTickets.commit() — the label is
+   * chosen by the caller (App) based on auth state so this component stays
+   * free of the auth context. Absent on the test render.
+   */
+  onPlace?: (ticket: Ticket) => void;
+  /** Label for the Place button (auth-aware, resolved by the caller). */
+  placeLabel?: string;
+  /** Transient status line (e.g. "Updated with your marks", offline-queued). */
+  toast?: string;
 }
 
 export function TicketsScreen(props: TicketsScreenProps) {
   const { t } = useI18n();
-  const { tickets, onRemix, onReset, onBackStyle, onExplain } = props;
+  const {
+    tickets,
+    onRemix,
+    onReset,
+    onBackStyle,
+    onExplain,
+    onPlace,
+    placeLabel,
+    toast,
+  } = props;
   if (tickets.length === 0) {
     // Only reachable when a real regenerate() returned 0 tickets — i.e. the
     // current constraints (typically too many "avoid" tags) are unsolvable.
@@ -45,6 +64,11 @@ export function TicketsScreen(props: TicketsScreenProps) {
   }
   return (
     <>
+      {toast && (
+        <p className="hint marks-toast" role="status">
+          {toast}
+        </p>
+      )}
       <div className="tickets">
         {tickets.map((tk, i) => {
           const sep = tk.type === "exacta" || tk.type === "trifecta" ? " > " : " - ";
@@ -87,6 +111,14 @@ export function TicketsScreen(props: TicketsScreenProps) {
                 )}
               </div>
               <div className="btn-row" style={{ marginTop: 12 }}>
+                {onPlace && (
+                  <button
+                    className="btn primary"
+                    onClick={() => onPlace(tk)}
+                  >
+                    {placeLabel ?? t("tickets.placeCta")}
+                  </button>
+                )}
                 <button
                   className="btn gold"
                   onClick={() => onExplain(tk.id)}
