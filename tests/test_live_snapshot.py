@@ -171,11 +171,17 @@ def test_publish_window_guard():
     def at(y, mo, d, h):
         return datetime(y, mo, d, h, 0, tzinfo=jst)
 
-    # register: Fri 10:00-21:59 and Thu 14:00-17:59
+    # register: Thursday or Friday, ANY hour (Thursday roster capture — JRA's
+    # shutuba finalizes Thursday with a publish time that wanders inside the
+    # 13:00-16:00 JST band; an hour gate would miss early publishes).
     assert win(at(2026, 6, 19, 11), "register") is True   # Fri
-    assert win(at(2026, 6, 19, 9), "register") is False   # Fri too early
-    assert win(at(2026, 6, 18, 15), "register") is True   # Thu
-    assert win(at(2026, 6, 18, 12), "register") is False  # Thu too early
+    assert win(at(2026, 6, 19, 9), "register") is True    # Fri early — now allowed
+    assert win(at(2026, 6, 19, 23), "register") is True   # Fri late — now allowed
+    assert win(at(2026, 6, 18, 15), "register") is True   # Thu afternoon
+    assert win(at(2026, 6, 18, 12), "register") is True   # Thu before 14:00 — now allowed
+    assert win(at(2026, 6, 18, 0), "register") is True    # Thu small hours — now allowed
+    assert win(at(2026, 6, 17, 15), "register") is False  # Wed — still off
+    assert win(at(2026, 6, 20, 8), "register") is False   # Sat morning — race window owns it
     # race: Sat/Sun 09:00-18:59 JST. The 17:00-18:59 extension (R2 Task 2)
     # catches late 確定: a race that finishes near 16:00 + a 30+min 審議
     # can confirm after the old 17:00 cutoff.
@@ -223,6 +229,54 @@ def test_est_odds_parser_captures_rendered_number():
     runners = parse_entries_payload(row, "202605030611")
     assert len(runners) == 1
     assert runners[0]["est_odds"] == 3.4
+
+
+def test_thursday_pre_entries_layout_umaban_recovered_from_mark_id():
+    """Thursday roster capture (2026-06-25). The Thursday-before-race shutuba
+    page renders EMPTY Umaban + Waku cells server-side; the umaban is filled
+    client-side by JS, but it's recoverable from the row's select control
+    (``id="mark_N"``). Race-week layouts (the existing fixture) keep the
+    populated cell, so this test pins the fallback in isolation."""
+    # Mirrors the live 2026-06-25 函館記念 shutuba row structure (trimmed).
+    row = (
+        '<tr class="HorseList" id="tr_1">'
+        '<td class="Waku Txt_C"><span></span></td>'
+        '<td class="Umaban Txt_C"></td>'
+        '<td class="CheckMark Horse_Select">'
+        '<select class="makeMeFancy_1" name="1" id="mark_1" style="display: none;">'
+        '<option value="_0">--</option></select>'
+        "</td>"
+        '<td class="HorseInfo"><span class="HorseName">'
+        '<a href="https://db.netkeiba.com/horse/2017104756" target="_blank" '
+        'title="アラタ">アラタ</a></span></td>'
+        '<td class="Barei Txt_C">牡9</td>'
+        '<td class="Txt_C">58.0</td>'
+        '<td class="Jockey">'
+        '<a href="https://db.netkeiba.com/jockey/result/recent/01096/" '
+        'target="_blank" title="大野"> 大野</a></td>'
+        '<td class="Txt_R Popular"><span id="odds-1_1">---.-</span></td>'
+        "</tr>"
+    )
+    runners = parse_entries_payload(row, "202602010611")
+    assert len(runners) == 1
+    r = runners[0]
+    # Umaban RECOVERED from the mark_1 id (not the empty cell).
+    assert r["horse_number"] == 1
+    # Horse identity intact.
+    assert r["horse_id"] == "2017104756"
+    assert r["horse_name"] == "アラタ"
+    # Jockey name + id from the title attribute (latent bug fix — the old regex
+    # required /CODE/"> which never matched real netkeiba anchors with target=
+    # and title= attributes between the href and the >).
+    assert r["jockey_id"] == "01096"
+    assert r["jockey_name"] == "大野"
+    # No estimated odds yet (Thursday pre-market) — placeholder stays None.
+    assert r["est_odds"] is None
+    # Wakuban stays None on the pre-entries layout (gate is JS-filled).
+    assert r["gate"] is None
+
+
+
 
 
 # ---------------------------------------------------------------------------

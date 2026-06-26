@@ -73,8 +73,18 @@ def in_window(now_jst: datetime, window: str) -> bool:
     exit in milliseconds, and a stray manual/launchd run can't publish at the
     wrong time. Weekday(): Mon=0 .. Sun=6.
 
-      register : Thu 14:00-17:59 (special-G1 numbered entries) OR
-                 Fri 10:00-21:59 (weekend numbered entries + estimated odds)
+      register : Thursday or Friday, ANY hour. JRA's shutuba (出走馬) finalizes
+                 Thursday — the publish time wanders inside the 13:00-16:00 JST
+                 band week-to-week, so an hour gate on Thursday would miss early
+                 publishes (the 2026-06-25 case: weekend G3 rosters were already
+                 public at 13:00 JST but the old Thu 14:00-17:59 gate let the
+                 launchd agent skip every fire before 14:00). The launchd
+                 agent's 30-min StartInterval is the actual sample cadence; this
+                 function only decides whether a fire is allowed to do real
+                 work. ``--skip-empty`` plus the completeness guard
+                 (``race_card_max``) protect the snapshot when a fire lands
+                 before netkeiba has published. Saturday/Sunday morning is
+                 owned by the ``race`` window (the two windows don't overlap).
       race     : Sat/Sun 09:00-18:59 JST. The 9:00-17:00 portion covers the
                  race-day odds feed (JRA updates ~every 120s; last race on a
                  Sat/Sun card is typically 15:30-16:00). The 17:00-18:59
@@ -92,7 +102,8 @@ def in_window(now_jst: datetime, window: str) -> bool:
     if window == "race":
         return wd in (5, 6) and 9 <= h < 19
     if window == "register":
-        return (wd == 3 and 14 <= h < 18) or (wd == 4 and 10 <= h < 22)
+        # Thursday roster capture: drop the hour gate. See docstring above.
+        return wd in (3, 4)
     return True  # unknown window name -> don't block
 
 

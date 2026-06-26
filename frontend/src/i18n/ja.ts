@@ -39,7 +39,8 @@ export const ja = {
     statusOpen: "発売中",
     statusRegistered: "登録済み",
     statusResult: "結果",
-    entriesPending: "出走馬 木曜",
+    entriesPending: "出走馬未定",
+    rosterPending: "出走馬確定前です。レースが近づくと発表されます。確定しているレースを選ぶと馬券を作れます。",
   },
   style: {
     title: "スタイルを選ぶ",

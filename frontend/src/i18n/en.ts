@@ -40,7 +40,8 @@ export const en = {
     statusOpen: "odds open",
     statusRegistered: "registered",
     statusResult: "result",
-    entriesPending: "Entries Thu",
+    entriesPending: "Entries pending",
+    rosterPending: "Roster pending — entries finalize closer to race day. Tap another race with a declared roster to start building tickets.",
   },
   style: {
     title: "Choose your style",
