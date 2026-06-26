@@ -15,6 +15,7 @@ path are real and testable now.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 from keibamon_core.adapters.jravan import (
@@ -602,6 +603,132 @@ def build_jravan_silver(lake: LakePaths) -> dict[str, int]:
     }
 
 
+# --------------------------------------------------------------------------- #
+# Masters (KS 騎手マスタ / CH 調教師マスタ)
+# --------------------------------------------------------------------------- #
+# See docs/prompts/jvlink-master-named-patternoflife.md (PC counterpart) +
+# docs/prompts/mac-import-named-patternoflife.md. Idempotent, content-hashed via
+# the bronze-to-silver row hash. NOT Hive-partitioned (no race_id to derive
+# year/venue from); written flat to data/normalized/{jockey,trainer}_master.parquet.
+# DATA_TRAP: '00000' codes are placeholders, never real names.
+
+PLACEHOLDER_LABEL = "(unknown/placeholder)"
+
+
+def _normalize_master_name(raw_name: str | None) -> str | None:
+    """Trim trailing full/half-width space padding the spec leaves on the field.
+
+    JV-Data spec fills the name field to its full byte width with full-width
+    spaces (U+3000); a typical "秋元\u3000松雄\u3000\u3000...\u3000" comes through.
+    We keep a SINGLE internal U+3000 as the surname/given separator (the spec
+    says: 姓 + 全角空白1文字 + 名) and strip the rest. Returns None if the
+    field is empty after trimming.
+    """
+    if raw_name is None:
+        return None
+    # Replace the SEPARATOR U+3000 with a regular space so downstream tools
+    # (DuckDB / Pandas / shell) handle the field cleanly. External consumers
+    # split on whitespace anyway; keeping U+3000 buys nothing.
+    s = raw_name.rstrip(" \u3000").replace("\u3000", " ").strip()
+    return s or None
+
+
+def _master_records(
+    lake: LakePaths,
+    *,
+    spec: str,
+    id_field: str,
+) -> list[dict[str, Any]]:
+    """Read + parse one master spec from bronze into silver-shaped dicts.
+
+    Shared by :func:`build_jockey_master` and :func:`build_trainer_master`.
+    Latest record per id wins (data_kubun=0 = delete -> dropped; 1/2 = upsert).
+    """
+    from keibamon_core.adapters.jravan import (
+        RECORD_LENGTHS,
+        RECORD_LAYOUTS,
+        parse_master,
+    )
+
+    adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan"))
+    layout = RECORD_LAYOUTS[spec]
+    expected_len = RECORD_LENGTHS.get(spec)
+    by_id: dict[str, dict[str, Any]] = {}
+    for row in adapter.iter_raw(spec=spec):
+        parsed = parse_master(row["raw"], layout, expected_len=expected_len)
+        # spec item 2: 0 = record-deletion (提供ミス). Drop on delete.
+        if parsed.get("data_kubun") == 0:
+            continue
+        rec_id = parsed[id_field]
+        if not rec_id:
+            continue
+        name_raw = parsed.get("name")
+        # DATA_TRAP: '00000' is the non-unique placeholder. Label it, never an
+        # invented name (per DATA_TRAPS["KS.jockey_id=00000"] / CH equivalent).
+        if rec_id == "00000":
+            name = PLACEHOLDER_LABEL
+            name_kana = PLACEHOLDER_LABEL
+        else:
+            name = _normalize_master_name(name_raw)
+            name_kana = _normalize_master_name(parsed.get("name_kana"))
+        by_id[rec_id] = {
+            id_field: rec_id,
+            "name": name,
+            "name_kana": name_kana,
+            "name_romanji": (parsed.get("name_romanji") or "").strip() or None,
+            "name_abbrev": _normalize_master_name(parsed.get("name_abbrev")),
+            "retire_flag": parsed.get("retire_flag"),
+            "license_issue_date": parsed.get("license_issue_date"),
+            "license_cancel_date": parsed.get("license_cancel_date"),
+            "birthdate": parsed.get("birthdate"),
+            "make_date": parsed.get("make_date"),
+            "source_name": "jravan",
+            "ingested_at": row.get("ingested_at"),
+        }
+    return sorted(by_id.values(), key=lambda r: r[id_field])
+
+
+def _write_master_parquet(rows: list[dict[str, Any]], path: Path) -> None:
+    """Write a flat (non-partitioned) master parquet atomically."""
+    try:
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("pyarrow is required to write master parquet") from exc
+    path.parent.mkdir(parents=True, exist_ok=True)
+    table = pa.Table.from_pylist(rows)
+    # Atomic via tmp-file rename (single-file parquet; safe for the master size).
+    tmp = path.with_name(f".{path.name}.tmp")
+    pq.write_table(table, tmp, compression="snappy")
+    import os
+    os.replace(tmp, path)
+
+
+def build_jockey_master(lake: LakePaths) -> dict[str, int]:
+    """KS 騎手マスタ -> data/normalized/jockey_master.parquet.
+
+    Columns: jockey_id, name, name_kana, name_romanji, name_abbrev,
+    retire_flag, license_issue_date, license_cancel_date, birthdate, make_date,
+    source_name, ingested_at. ``jockey_id='00000'`` is labelled
+    '(unknown/placeholder)' per DATA_TRAPS['KS.jockey_id=00000'].
+    """
+    lake.ensure()
+    rows = _master_records(lake, spec="KS", id_field="jockey_id")
+    _write_master_parquet(rows, lake.normalized / "jockey_master.parquet")
+    return {"jockey_master": len(rows)}
+
+
+def build_trainer_master(lake: LakePaths) -> dict[str, int]:
+    """CH 調教師マスタ -> data/normalized/trainer_master.parquet.
+
+    Same shape as :func:`build_jockey_master` but keyed by ``trainer_id``.
+    """
+    lake.ensure()
+    rows = _master_records(lake, spec="CH", id_field="trainer_id")
+    _write_master_parquet(rows, lake.normalized / "trainer_master.parquet")
+    return {"trainer_master": len(rows)}
+
+
 if __name__ == "__main__":  # quick manual run: python -m keibamon_core.ingestion.jravan_silver
     import json
     lake = LakePaths()
@@ -611,4 +738,6 @@ if __name__ == "__main__":  # quick manual run: python -m keibamon_core.ingestio
     out.update(build_jravan_payouts(lake))   # HR payouts
     out.update(build_jravan_mining(lake))    # DM time + TM score predictions
     out.update(build_jravan_training(lake))  # HC slope + WC woodchip training times
+    out.update(build_jockey_master(lake))    # KS 騎手マスタ
+    out.update(build_trainer_master(lake))   # CH 調教師マスタ
     print(json.dumps(out, indent=2))

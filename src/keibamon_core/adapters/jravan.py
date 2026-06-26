@@ -326,6 +326,46 @@ RECORD_LAYOUTS: dict[str, list[Field]] = {
         Field("f2_lap", 97, 3, "tenths_sec"),
         Field("last_1f", 100, 3, "tenths_sec"),  # 200→0m -- the money field
     ],
+    # KS = 騎手マスタ (jockey master), 4171 data bytes (spec lists 4173 incl. CRLF).
+    # Horse-keyed (NOT race-keyed) so does NOT use _RACE_ID_HEADER. Offsets
+    # [SPEC] from JV-Data4901 §14; row counts verified against the 2026-06-26
+    # master pull (1,914 rows). The records arrive at the bronze as cp1252-
+    # decoded strings (the master-pull script ran on a non-Japanese ACP host);
+    # see ``recover_raw_bytes`` + ``parse_master`` for the round-trip path.
+    "KS": [
+        Field("record_spec", 0, 2, "str"),        # 1 "KS"
+        Field("data_kubun", 2, 1, "int"),         # 2 1=new, 2=update, 0=delete
+        Field("make_date", 3, 8, "date8"),        # 3 データ作成年月日
+        Field("jockey_id", 11, 5, "str"),         # 4 騎手コード (KEY)
+        Field("retire_flag", 16, 1, "int"),       # 5 騎手抹消区分 0=active 1=retired
+        Field("license_issue_date", 17, 8, "date8"),  # 6
+        Field("license_cancel_date", 25, 8, "date8"), # 7
+        Field("birthdate", 33, 8, "date8"),       # 8 生年月日
+        Field("name", 41, 34, "str"),             # 9 騎手名 全角17文字 (姓+全角空白+名)
+        # 10 予備 34 bytes (pos 76) -- skipped
+        Field("name_kana", 109, 30, "str"),       # 11 騎手名半角ｶﾅ 半角30文字
+        Field("name_abbrev", 139, 8, "str"),      # 12 騎手名略称 全角4文字
+        Field("name_romanji", 147, 80, "str"),    # 13 騎手名欧字 半角80文字
+        Field("sex_code", 227, 1, "int"),         # 14 性別区分 1=male 2=female
+    ],
+    # CH = 調教師マスタ (trainer master), 3860 data bytes (spec lists 3862 incl. CRLF).
+    # Same shape / decoding path as KS. Note CH has NO 予備 field between name and
+    # name_kana, so name_kana starts at pos 76 (vs KS at pos 110).
+    "CH": [
+        Field("record_spec", 0, 2, "str"),        # 1 "CH"
+        Field("data_kubun", 2, 1, "int"),         # 2
+        Field("make_date", 3, 8, "date8"),        # 3
+        Field("trainer_id", 11, 5, "str"),        # 4 調教師コード (KEY)
+        Field("retire_flag", 16, 1, "int"),       # 5
+        Field("license_issue_date", 17, 8, "date8"),
+        Field("license_cancel_date", 25, 8, "date8"),
+        Field("birthdate", 33, 8, "date8"),
+        Field("name", 41, 34, "str"),             # 9 調教師名
+        Field("name_kana", 75, 30, "str"),        # 10 調教師名半角ｶﾅ
+        Field("name_abbrev", 105, 8, "str"),      # 11 調教師名略称
+        Field("name_romanji", 113, 80, "str"),    # 12 調教師名欧字
+        Field("sex_code", 193, 1, "int"),         # 13 性別区分
+    ],
 }
 
 # Canonical record byte-lengths of the DATA portion (CRLF terminator excluded;
@@ -338,6 +378,8 @@ RECORD_LENGTHS: dict[str, int] = {
     "SE": 553,   # spec lists 555 incl. CRLF
     "HC": 58,    # spec lists 60 incl. CRLF (坂路調教)
     "WC": 103,   # spec lists 105 incl. CRLF (ウッドチップ調教)
+    "KS": 4171,  # spec lists 4173 incl. CRLF (騎手マスタ)
+    "CH": 3860,  # spec lists 3862 incl. CRLF (調教師マスタ)
 }
 
 # Known JV-Data traps -> enforce as Pandera checks downstream (silver -> gold).
@@ -495,6 +537,27 @@ DATA_TRAPS = {
         "marker suffix, or use a separate annotation column. Re-verify against a real "
         "降着/失格 result.html before the capture-PC handoff (ADR-0004). The R2 docstring "
         "in live/result.py reflects the corrected semantics either way.",
+    "KS.jockey_id=00000": "騎手コード '00000' is the non-unique placeholder (sibling of "
+        "SE.ketto_num='0000000000') -- it appears on rows where the jockey code is "
+        "unknown/unassigned (early records, foreign-rider gap). It is NOT a real jockey. "
+        "Silver master MUST label it '(unknown/placeholder)' for name + name_kana; never "
+        "an invented name. Verified: KS bronze carries 0 rows for jockey_id='00000' in "
+        "the 2026-06-26 pull, but the rule is enforced defensively in "
+        "jravan_silver.build_jockey_master so a future pull that surfaces the placeholder "
+        "cannot accidentally mint a phantom jockey.",
+    "CH.trainer_id=00000": "same shape as KS.jockey_id='00000' -- '00000' on a CH row "
+        "is the placeholder, not a trainer. Silver labels it '(unknown/placeholder)'.",
+    "masters.cp1252_roundtrip": "KS/CH/UM/BN/BR master records arrive at the bronze "
+        "decoded as cp1252 (Windows English ACP), NOT cp932 (Japanese ACP) -- the master-"
+        "pull script on the capture-PC did not enforce ACP=932 (ingest_jvlink/"
+        "realtime_jvlink DO enforce it; the master pull did not). parse_master() undoes "
+        "the wrong decode via recover_raw_bytes() before slicing on byte offsets. "
+        "Symptom: raw contains U+0081/U+008F (raw bytes 0x81/0x8F passed through) AND "
+        "U+0152 Œ / U+2014 — (cp1252-specific mappings of 0x8C/0x97) in the same record. "
+        "Durable fix: re-run the master pull on a Japanese-ACP host so raw_text is the "
+        "real Unicode jockey/trainer name (decode-then-store); then parse_master can "
+        "collapse to a strict cp932 round-trip. The recovery path is the safety net for "
+        "already-ingested bronze.",
 }
 
 
@@ -510,6 +573,77 @@ def parse_fixed(raw: str, layout: list[Field], *, expected_len: int | None = Non
     data fails loudly instead of silently shifting every field.
     """
     data = raw.rstrip("\r\n").encode(ENCODING)
+    if expected_len is not None and len(data) != expected_len:
+        raise ValueError(
+            f"record byte-length {len(data)} != expected {expected_len} "
+            f"(spec='{raw[:2]}'); offsets would misalign"
+        )
+    out: dict = {}
+    for f in layout:
+        chunk = data[f.start : f.start + f.length]
+        text = chunk.decode(ENCODING, errors="replace")
+        out[f.name] = CONVERTERS.get(f.kind, CONVERTERS["str"])(text)
+    return out
+
+
+# --------------------------------------------------------------------------- #
+# Master-record parsing (KS/CH/UM/BN/BR)
+# --------------------------------------------------------------------------- #
+# Master records arrive at the bronze decoded as cp1252 (English Windows ACP),
+# NOT cp932 (Japanese ACP) -- see DATA_TRAPS["masters.cp1252_roundtrip"] for the
+# full why. ``recover_raw_bytes`` undoes the wrong decode so the spec byte
+# offsets line up. Map is the standard cp1252 reverse: the 27 code points that
+# cp1252 maps to non-latin-1 Unicode chars (per Microsoft's published table).
+_CP1252_HIGH_REVERSE: dict[int, int] = {
+    0x20AC: 0x80, 0x201A: 0x82, 0x0192: 0x83, 0x201E: 0x84, 0x2026: 0x85,
+    0x2020: 0x86, 0x2021: 0x87, 0x02C6: 0x88, 0x2030: 0x89, 0x0160: 0x8A,
+    0x2039: 0x8B, 0x0152: 0x8C, 0x017D: 0x8E, 0x2018: 0x91, 0x2019: 0x92,
+    0x201C: 0x93, 0x201D: 0x94, 0x2022: 0x95, 0x2013: 0x96, 0x2014: 0x97,
+    0x02DC: 0x98, 0x2122: 0x99, 0x0161: 0x9A, 0x203A: 0x9B, 0x0153: 0x9C,
+    0x017E: 0x9E, 0x0178: 0x9F,
+}
+
+
+def recover_raw_bytes(raw_text: str) -> bytes:
+    """Recover the original cp932 bytes from a master record that the bronze
+    path decoded as cp1252 + latin-1-fallback (English Windows ACP) instead of
+    cp932 (Japanese ACP).
+
+    For each char in ``raw_text``:
+      - U+0000..U+00FF (ASCII + latin-1) -- pass through as a single byte.
+      - cp1252 high chars (U+0152 Œ, U+2014 —, U+201C ", etc.) -- map back to
+        the original cp1252 byte (0x8C, 0x97, 0x93, ...).
+      - Any other code point -- raises ValueError; a valid master record on a
+        Japanese-ACP capture would decode cleanly to begin with, so an
+        unmapped char here means the upstream decode path changed.
+
+    Idempotent and symmetric with the bronze storage path for these specs
+    (raw bytes -> cp1252 decode -> Python str -> recover_raw_bytes -> raw bytes).
+    """
+    out = bytearray()
+    for c in raw_text:
+        cp = ord(c)
+        if cp < 0x100:
+            out.append(cp)
+        elif cp in _CP1252_HIGH_REVERSE:
+            out.append(_CP1252_HIGH_REVERSE[cp])
+        else:
+            raise ValueError(
+                f"unmapped codepoint U+{cp:04X} in master raw -- "
+                "either the bronze decode path changed or this isn't a master record"
+            )
+    return bytes(out)
+
+
+def parse_master(raw: str, layout: list[Field], *, expected_len: int | None = None) -> dict:
+    """Slice a master record (KS/CH/UM/BN/BR) by BYTE offsets.
+
+    Counterpart to :func:`parse_fixed` for records that arrived at the bronze
+    decoded as cp1252 (see :func:`recover_raw_bytes`). Length-check semantics
+    mirror :func:`parse_fixed`: a mismatch is a tripped round-trip / truncated
+    record and fails loudly.
+    """
+    data = recover_raw_bytes(raw.rstrip("\r\n"))
     if expected_len is not None and len(data) != expected_len:
         raise ValueError(
             f"record byte-length {len(data)} != expected {expected_len} "
