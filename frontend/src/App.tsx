@@ -24,10 +24,11 @@ import { StyleScreen } from "./screens/StyleScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
 import { ExplainScreen } from "./screens/ExplainScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
+import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { Footer } from "./components/Footer";
 
 type Step = "race" | "style" | "tickets" | "explain";
-type View = "browse" | "mine";
+type View = "browse" | "mine" | "reference";
 
 function App() {
   const i18n = useI18n();
@@ -314,6 +315,13 @@ function App() {
     );
   }
 
+  // Reference section: bilingual glossary + weekend graded-stakes roundup.
+  // Full-screen, non-auth-gated (reference material). "Back to race builder"
+  // (onBack) returns here.
+  if (view === "reference") {
+    return <ReferenceScreen onBack={() => setView("browse")} />;
+  }
+
   return (
     <main className="app">
       <header className="head">
@@ -352,6 +360,15 @@ function App() {
           aria-label={t("mine.home")}
         >
           {t("mine.home")}
+        </button>
+        {/* Reference section: bilingual glossary + weekend graded-stakes
+            roundup. Non-auth-gated reference material. */}
+        <button
+          className="lang-toggle reference-tab"
+          onClick={() => setView("reference")}
+          aria-label={t("reference.home")}
+        >
+          {t("reference.tab")}
         </button>
       </header>
 

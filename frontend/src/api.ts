@@ -210,3 +210,33 @@ export async function fetchJockeyForm(
   if (!res.ok) throw new FormFetchError(res.status, `jockey form HTTP ${res.status}`);
   return (await res.json()) as JockeyFormCard;
 }
+
+// ---------------------------------------------------------------------------
+// Reference — weekend graded-stakes roundup. The worker route
+// /api/weekly-report returns either a D1-published edition
+// ({ status:"published", inputs: WeekendInput[] }) or { status:"sample" }
+// when no edition has been published yet. On sample, the frontend renders the
+// bundled SAMPLE_ARCHIVE (data/sampleWeekend.ts) so the feature works with no
+// deploy. Generation always runs client-side + deterministically.
+// ---------------------------------------------------------------------------
+
+export interface WeeklyReportResponse {
+  /** "published" = a real D1 edition is available; "sample" = use the bundle. */
+  status: "published" | "sample";
+  /** Published WeekendInput editions (Friday + Saturday refresh + ...). */
+  inputs?: unknown[];
+}
+
+export async function fetchWeeklyReport(): Promise<WeeklyReportResponse> {
+  try {
+    const res = await fetch("/api/weekly-report", { cache: "no-store" });
+    if (!res.ok) return { status: "sample" };
+    const data = (await res.json()) as WeeklyReportResponse;
+    if (data && (data.status === "published" || data.status === "sample"))
+      return data;
+    return { status: "sample" };
+  } catch {
+    // Offline / route not deployed → degrade to bundled sample.
+    return { status: "sample" };
+  }
+}

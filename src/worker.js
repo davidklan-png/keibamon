@@ -18,6 +18,7 @@
 //   ASSETS = ./splash
 
 import { handleFormRoutes } from "./form/index";
+import { handleWeeklyReportRoutes } from "./reference/weekly";
 
 export default {
   async fetch(request, env) {
@@ -39,6 +40,12 @@ export default {
     if (url.pathname === "/live") {
       return env.ASSETS.fetch(new Request(new URL("/live.html", url), request));
     }
+
+    // Weekly graded-stakes report (src/reference/). Returns null on non-match
+    // so the request falls through. Returns { status: "sample" } when the D1
+    // table is absent/empty so the frontend renders bundled sample data.
+    const weeklyRes = await handleWeeklyReportRoutes(request, env);
+    if (weeklyRes) return weeklyRes;
 
     // Form panel routes (src/form/). Returns null on non-match so the request
     // falls through to /api/live or the static-assets fallback below.

@@ -102,3 +102,38 @@ working on the system must know **which device they are on** before acting — r
 5. **git push / USB import are human actions on the Mac.** The sandbox agent
    prepares the diff and the commands; it does not push or import.
 6. **Bronze crosses the airgap only via the USB.** PC ⇄ Mac, nothing else.
+
+## Cross-platform test gotcha: per-platform native binaries
+
+The root worker test suite (`npm test` at repo root — `src/form/*`, `src/reference/*`)
+and the production frontend build (`vite build`) depend on **per-platform native
+binaries** that are installed for the host that ran `npm install`:
+
+- **`better-sqlite3`** — ships a prebuilt node binding compiled for the
+  install-time OS/arch (the `makeFakeD1` shim drives it). The Mac install is a
+  darwin/arm64 binary; it will **not load on the Linux sandbox** (`GLIBC ... not
+  found` / `Module did not self-register`).
+- **`esbuild`** + **`rollup`** (vite) — same shape: platform-specific binaries
+  fetched at install time.
+
+**Consequence:** the cowork **sandbox cannot run the root worker vitest suite or
+the production vite build** — the macOS-compiled natives don't load on Linux.
+Run those two on the Mac:
+
+```
+npm test                       # root worker suite (better-sqlite3) — Mac only
+cd frontend && npm run build   # vite production build (esbuild/rollup) — Mac only
+```
+
+The **frontend logic tests** (`cd frontend && npm test` — vitest + jsdom, no
+better-sqlite3) **are reproducible on the sandbox** once Linux natives are
+installed without saving them to package.json:
+
+```
+cd frontend && npm i -D esbuild --no-save && npm test
+```
+
+Rule of thumb: the sandbox can validate frontend logic + Python/lake code; the
+root worker suite and the production bundle are Mac (or matching-arch CI) only.
+Always confirm `npm test` (root) on the Mac before sign-off — a green sandbox
+run does NOT cover the worker routes.
