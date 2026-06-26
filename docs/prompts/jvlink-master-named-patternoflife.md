@@ -40,10 +40,12 @@ chars ([[jravan-silver-byte-offset-parsing]]).
   - `JG` 競走馬除外 — scratches/exclusions = the #1 innocent explanation for a
     false drift flag; lets the detector exclude them.
 
-**Tier 3 — forward-only capture-config (NOT a one-time pull):** the intraday
-*curve* for exotics (O3–O6) comes from the realtime feed and **cannot be
-backfilled**. Add O3–O6 to the realtime odds capture subscription so exotic
-curves accumulate going forward. (Separate from the 蓄積 pull above.)
+**Tier 3 — CORRECTED: exotic curves are NOT a capture gap.** O3–O6 are already
+in bronze (realtime 0B30; verified in jravan_rt). The gap is downstream:
+`ingestion/jravan_silver.py` filters the timeseries to ("O1","O2"). So nothing to
+pull/subscribe — it's a silver un-filter, recoverable from existing bronze,
+tracked as a SEPARATE ticket (see the mac-dev counterpart STEP 4). Gate on
+cardinality before materializing (O6 ≈ 4,900 combos/race).
 
 Then STEP 1+ run on **mac-dev** from the USB import.
 
