@@ -237,9 +237,6 @@ export const en = {
     roundup: "Weekend roundup",
     back: "Back to race builder",
     notAdvice: "Research framing — not betting advice.",
-    sampleBadge: "Sample",
-    sampleNote:
-      "Showing bundled sample data. Live editions publish here once the weekend G1/G2/G3 gates open.",
   },
   glossary: {
     title: "Racing glossary",
@@ -263,6 +260,11 @@ export const en = {
     watchlist: "Odds movement watchlist",
     lens: "Keibamon ticket lens",
     notYet: "Coming this weekend",
+    emptyTitle: "No roundup published yet",
+    emptyCadence:
+      "The Friday edition lands once weekend gates and entries are final; a Saturday refresh follows when live odds open. Check back on race weekend.",
+    upcoming: "Upcoming graded stakes",
+    noUpcoming: "No graded stakes registered on this card yet.",
     freshness: "Data freshness",
     generator: "Generator version",
     publishedAt: "Published",

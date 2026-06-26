@@ -214,15 +214,16 @@ export async function fetchJockeyForm(
 // ---------------------------------------------------------------------------
 // Reference — weekend graded-stakes roundup. The worker route
 // /api/weekly-report returns either a D1-published edition
-// ({ status:"published", inputs: WeekendInput[] }) or { status:"sample" }
-// when no edition has been published yet. On sample, the frontend renders the
-// bundled SAMPLE_ARCHIVE (data/sampleWeekend.ts) so the feature works with no
-// deploy. Generation always runs client-side + deterministically.
+// ({ status:"published", inputs: WeekendInput[] }) or { status:"empty" }
+// when no edition has been published yet. On empty, the frontend renders a
+// no-data state: a cadence message + the real upcoming graded stakes from
+// /api/live (no fabricated sample data). Generation always runs client-side +
+// deterministically when an edition is published.
 // ---------------------------------------------------------------------------
 
 export interface WeeklyReportResponse {
-  /** "published" = a real D1 edition is available; "sample" = use the bundle. */
-  status: "published" | "sample";
+  /** "published" = a real D1 edition is available; "empty" = none yet. */
+  status: "published" | "empty";
   /** Published WeekendInput editions (Friday + Saturday refresh + ...). */
   inputs?: unknown[];
 }
@@ -230,13 +231,14 @@ export interface WeeklyReportResponse {
 export async function fetchWeeklyReport(): Promise<WeeklyReportResponse> {
   try {
     const res = await fetch("/api/weekly-report", { cache: "no-store" });
-    if (!res.ok) return { status: "sample" };
+    if (!res.ok) return { status: "empty" };
     const data = (await res.json()) as WeeklyReportResponse;
-    if (data && (data.status === "published" || data.status === "sample"))
-      return data;
-    return { status: "sample" };
+    if (data && data.status === "published") return data;
+    // Any other shape — including a stale "sample" response from a not-yet-
+    // redeployed worker — normalizes to empty so the user never sees fake data.
+    return { status: "empty" };
   } catch {
-    // Offline / route not deployed → degrade to bundled sample.
-    return { status: "sample" };
+    // Offline / route not deployed → empty state (cadence + upcoming).
+    return { status: "empty" };
   }
 }

@@ -42,8 +42,9 @@ export default {
     }
 
     // Weekly graded-stakes report (src/reference/). Returns null on non-match
-    // so the request falls through. Returns { status: "sample" } when the D1
-    // table is absent/empty so the frontend renders bundled sample data.
+    // so the request falls through. Returns { status: "empty" } when the D1
+    // table is absent/empty so the frontend renders the no-data empty state
+    // (cadence + real upcoming graded stakes from /api/live).
     const weeklyRes = await handleWeeklyReportRoutes(request, env);
     if (weeklyRes) return weeklyRes;
 

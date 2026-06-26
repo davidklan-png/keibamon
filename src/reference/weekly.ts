@@ -9,10 +9,10 @@
 // deterministically). Returns the latest edition first.
 //
 // If the table doesn't exist yet (migration not applied) or holds no rows,
-// returns { status: "sample" } so the frontend renders the bundled
-// SAMPLE_ARCHIVE. This mirrors the live_snapshot key-fallback philosophy: the
-// feature is fully functional without a deploy, and a publish step (documented
-// in docs/prompts/weekly-roundup.md) promotes it to live data.
+// returns { status: "empty" } so the frontend renders the no-data empty state
+// (cadence message + real upcoming graded stakes from /api/live) instead of
+// fabricated sample races. No edition is published until an operator runs the
+// publish step (documented in docs/prompts/weekly-roundup.md).
 //
 // Publish is a manual step (wrangler d1 execute INSERT of the WeekendInput
 // JSON), NOT an open POST endpoint — there is no admin-auth surface in this
@@ -48,9 +48,9 @@ export async function handleWeeklyReportRoutes(
     return jsonResponse({ error: "method not allowed" }, 405);
   }
 
-  // No D1 binding → sample path (local dev / a deploy without the binding).
+  // No D1 binding → empty path (local dev / a deploy without the binding).
   if (!env || !env.DB) {
-    return jsonResponse({ status: "sample" });
+    return jsonResponse({ status: "empty" });
   }
 
   try {
@@ -62,7 +62,7 @@ export async function handleWeeklyReportRoutes(
       published_at: string;
     }>;
     if (rows.length === 0) {
-      return jsonResponse({ status: "sample" });
+      return jsonResponse({ status: "empty" });
     }
     // Parse each payload; skip any row that doesn't deserialize so one bad
     // row can't blank the whole surface.
@@ -74,10 +74,10 @@ export async function handleWeeklyReportRoutes(
         /* skip malformed row */
       }
     }
-    if (inputs.length === 0) return jsonResponse({ status: "sample" });
+    if (inputs.length === 0) return jsonResponse({ status: "empty" });
     return jsonResponse({ status: "published", inputs });
   } catch {
-    // Table not migrated, or transient D1 error → degrade to sample.
-    return jsonResponse({ status: "sample" });
+    // Table not migrated, or transient D1 error → degrade to empty.
+    return jsonResponse({ status: "empty" });
   }
 }

@@ -2396,15 +2396,52 @@ select:focus {
   font: inherit;
   color: var(--ink);
 }
-.sample-pill {
-  background: var(--tint);
-  color: var(--soft);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 10px;
-  font-size: 11px;
+/* No-data empty state: cadence message + real upcoming graded stakes. Shown
+   when /api/weekly-report has no published edition. Reuses .grade-chip and
+   .entries-pending-chip so the rows read like the rest of the app. */
+.roundup-empty {
+  padding: 0 16px;
+}
+.roundup-empty > h3 {
+  margin: 8px 0 6px;
+  font-size: 15px;
+}
+.roundup-empty > h4 {
+  margin: 16px 0 6px;
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
+  color: var(--soft);
+}
+.roundup-empty .hint {
+  margin: 0 0 8px;
+}
+.roundup-upcoming {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.roundup-upcoming-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 6px 10px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+.roundup-upcoming-name {
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 14px;
+}
+.roundup-upcoming-meta {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .freshness {

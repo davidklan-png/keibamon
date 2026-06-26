@@ -1,11 +1,11 @@
 // ============================================================================
 // Sample weekend fixture for the "Weekend Roundup" Reference tab.
 //
-// This is the FALLBACK data path (requirement: "If live data is unavailable,
-// support a manual or fixture/sample-data path consistent with the app's
-// existing approach"). The worker route /api/weekly-report returns
-// { status: "sample" } when no D1-published report exists, and the frontend
-// renders these two editions deterministically.
+// TEST-ONLY: the generator tests (lib/weeklyReport.test.ts) drive these two
+// editions through generateReport to pin the deterministic output. The fixture
+// is NO LONGER rendered in the app — when no D1-published report exists the
+// worker returns { status: "empty" } and the frontend shows a cadence message
+// + the real upcoming graded stakes from /api/live (no fabricated data).
 //
 // Two editions of the SAME weekend demonstrate the Friday-publish → Saturday-
 // refresh versioning arc:
@@ -152,6 +152,3 @@ function sampleWeekend(friday: boolean): WeekendInput {
 
 export const SAMPLE_FRIDAY: WeekendInput = sampleWeekend(true);
 export const SAMPLE_SATURDAY: WeekendInput = sampleWeekend(false);
-
-/** The bundled archive: both editions of the current sample weekend. */
-export const SAMPLE_ARCHIVE: WeekendInput[] = [SAMPLE_FRIDAY, SAMPLE_SATURDAY];

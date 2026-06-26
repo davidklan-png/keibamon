@@ -230,9 +230,6 @@ export const ja = {
     roundup: "週末まとめ",
     back: "レース作成に戻る",
     notAdvice: "リサーチ目的 — 投票助言ではありません。",
-    sampleBadge: "サンプル",
-    sampleNote:
-      "サンプルデータを表示中。週末のG1/G2/G3枠順発表後にライブ版がここへ公開されます。",
   },
   glossary: {
     title: "競馬 用語集",
@@ -256,6 +253,11 @@ export const ja = {
     watchlist: "オッズ動向ウォッチ",
     lens: "ケイバモン 馬券視点",
     notYet: "今週末予定",
+    emptyTitle: "まだまとめは公開されていません",
+    emptyCadence:
+      "金曜版は週末の枠順と出走馬が確定した時点で公開され、土曜版はオッズの発売開始とともに更新されます。週末にまたご覧ください。",
+    upcoming: "今後の重賞",
+    noUpcoming: "このカードにはまだ重賞の登録がありません。",
     freshness: "データの鮮度",
     generator: "生成バージョン",
     publishedAt: "公開",

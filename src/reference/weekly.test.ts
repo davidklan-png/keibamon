@@ -2,10 +2,10 @@
 //
 // Mirrors the form routes.test.ts pattern: drive handleWeeklyReportRoutes with
 // a tiny D1 shim (makeFakeD1 over better-sqlite3). Covers:
-//   - empty table → { status: "sample" }
+//   - empty table → { status: "empty" }
 //   - seeded editions → { status: "published", inputs: [...] } (latest first)
-//   - table-missing (prepare throws) → graceful sample
-//   - no DB binding → sample
+//   - table-missing (prepare throws) → graceful empty
+//   - no DB binding → empty
 //   - non-GET → 405
 //   - non-matching path → null fall-through
 //   - malformed payload row is skipped, not fatal
@@ -18,7 +18,7 @@ import { makeFakeD1 } from "../form/test/fakeD1";
 
 // Parsed body shape of GET /api/weekly-report (typed so the assertions below
 // don't fall back to `unknown`). A discriminated union models the two response
-// shapes: sample (no inputs) vs published (inputs required).
+// shapes: empty (no inputs) vs published (inputs required).
 type WeeklyPublishedInputs = Array<{
   version: number;
   edition_key: string;
@@ -26,7 +26,7 @@ type WeeklyPublishedInputs = Array<{
 }>;
 
 type WeeklyBody =
-  | { status: "sample" }
+  | { status: "empty" }
   | { status: "published"; inputs: WeeklyPublishedInputs };
 
 async function bodyOf(res: Response): Promise<WeeklyBody> {
@@ -99,7 +99,7 @@ function seed(db: SqliteDb, version: number, payload: string) {
 }
 
 describe("GET /api/weekly-report", () => {
-  it("returns {status:'sample'} when the table is empty", async () => {
+  it("returns {status:'empty'} when the table is empty", async () => {
     const db = new Database(":memory:");
     withTable(db);
     const env = withFakeDb(makeFakeD1(db));
@@ -110,7 +110,7 @@ describe("GET /api/weekly-report", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(200);
     const body = await bodyOf(res!);
-    expect(body).toEqual({ status: "sample" });
+    expect(body).toEqual({ status: "empty" });
   });
 
   it("returns published editions, latest version first", async () => {
@@ -133,7 +133,7 @@ describe("GET /api/weekly-report", () => {
     expect(inputs[0].gate_snapshot_at).toBe("2026-06-26T08:00:00Z");
   });
 
-  it("degrades to sample when the table is missing (prepare throws)", async () => {
+  it("degrades to empty when the table is missing (prepare throws)", async () => {
     // A DB whose .prepare throws on any SQL — emulates an unmigrated D1.
     // Cast to the global D1Database type (no import of the local shim type).
     const throwingDb = {
@@ -147,16 +147,16 @@ describe("GET /api/weekly-report", () => {
       env,
     );
     const body = await bodyOf(res!);
-    expect(body).toEqual({ status: "sample" });
+    expect(body).toEqual({ status: "empty" });
   });
 
-  it("degrades to sample when no DB binding is present", async () => {
+  it("degrades to empty when no DB binding is present", async () => {
     const res = await handleWeeklyReportRoutes(
       new Request("https://test/api/weekly-report"),
       {} as WeeklyReportEnv,
     );
     const body = await bodyOf(res!);
-    expect(body).toEqual({ status: "sample" });
+    expect(body).toEqual({ status: "empty" });
   });
 
   it("skips a malformed payload row but still serves the good ones", async () => {
