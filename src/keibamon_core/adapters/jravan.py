@@ -366,6 +366,19 @@ RECORD_LAYOUTS: dict[str, list[Field]] = {
         Field("name_romanji", 113, 80, "str"),    # 12 調教師名欧字
         Field("sex_code", 193, 1, "int"),         # 13 性別区分
     ],
+    # JG = 競走馬除外情報 (pre-race declarations + exclusions), 78 data bytes
+    # (spec lists 80 incl. CRLF). Race-keyed via _RACE_ID_HEADER. Arrives at the
+    # bronze as clean cp932 (NOT cp1252 like KS/CH), so parsed via parse_fixed.
+    # Offsets [confirmed] vs real bronze (149,636 rows in the 2026-06-26 pull):
+    # name field "ヤプシ" decodes correctly under cp932, proving a clean round-trip.
+    "JG": _RACE_ID_HEADER + [
+        Field("ketto_num",         27, 10, "str"),  # 血統登録番号 (= horse_id; KEY)
+        Field("bamei",             37, 36, "str"),  # 馬名 全角18字 (clean cp932)
+        Field("vote_accept_order", 73, 3,  "int"),  # 001/002/003 — 再投票 ordering
+        Field("shutan_kubun",      76, 1,  "str"),  # 1=投票馬 2=締切除外 4=再投票
+        #                                      5=再投票除外 6=馬番なし取消 9=取消
+        Field("jogai_jotai_kubun", 77, 1,  "str"),  # 0=none 1=非抽選 2=非当選
+    ],
 }
 
 # Canonical record byte-lengths of the DATA portion (CRLF terminator excluded;
@@ -380,6 +393,7 @@ RECORD_LENGTHS: dict[str, int] = {
     "WC": 103,   # spec lists 105 incl. CRLF (ウッドチップ調教)
     "KS": 4171,  # spec lists 4173 incl. CRLF (騎手マスタ)
     "CH": 3860,  # spec lists 3862 incl. CRLF (調教師マスタ)
+    "JG": 78,    # spec lists 80 incl. CRLF (競走馬除外情報)
 }
 
 # Known JV-Data traps -> enforce as Pandera checks downstream (silver -> gold).
@@ -558,6 +572,24 @@ DATA_TRAPS = {
         "real Unicode jockey/trainer name (decode-then-store); then parse_master can "
         "collapse to a strict cp932 round-trip. The recovery path is the safety net for "
         "already-ingested bronze.",
+    "H1.make_date_drift": "H1 make_date is the bulk-delivery date, NOT the event time. "
+        "19,815 of 30,597 rows in the 2026-06-26 pull have make_date=2002 for 1986-2002 "
+        "races (bulk re-pull). Silver builder MUST set available_at via _event_at "
+        "(post_time || race_date). Same shape as available_at_bulk_download.",
+    "H1.data_kubun_no_intraday": "H1's data_kubun enum is 2/4/5/9/0 -- NO 1 (中間). "
+        "Unlike O1-O6 odds which are intraday snapshots, H1 is final-state-only. Each "
+        "(race, pool, combo) has at most a handful of records, one per final snapshot "
+        "type. Verified in bronze: this pull has only data_kubun=5 (月曜確定, 30594 rows) "
+        "and =9 (race cancelled, 3 rows).",
+    "JG.ketto_num=0000000000": "Sibling of SE.ketto_num='0000000000'. JG scratches on a "
+        "foreign horse without JRA pedigree carry the placeholder -- join via (race_id, "
+        "horse_id) but expect NULL horse_number for the placeholder case. None present in "
+        "the 2026-06-26 pull; rule enforced defensively (silver preserves the row).",
+    "JG.is_not_pure_exclusions": "JG is the cumulative pre-race declarations master, NOT "
+        "just exclusions -- 91% of rows are shutan_kubun=1 (投票馬, ran). The exclusion "
+        "subset is shutan_kubun IN (2,5,6,9) OR jogai_jotai_kubun IN (1,2). Silver emits "
+        "all rows to jravan_declarations with derived is_excluded + exclusion_kind; "
+        "downstream filters via WHERE is_excluded=true.",
 }
 
 
@@ -785,6 +817,19 @@ def _yen(s: str) -> int | None:
     return int(s) if s.isdigit() and int(s) > 0 else None
 
 
+def _votes_x100(s: str) -> int | None:
+    """H1 票数 field (11-digit, 単位百円) -> yen amount (×100).
+
+    None for the '00000000000' sentinel (発売前取消し / cancelled before sale) and for
+    whitespace (発売なし / pool not registered). Mirrors :func:`_yen` in spirit -- a
+    zero count carries no liquidity signal, so it nulls out rather than reporting 0.
+    """
+    s = s.strip()
+    if not s or not s.isdigit() or int(s) == 0:
+        return None
+    return int(s) * 100
+
+
 def _pred_time(s: str) -> float | None:
     """Mining predicted time '9分99秒99' (M SS cc) -> seconds. '14606' -> 106.06."""
     s = s.strip()
@@ -810,6 +855,7 @@ def _score10(s: str) -> float | None:
 VALUE_CONVERTERS: dict[str, Callable[[str], object]] = {
     "odds": _odds_value,
     "yen": _yen,
+    "votes_x100": _votes_x100,
     "pred_time": _pred_time,
     "pred_err": _pred_err,
     "score10": _score10,
@@ -876,6 +922,32 @@ _MINING_BLOCKS: dict[str, list[RepeatBlock]] = {
                        (("score", 2, 4, "score10"),), None, 0, "kind")],
 }
 
+# H1 = 票数 (per-pool yen vote counts), 28953 data bytes (spec lists 28955 incl.
+# CRLF). One record carries all 7 pools back-to-back; each pool = a fixed-size
+# repeating array of (combo + 11-digit 票数-in-units-of-100 + 人気順). Block
+# start/stride derived from JV-Data4901 §13 and [confirmed] vs real bronze by
+# parsing every pool on a 16-starter 2023 race: win=16, place=16, BQ<=15,
+# quinella=wide=C(N,2), exacta=N*(N-1), trio=C(N,3) entries. Pre-2003 races only
+# carry win/place/bracket_quinella (JRA did not offer the exotics then) -- those
+# slots are whitespace, dropped by the combo-blank skip in parse_grouped_record.
+# NOTE: exacta starts at byte 6971 (NOT 6969): wide ends at 4217+153*18=6971, and
+# 6971+306*18=12479=trio start -- the 2-byte drift misaligns every exacta combo.
+_H1_HEADER: list[Field] = _RACE_ID_HEADER + [
+    Field("entry_count",   27, 2, "int"),   # 登録頭数 (pos 28)
+    Field("starter_count", 29, 2, "int"),   # 出走頭数 (pos 30)
+    # sell_flag_* (7 × 1 byte) + fukusho_pay_key + refund_umaban/wakuban/same_waku
+    # = header bytes 31..82 -- opaque filler, not emitted to silver.
+]
+_H1_BLOCKS: list[RepeatBlock] = [
+    RepeatBlock("win",              83,   28,  15, 2, (("vote_yen", 2, 11, "votes_x100"),), 13, 2, "pool"),
+    RepeatBlock("place",            503,  28,  15, 2, (("vote_yen", 2, 11, "votes_x100"),), 13, 2, "pool"),
+    RepeatBlock("bracket_quinella", 923,  36,  15, 2, (("vote_yen", 2, 11, "votes_x100"),), 13, 2, "pool"),
+    RepeatBlock("quinella",         1463, 153, 18, 4, (("vote_yen", 4, 11, "votes_x100"),), 15, 3, "pool"),
+    RepeatBlock("wide",             4217, 153, 18, 4, (("vote_yen", 4, 11, "votes_x100"),), 15, 3, "pool"),
+    RepeatBlock("exacta",           6971, 306, 18, 4, (("vote_yen", 4, 11, "votes_x100"),), 15, 3, "pool"),
+    RepeatBlock("trio",             12479, 816, 20, 6, (("vote_yen", 6, 11, "votes_x100"),), 17, 3, "pool"),
+]
+
 # Registry: record_id -> (header fields, blocks, expected data byte-length).
 GROUP_LAYOUTS: dict[str, tuple[list[Field], list[RepeatBlock], int | None]] = {
     "O1": (_ODDS_HEADER, _ODDS_BLOCKS["O1"], 960),
@@ -887,4 +959,5 @@ GROUP_LAYOUTS: dict[str, tuple[list[Field], list[RepeatBlock], int | None]] = {
     "HR": (_HR_HEADER, _HR_BLOCKS, 717),
     "DM": (_MINING_HEADER, _MINING_BLOCKS["DM"], 301),
     "TM": (_MINING_HEADER, _MINING_BLOCKS["TM"], 139),
+    "H1": (_H1_HEADER, _H1_BLOCKS, 28953),
 }

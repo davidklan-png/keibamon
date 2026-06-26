@@ -729,6 +729,137 @@ def build_trainer_master(lake: LakePaths) -> dict[str, int]:
     return {"trainer_master": len(rows)}
 
 
+# --------------------------------------------------------------------------- #
+# H1 票数 (per-pool yen vote counts) + JG 競走馬除外情報 (declarations)
+# --------------------------------------------------------------------------- #
+# H1 unlocks TRUE pool liquidity for the odds-flow anomaly detector (replaces
+# the inferred-liquidity proxy from odds movement). JG carries pre-race
+# declarations + exclusions -- the exclusion subset is the #1 innocent
+# explanation for a false drift flag (a late scratch reshaping the pool). Both
+# specs lack an explicit 発表時分 field, so available_at = _event_at
+# (post_time || race_date); NEVER make_date, which drifts (H1.make_date_drift).
+
+JRAVAN_VOTES_TABLE = "jravan_votes"
+JRAVAN_DECLARATIONS_TABLE = "jravan_declarations"
+
+
+def build_jravan_votes(lake: LakePaths) -> dict[str, int]:
+    """H1 票数 -> silver/jravan_votes (one row per race × pool × combo).
+
+    True yen liquidity per pool combo (11-digit 単位百円 vote count × 100). All
+    7 pools (win/place/bracket_quinella/quinella/wide/exacta/trio); pre-2003
+    races only carry win/place/bracket_quinella (the exotics weren't offered
+    then -- those slots are whitespace, dropped by the parser's combo skip).
+    available_at = _event_at (post_time || race_date); NEVER make_date
+    (H1.make_date_drift DATA_TRAP). data_kubun='0' (delete) rows dropped;
+    latest record per (race, pool, combo) wins to dedup across data_kubun
+    variants. H1 lives in its own file in the master pull AND may be bundled in
+    RACE.* in race snapshots, so both specs are streamed.
+    """
+    adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan"))
+    by_key: dict[tuple[str, str, str], dict[str, Any]] = {}
+    for spec in ("RACE", "H1"):
+        for row in adapter.iter_raw(spec=spec):
+            if row["record_id"] != "H1":
+                continue
+            rec = JravanSourceAdapter.parse_grouped_record(row)
+            if rec is None or str(rec.get("data_kubun")) == "0":
+                continue
+            rid = _race_id(rec)
+            meta = _meta_columns(rec["_meta"])
+            event_at = _event_at(rec)
+            for e in rec["entries"]:
+                by_key[(rid, e["pool"], e["combo"])] = {
+                    "race_id": rid,
+                    "pool": e["pool"],
+                    "combo": e["combo"],
+                    "vote_yen": e.get("vote_yen"),
+                    "popularity": e.get("popularity"),
+                    **meta,
+                    "available_at": event_at,
+                }
+    rows = sorted(by_key.values(),
+                  key=lambda r: (r["race_id"], r["pool"], r["combo"]))
+    _write_silver(lake, JRAVAN_VOTES_TABLE, rows)
+    return {JRAVAN_VOTES_TABLE: len(rows)}
+
+
+# shutan_kubun (出馬区分) -> label. {2,5,6,9} are the exclusion/withdrawal set.
+_SHUTAN_LABELS: dict[str, str] = {
+    "1": "declared",          # 投票馬 (declared + ran)
+    "2": "excluded_close",    # 締切での除外馬
+    "4": "revote",            # 再投票馬
+    "5": "revote_excluded",   # 再投票除外馬
+    "6": "withdrawn_no_num",  # 馬番を付さない出走取消馬
+    "9": "withdrawn",         # 取消馬
+}
+# jogai_jotai_kubun (除外状態) -> label. {1,2} mark a ballot-loss exclusion.
+_JOGAI_LABELS: dict[str, str] = {"0": "none", "1": "ballot_lost", "2": "ballot_excluded"}
+_EXCLUDED_SHUTAN: set[str] = {"2", "5", "6", "9"}
+_EXCLUDED_JOGAI: set[str] = {"1", "2"}
+
+
+def _declaration_row(p: dict, meta: dict) -> dict[str, Any]:
+    """JG -> one silver jravan_declarations row with derived exclusion flags.
+
+    is_excluded is True for shutan_kubun in {2,5,6,9} (the four exclusion /
+    withdrawal kubun) OR jogai_jotai_kubun in {1,2} (ballot loss / exclusion).
+    The ~91% of rows with shutan=1+jogai=0 (declared, ran) have
+    is_excluded=False (JG.is_not_pure_exclusions DATA_TRAP). exclusion_kind
+    prefers the shutan label, falling back to the jogai label.
+    """
+    shutan = p.get("shutan_kubun") or "0"
+    jogai = p.get("jogai_jotai_kubun") or "0"
+    is_excluded = shutan in _EXCLUDED_SHUTAN or jogai in _EXCLUDED_JOGAI
+    if shutan in _EXCLUDED_SHUTAN:
+        exclusion_kind = _SHUTAN_LABELS.get(shutan)
+    elif jogai in _EXCLUDED_JOGAI:
+        exclusion_kind = _JOGAI_LABELS.get(jogai)
+    else:
+        exclusion_kind = None
+    return {
+        "race_id": _race_id(p),
+        "horse_id": p.get("ketto_num"),
+        "ketto_num": p.get("ketto_num"),
+        "bamei": (p.get("bamei") or "").strip() or None,
+        "vote_accept_order": p.get("vote_accept_order"),
+        "shutan_kubun": shutan,
+        "shutan_label": _SHUTAN_LABELS.get(shutan),
+        "jogai_jotai_kubun": jogai,
+        "jogai_label": _JOGAI_LABELS.get(jogai),
+        "is_excluded": is_excluded,
+        "exclusion_kind": exclusion_kind,
+        **meta,
+        "available_at": _event_at(p),
+    }
+
+
+def build_jravan_declarations(lake: LakePaths) -> dict[str, int]:
+    """JG 競走馬除外情報 -> silver/jravan_declarations.
+
+    The cumulative pre-race declarations master (NOT just exclusions -- ~91% of
+    rows are shutan_kubun=1 投票馬 that ran). The exclusion subset is a one-
+    liner downstream: WHERE is_excluded=true. The ketto_num='0000000000'
+    placeholder is PRESERVED (not filtered) so downstream joins still see the
+    scratch via (race_id, horse_id) -- horse_number is NULL for placeholders
+    (JG.ketto_num=0000000000 DATA_TRAP). JG lives in its own file in the master
+    pull AND may be bundled in RACE.* in race snapshots, so both specs streamed.
+    """
+    adapter = JravanSourceAdapter(lake.bronze_source_dir("jravan"))
+    rows: list[dict[str, Any]] = []
+    for spec in ("RACE", "JG"):
+        for row in adapter.iter_raw(spec=spec):
+            if row["record_id"] != "JG":
+                continue
+            p = JravanSourceAdapter.parse_record(row)
+            if p is None or str(p.get("data_kubun")) == "0":
+                continue
+            rows.append(_declaration_row(p, _meta_columns(p["_meta"])))
+    rows.sort(key=lambda r: (r["race_id"], r["horse_id"] or ""))
+    _write_silver(lake, JRAVAN_DECLARATIONS_TABLE, rows)
+    return {JRAVAN_DECLARATIONS_TABLE: len(rows)}
+
+
 if __name__ == "__main__":  # quick manual run: python -m keibamon_core.ingestion.jravan_silver
     import json
     lake = LakePaths()
@@ -740,4 +871,6 @@ if __name__ == "__main__":  # quick manual run: python -m keibamon_core.ingestio
     out.update(build_jravan_training(lake))  # HC slope + WC woodchip training times
     out.update(build_jockey_master(lake))    # KS 騎手マスタ
     out.update(build_trainer_master(lake))   # CH 調教師マスタ
+    out.update(build_jravan_votes(lake))         # H1 票数 (yen vote counts, 7 pools)
+    out.update(build_jravan_declarations(lake))  # JG 競走馬除外情報
     print(json.dumps(out, indent=2))
