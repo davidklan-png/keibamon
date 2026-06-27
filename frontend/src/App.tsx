@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { UserButton } from "@clerk/clerk-react";
 import { useI18n } from "./i18n";
 import { winProbs, type Runner } from "./lib/fairvalue";
 import { recommend, recommendDiverse } from "./lib/recommender";
@@ -45,7 +46,7 @@ function App() {
   // Lift auth into App so the header's "My Tickets" tab can trigger Clerk's
   // sign-in modal directly, and so placeTicket() can commit on the signed-in
   // user without re-reading the context inside the handler.
-  const { isSignedIn, userId, getToken, openSignIn } = useAuth();
+  const { isSignedIn, userId, getToken, openSignIn, clerkMounted } = useAuth();
 
   // Race-first UX: the race browser is the landing. "My Tickets" is a separate
   // top-level view toggled from the header (auth-gated). The classic 4-step
@@ -505,6 +506,22 @@ function App() {
         >
           {t("reference.tab")}
         </button>
+        {/* Profile indicator — Clerk's hosted <UserButton />. Avatar + chip;
+            click opens Clerk's menu (Manage account, Sign out). Gated on
+            BOTH isSignedIn and clerkMounted because the Playwright bypass
+            branch fakes a session WITHOUT mounting <ClerkProvider>, and
+            <UserButton /> throws without that ancestor. */}
+        {isSignedIn && clerkMounted && (
+          <UserButton
+            appearance={{
+              elements: {
+                avatarBox: "kbm-userbtn-avatar",
+                userButtonTrigger: "kbm-userbtn",
+              },
+            }}
+            afterSignOutUrl="/"
+          />
+        )}
       </header>
 
       <nav className="stepper" aria-label="steps">

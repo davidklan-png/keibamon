@@ -228,6 +228,19 @@ a {
   letter-spacing: 0.02em;
 }
 
+/* Clerk <UserButton /> — sized to sit in the header's chip row without
+   towering over the 36px-tall lang-toggle pills. The avatar is the visible
+   element; the trigger wrapper just gets matching min-height so it tracks
+   the grid row. */
+.kbm-userbtn {
+  min-height: 36px;
+}
+
+.kbm-userbtn-avatar {
+  width: 32px;
+  height: 32px;
+}
+
 /* Transient status line above the ticket list (marks-applied / place result). */
 .marks-toast {
   margin: 4px 0 0;

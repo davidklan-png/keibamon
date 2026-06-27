@@ -33,12 +33,21 @@ export interface AuthState {
    * throws.
    */
   setAgeVerified: (v: boolean) => Promise<void>;
+  /**
+   * True iff a real <ClerkProvider> is mounted above us. Required for any
+   * direct Clerk component (e.g. <UserButton />) — those throw without a
+   * ClerkProvider ancestor, so callers MUST gate on this. False in the NOOP
+   * branch (no key) and the Playwright bypass branch (fake session, no
+   * ClerkProvider mounted).
+   */
+  clerkMounted: boolean;
 }
 
 const NOOP_VALUE: AuthState = {
   isSignedIn: false,
   userId: null,
   ageVerified: false,
+  clerkMounted: false,
   getToken: async () => null,
   openSignIn: () => {
     if (import.meta.env.DEV) {
@@ -71,6 +80,11 @@ const PLAYWRIGHT_VALUE: AuthState = {
   isSignedIn: true,
   userId: "playwright-fake-user",
   ageVerified: true,
+  // Critical UserButton crash-guard: Playwright bypass fakes a session
+  // WITHOUT mounting <ClerkProvider>, so direct Clerk components must stay
+  // unmounted. isSignedIn=true && clerkMounted=false is the exact combo that
+  // prevents <UserButton /> from throwing inside the visual-regression build.
+  clerkMounted: false,
   getToken: async () => "playwright-fake-token",
   openSignIn: () => {
     /* no-op in bypass mode */
@@ -133,6 +147,7 @@ function ClerkAuthInner({ children }: { children: React.ReactNode }) {
     isSignedIn: !!user,
     userId,
     ageVerified,
+    clerkMounted: true,
     getToken: async () => {
       try {
         return (await getToken()) ?? null;
