@@ -49,7 +49,16 @@ export interface LiveRace {
 }
 
 export interface LiveSnapshot {
-  meta?: { status?: string; message?: string; updated_at?: string; date?: string };
+  meta?: {
+    status?: string;
+    message?: string;
+    updated_at?: string;
+    /** Producer's heartbeat (src/keibamon_core/live/snapshot.py:171). The
+     *  freshness anchor used by ADR-0010 buildLiveEdition AND by the Phase 1
+     *  impression store's odds_snapshot_at stamp (ADR-0011 D3). */
+    published_at?: string;
+    date?: string;
+  };
   races?: LiveRace[];
 }
 

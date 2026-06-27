@@ -27,6 +27,7 @@ import {
   type JockeyFormCard,
 } from "../api";
 import type { IntuitionKind, IntuitionState } from "../lib/types";
+import type { Impression } from "../lib/impressions";
 
 const INTUITION_KINDS: IntuitionKind[] = [
   "like",
@@ -56,6 +57,12 @@ export interface FormPanelViewProps {
   comingSoon: boolean;
   horse: HorseFormCard | null;
   jockey: JockeyFormCard | null;
+  /**
+   * Current intuition mark for this horse (ADR-0011 Phase 1: replaces the old
+   * IntuitionState prop). null when the horse has no stored impression.
+   * Extracted from the Impression by the parent (RaceScreen / ExplainScreen)
+   * so this PURE view stays decoupled from the store's value shape.
+   */
   intuition: IntuitionState;
   onIntuition: (next: IntuitionState) => void;
   onClose: () => void;
@@ -346,6 +353,14 @@ export function FormPanelView(props: FormPanelViewProps) {
 
 // ---------------------------------------------------------------------------
 // Fetch-owning wrapper used by RaceScreen / ExplainScreen in the live app.
+//
+// ADR-0011 Phase 1: the wrapper now bridges the impression store to the PURE
+// view. The store key (race_id, horse_key) + the odds-context stamping happen
+// HERE — the parent (RaceScreen / ExplainScreen) passes the already-looked-up
+// Impression plus the runner's current odds + snapshot time, and this wrapper
+// extracts `impression?.mark ?? null` for the view + calls `onMark` when the
+// user toggles. The view itself is unchanged (still takes IntuitionState) so
+// its presentational tests don't need to know about the store.
 // ---------------------------------------------------------------------------
 
 export interface FormPanelProps {
@@ -354,10 +369,21 @@ export interface FormPanelProps {
   jockeyName?: string | null;
   /** Optional PIT anchor (ISO). When absent the backend uses now-UTC. */
   asOf?: string;
-  /** Current intuition mark for this horse (null = none). */
-  intuition: IntuitionState;
-  /** Set or clear the intuition mark. */
-  onIntuition: (next: IntuitionState) => void;
+  /**
+   * Already-looked-up impression for this horse, or null when none stored.
+   * The PARENT (RaceScreen / ExplainScreen) does the lookup against its
+   * impression map + the active raceId; the wrapper extracts the mark kind
+   * for the PURE view, so the view stays decoupled from the store's shape.
+   */
+  impression: Impression | null;
+  /**
+   * Write through to the parent's impression store. The wrapper translates
+   * the user's tap to a plain IntuitionState; the parent (which has the
+   * runner + snapshot context) stamps umaban + odds context into the payload
+   * before calling setImpression. This keeps odds-context stamping in ONE
+   * place (the parent), where the runner data actually lives.
+   */
+  onMark: (mark: IntuitionState) => void;
   onClose: () => void;
   /** Optional "Back to tickets" affordance (closes panel + routes to tickets). */
   onReturnToTickets?: () => void;
@@ -370,8 +396,8 @@ export function FormPanel(props: FormPanelProps) {
     jockeyId,
     jockeyName,
     asOf,
-    intuition,
-    onIntuition,
+    impression,
+    onMark,
     onClose,
     onReturnToTickets,
   } = props;
@@ -441,8 +467,13 @@ export function FormPanel(props: FormPanelProps) {
       comingSoon={comingSoon}
       horse={horse}
       jockey={jockey}
-      intuition={intuition}
-      onIntuition={onIntuition}
+      // ADR-0011 Phase 1: bridge impression store → PURE view's IntuitionState.
+      // The view stays decoupled from the store's value shape; the wrapper
+      // extracts just the mark kind so existing view tests don't need to know
+      // about the store, and routes the toggle back through onMark so the
+      // parent stamps odds context at mark time.
+      intuition={impression?.mark ?? null}
+      onIntuition={(next) => onMark(next)}
       onClose={onClose}
       onRetry={load}
       onReturnToTickets={onReturnToTickets}

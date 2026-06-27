@@ -10,6 +10,15 @@ import type {
 } from "./lib/types";
 import { DEFAULT_STYLE, moodKey } from "./lib/types";
 import {
+  loadImpressions,
+  saveImpressions,
+  setImpression,
+  impressionsByRace,
+  clearRace as clearRaceForReset,
+  type ImpressionMap,
+} from "./lib/impressions";
+import { normalizeName } from "./lib/normalizeName";
+import {
   fetchLiveSnapshot,
   seedManualRunners,
   type LiveSnapshot,
@@ -19,7 +28,7 @@ import { raceHasLiveOdds, snapshotRace } from "./lib/mytickets-view";
 import { useAuth } from "./auth/AuthProvider";
 import { postTicket } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
-import { RaceScreen } from "./screens/RaceScreen";
+import { RaceScreen, type MarkPayload } from "./screens/RaceScreen";
 import { StyleScreen } from "./screens/StyleScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
 import { ExplainScreen } from "./screens/ExplainScreen";
@@ -55,8 +64,14 @@ function App() {
   const [raceStatus, setRaceStatus] = useState<string>("manual");
 
   const [style, setStyle] = useState<StyleState>(DEFAULT_STYLE);
-  const [intuition, setIntuition] = useState<Record<string, IntuitionState>>(
-    {},
+  // ADR-0011 Phase 1: replace the uma-keyed intuition record with the
+  // (race_id, horse_key)-keyed impression store. raceId is the active race's
+  // namespace key (JRA race_id when present, else the composite fallback);
+  // impressions is the full in-memory mirror of localStorage, so child
+  // components re-render naturally when a mark changes.
+  const [raceId, setRaceId] = useState<string>("");
+  const [impressions, setImpressions] = useState<ImpressionMap>(() =>
+    loadImpressions(),
   );
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
@@ -148,9 +163,16 @@ function App() {
     setSelectedRaceDate(date);
     setSelectedRaceKey(raceKey(race, date));
     setRaceStatus(race.status ?? (raceHasLiveOdds(race) ? "open" : "registered"));
-    setIntuition({});
-    // Auto-regen effect (driven by [runners, style, intuition]) will refill
-    // tickets; no need to set them here.
+    // ADR-0011 Phase 1: switch the active race namespace. JRA race_id when
+    // present, else the composite `date|venue|race_no|name` key — marks land
+    // in the new race's namespace; the prior race's marks stay in storage
+    // (invisible until Phase 2 surfaces cross-race browsing). Old behavior
+    // was `setIntuition({})` (wiped ALL marks in-memory); the namespace
+    // switch preserves the user-visible "fresh race, no marks" experience
+    // without losing prior research.
+    setRaceId(race.race_id ?? raceKey(race, date));
+    // Auto-regen effect (driven by [runners, style, impressions, raceId])
+    // will refill tickets; no need to set them here.
   }
 
   function seedManual(n = 12) {
@@ -159,8 +181,34 @@ function App() {
     setSelectedRaceDate("");
     setSelectedRaceKey("");
     setRaceStatus("manual");
-    setIntuition({});
+    // Manual mode has no race_id and no composite key — use a stable
+    // namespace so in-session marks work (they won't survive reload to a
+    // different race, which matches the old in-memory-only behavior).
+    setRaceId("manual");
   }
+
+  // ADR-0011 Phase 1: write a mark through to the impression store. The
+  // child (RaceScreen / ExplainScreen) builds the MarkPayload with the
+  // runner's current odds + the snapshot heartbeat already attached — App
+  // just adapts it to the store's value shape. Toggle-off (mark === null)
+  // deletes the entry, mirroring the old `delete copy[uma]` semantics.
+  function handleMark(payload: MarkPayload) {
+    setImpressions((prev) =>
+      setImpression(prev, payload.raceId, payload.horseName, {
+        mark: payload.mark,
+        umaban: payload.umaban,
+        odds_when_marked: payload.oddsWhenMarked,
+        odds_snapshot_at: payload.oddsSnapshotAt,
+      }),
+    );
+  }
+
+  // Persist the impression store whenever it changes. Best-effort: failures
+  // (quota / disabled storage) degrade silently to in-memory only — the
+  // store layer swallows the throw so the React render never sees it.
+  useEffect(() => {
+    saveImpressions(impressions);
+  }, [impressions]);
 
   // ---------- Derived: de-vigged probs ----------
   const { p } = useMemo(() => winProbs(runners), [runners]);
@@ -172,9 +220,37 @@ function App() {
   // again whenever style changes. The TICKETS tab is never a dead
   // end. Style is framed as optional refinement; the
   // "Standard tickets" CTA on the Race screen jumps straight to results.
-  function regenerate(overrideStyle?: StyleState, overrideIntuition?: Record<string, IntuitionState>) {
+  //
+  // ADR-0011 Phase 1: the recommender's interface is still uma-keyed (its
+  // math operates on combos of umas — changing the input shape would ripple
+  // through recommender.ts + its tests for no behavioral gain). App.deriveIntuitionRecord
+  // rebuilds that uma-keyed view on every regenerate from the impression
+  // store + the current runners list. This is the "ticket builder consumes
+  // byRace(race_id)" hop — the store IS the source of truth; the derived
+  // record is just a thin adapter for the recommender's stable interface.
+  function deriveIntuitionRecord(
+    overrideImpressions?: ImpressionMap,
+    overrideRaceId?: string,
+  ): Record<string, IntuitionState> {
+    const store = overrideImpressions ?? impressions;
+    const ns = overrideRaceId ?? raceId;
+    if (!ns) return {};
+    const byHorseKey = impressionsByRace(store, ns);
+    const out: Record<string, IntuitionState> = {};
+    for (const r of runners) {
+      const hk = normalizeName(r.name);
+      if (hk && byHorseKey[hk]) out[r.uma] = byHorseKey[hk].mark;
+    }
+    return out;
+  }
+
+  function regenerate(
+    overrideStyle?: StyleState,
+    overrideImpressions?: ImpressionMap,
+    overrideRaceId?: string,
+  ) {
     const s = overrideStyle ?? style;
-    const i = overrideIntuition ?? intuition;
+    const i = deriveIntuitionRecord(overrideImpressions, overrideRaceId);
     // Default diverse; personality refines: on the beginner path (DEFAULT_STYLE
     // + no intuition), surface one safer / balanced / spicier ticket each so
     // the user reaches 3 ideas in ≤2 decisions. The moment a personality is
@@ -189,8 +265,9 @@ function App() {
     setActiveTicketId(out[0]?.id ?? null);
   }
 
-  // Auto-regen on any change to runners/style/intuition. Skip the very first
-  // render (handled by the initial loadLive flow). Stay on the current step.
+  // Auto-regen on any change to runners/style/impressions/raceId. Skip the
+  // very first render (handled by the initial loadLive flow). Stay on the
+  // current step.
   const firstRender = useRef(true);
   useEffect(() => {
     if (runners.length < 2) {
@@ -203,29 +280,31 @@ function App() {
     }
     regenerate();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runners, style, intuition]);
+  }, [runners, style, impressions, raceId]);
 
-  // "Updated with your marks" toast: flashes once when intuition changes while
-  // the user is viewing the Tickets step, so the auto-regen reshape is visible.
-  // Tracked against its own ref so runner/style changes don't trigger it.
-  const prevIntuition = useRef(intuition);
+  // "Updated with your marks" toast: flashes once when the user adds a mark
+  // while on the Tickets step, so the auto-regen reshape is visible. Tracked
+  // against the impression store (race-scoped) so a stale mark from another
+  // race doesn't trigger it; runner/style changes don't trigger it either.
+  const prevMarkCount = useRef<number>(0);
   useEffect(() => {
-    const prev = prevIntuition.current;
-    prevIntuition.current = intuition;
-    if (prev === intuition) return;
-    if (Object.keys(intuition).length === 0) return; // cleared, not a mark
+    const count = Object.keys(impressionsByRace(impressions, raceId)).length;
+    const prev = prevMarkCount.current;
+    prevMarkCount.current = count;
+    if (count <= prev) return;       // only fires on a NEW mark, not a clear
+    if (count === 0) return;          // empty state — no toast
     if (step !== "tickets") return;
     setToast(t("tickets.updatedMarks"));
     const id = window.setTimeout(() => setToast(""), 1800);
     return () => window.clearTimeout(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [intuition, step]);
+  }, [impressions, raceId, step]);
 
-  /** "Standard tickets" CTA — apply DEFAULT_STYLE + empty intuition, jump. */
+  /** "Standard tickets" CTA — apply DEFAULT_STYLE + clear marks for this race, jump. */
   function standardTickets() {
     setStyle(DEFAULT_STYLE);
-    setIntuition({});
-    regenerate(DEFAULT_STYLE, {});
+    if (raceId) setImpressions((prev) => clearRaceForReset(prev, raceId));
+    regenerate(DEFAULT_STYLE, undefined, raceId);
     setStep("tickets");
   }
 
@@ -238,8 +317,8 @@ function App() {
   /** Reset over-constraints and try again — used by the empty state. */
   function resetToStandard() {
     setStyle(DEFAULT_STYLE);
-    setIntuition({});
-    regenerate(DEFAULT_STYLE, {});
+    if (raceId) setImpressions((prev) => clearRaceForReset(prev, raceId));
+    regenerate(DEFAULT_STYLE, undefined, raceId);
   }
 
   /**
@@ -401,17 +480,16 @@ function App() {
           onStandard={standardTickets}
           onRefine={() => setStep("style")}
           raceStatus={raceStatus}
-          intuition={intuition}
-          onIntuition={(uma, next) => {
-            // Toggle/clear a mark: replace or delete the entry so the
-            // recommender sees a clean Record each time.
-            setIntuition((prev) => {
-              const copy = { ...prev };
-              if (next === null) delete copy[uma];
-              else copy[uma] = next;
-              return copy;
-            });
-          }}
+          raceId={raceId}
+          impressions={impressions}
+          // Snapshot heartbeat — stamped into each mark so a future reader
+          // can tell whether the mark was made against the live odds or a
+          // stale snapshot. Falls back to updated_at when the producer hasn't
+          // set published_at.
+          oddsSnapshotAt={
+            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+          }
+          onMark={handleMark}
         />
       )}
 
@@ -446,15 +524,12 @@ function App() {
           style={style}
           onBack={() => setStep("tickets")}
           runners={runners}
-          intuition={intuition}
-          onIntuition={(uma, next) => {
-            setIntuition((prev) => {
-              const copy = { ...prev };
-              if (next === null) delete copy[uma];
-              else copy[uma] = next;
-              return copy;
-            });
-          }}
+          raceId={raceId}
+          impressions={impressions}
+          oddsSnapshotAt={
+            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+          }
+          onMark={handleMark}
         />
       )}
 

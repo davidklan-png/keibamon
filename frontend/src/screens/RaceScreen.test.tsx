@@ -104,8 +104,10 @@ function renderHtml() {
       onStandard={() => {}}
       onRefine={() => {}}
       raceStatus="manual"
-      intuition={{}}
-      onIntuition={() => {}}
+      raceId="test-race"
+      impressions={{}}
+      oddsSnapshotAt={null}
+      onMark={() => {}}
     />,
   );
 }

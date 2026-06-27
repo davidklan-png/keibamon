@@ -9,7 +9,10 @@ import { RET, type BetType, type Runner } from "../lib/fairvalue";
 import type { Ticket, StyleState, IntuitionState } from "../lib/types";
 import { moodKey } from "../lib/types";
 import { yen, fmt } from "../lib/format";
+import type { ImpressionMap } from "../lib/impressions";
+import { getImpression } from "../lib/impressions";
 import { FormPanel } from "./FormPanel";
+import type { MarkPayload } from "./RaceScreen";
 
 export interface ExplainScreenProps {
   ticket: Ticket | null;
@@ -18,13 +21,20 @@ export interface ExplainScreenProps {
   /** Milestone 4: runners for the current race, so the Explain screen can
    * surface a form/context panel for each horse on the ticket. */
   runners: Runner[];
-  intuition: Record<string, IntuitionState>;
-  onIntuition: (uma: string, next: IntuitionState) => void;
+  /**
+   * ADR-0011 Phase 1: replaces the old uma-keyed intuition record. Same shape
+   * as RaceScreen — parent owns the store; this screen reads via lookup +
+   * writes through onMark with the full odds-context payload.
+   */
+  raceId: string;
+  impressions: ImpressionMap;
+  oddsSnapshotAt: string | null;
+  onMark: (payload: MarkPayload) => void;
 }
 
 export function ExplainScreen(props: ExplainScreenProps) {
   const { t, tFmt } = useI18n();
-  const { ticket, style, onBack, runners, intuition, onIntuition } = props;
+  const { ticket, style, onBack, runners, raceId, impressions, oddsSnapshotAt, onMark } = props;
   const [openUma, setOpenUma] = useState<string | null>(null);
   if (!ticket) {
     return (
@@ -146,8 +156,17 @@ export function ExplainScreen(props: ExplainScreenProps) {
                   horseName={r.name || `#${r.uma}`}
                   jockeyId={r.jockey_id ?? null}
                   jockeyName={r.jockey_name ?? null}
-                  intuition={intuition[r.uma] ?? null}
-                  onIntuition={(next) => onIntuition(r.uma, next)}
+                  impression={getImpression(impressions, raceId, r.name)}
+                  onMark={(next) =>
+                    onMark({
+                      raceId,
+                      horseName: r.name ?? "",
+                      umaban: Number(r.uma),
+                      oddsWhenMarked: r.odds > 0 ? r.odds : null,
+                      oddsSnapshotAt,
+                      mark: next,
+                    })
+                  }
                   onClose={() => setOpenUma(null)}
                 />
               );
