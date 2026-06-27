@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keibamon 競馬モン — a horse-racing data lab, built in public</title>
-<meta name="description" content="Keibamon: a local-first data & ML platform for Japanese horse racing (JRA). A leakage-guarded, walk-forward evaluation spine — and the honest finding that the JRA market prices public information efficiently. Six signals tested, six honest nulls.">
-<meta property="og:title" content="Keibamon 競馬モン">
-<meta property="og:description" content="A local-first horse-racing data lab for JRA. Rigorous evaluation spine; honest market-efficiency findings. Built in public.">
+<title>Keibamon 競馬モン — the honest keiba companion</title>
+<meta name="description" content="Keibamon: a companion for Japanese horse racing (JRA). Weekend graded-stakes research that refreshes through post time, horse & jockey form at a glance, and honest ticket structuring you copy straight onto the JRA card. Built on a research spine rigorous enough to prove the market is efficient — so it never sells you a winning system.">
+<meta property="og:title" content="Keibamon 競馬モン — the honest keiba companion">
+<meta property="og:description" content="A companion for JRA racing: weekend graded-stakes research, horse & jockey form, honest ticket structuring. Built in public on a rigorous, market-tested research spine. Never a tip sheet.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://keibamon.com/keibamon.png">
 <style>
@@ -35,7 +35,6 @@
   .card h3{margin:.6em 0 .3em; font-size:18px}
   .card p{margin:0; color:var(--muted); font-size:14.5px}
   .card .stat{font:700 22px/1 ui-monospace,monospace; color:var(--ink); margin:.5em 0 .15em}
-  /* scoreboard */
   .score{display:flex; flex-direction:column; gap:10px}
   .scorerow{display:flex; align-items:center; justify-content:space-between; gap:14px;
     background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 16px}
@@ -61,84 +60,86 @@
     <img class="avatar" src="keibamon.png" width="104" height="104" alt="Keibamon 競馬モン avatar" decoding="async">
     <p class="eyebrow">build in public · 個人開発</p>
     <h1>Keibamon <span class="ja">競馬モン</span></h1>
-    <p class="lede">A local-first data &amp; machine-learning lab for Japanese horse racing (JRA) — built to turn open racing data into honest, testable insight. The point isn't a tip sheet. It's a yardstick rigorous enough to tell a real signal from a flattering coincidence — and the willingness to publish what it says.</p>
-    <span class="status"><span class="dot"></span>PROGRAMME COMPLETE · 6 NULLS · MARKET EFFICIENT</span>
+    <p class="lede">Your companion for Japanese horse racing (JRA) — weekend graded-stakes research that refreshes through post time, horse-and-jockey form at a glance, and honest ticket structuring you can copy straight onto the JRA card. Built on a research spine rigorous enough to prove the market is efficient — which is exactly why it will never sell you a winning system.</p>
+    <span class="status"><span class="dot"></span>RESEARCH PREVIEW · LIVE ON RACE DAY</span>
 
     <div class="links">
       <a class="btn btn--turf" href="/app/">アプリを開く · Open the app &rarr;</a>
     </div>
 
-    <h2>// The platform</h2>
+    <h2>// What it does</h2>
     <div class="grid">
       <div class="card">
-        <div class="k">DATA LAKE</div>
-        <div class="stat">30 yrs</div>
-        <h3>Medallion lake</h3>
-        <p>JRA-VAN official records normalized bronze→silver→gold: ~462k race entries, plus a full year of intraday odds curves (83M time-series rows), training times (12.5M), mining, going &amp; weather.</p>
+        <div class="k">WEEKEND ROUNDUP</div>
+        <h3>Graded-stakes research, live</h3>
+        <p>Every G1–G3 on the card, with race shape, contenders, pace, gate &amp; going — and it refreshes itself every few minutes through post time, with an "as of" stamp so you always know how current the odds are.</p>
       </div>
+      <div class="card">
+        <div class="k">FORM &amp; YOUR READ</div>
+        <h3>Know the runners</h3>
+        <p>Tap any horse for career, recent finishes with surface &amp; distance, going splits and running style — then mark your own read (anchor, like, price, avoid) and watch it against how the market moves.</p>
+      </div>
+      <div class="card">
+        <div class="k">HONEST TICKETS</div>
+        <h3>Structure, then transcribe</h3>
+        <p>Turn your reads into box / wheel / formation tickets across 馬連・ワイド・3連複・馬単・3連単, with a mark-card fill guide you copy straight onto the JRA card. The math is honest — WIDE pays on multiple lines, and we count every one.</p>
+      </div>
+      <div class="card">
+        <div class="k">GLOSSARY</div>
+        <h3>The card, decoded</h3>
+        <p>A bilingual EN / 日本語 reference for the terms, bet types and track language — so the betting card stops being a wall of kanji and starts making sense.</p>
+      </div>
+    </div>
+
+    <h2>// Why you can trust it</h2>
+    <p class="note"><b>Six signals tested, six honest nulls.</b> Before any of this was a companion, it was a research lab. Every promising edge — data-mining, going aptitude, training times, the odds curve, cross-pool exotics, even a full multivariate model — was held to one bar: beat the de-vigged market, out of sample, net of takeout. All six failed it. The JRA pari-mutuel prices public information efficiently. We publish that finding plainly, because a companion that knows it can't sell you an edge is one you can actually trust.</p>
+    <div class="grid">
       <div class="card">
         <div class="k">INTEGRITY</div>
         <div class="stat">PIT</div>
-        <h3>The evaluation spine</h3>
-        <p>Point-in-time correct (a decision at time <em>t</em> sees only what was knowable at <em>t</em>), leakage-guarded, walk-forward, settled at official payouts, judged against a calibrated market baseline. The yardstick everything is measured against.</p>
+        <h3>Point-in-time honest</h3>
+        <p>A decision at time <em>t</em> sees only what was knowable at <em>t</em> — leakage-guarded, walk-forward, settled at official payouts, judged against a calibrated market baseline. The same rigor underwrites the live numbers.</p>
       </div>
       <div class="card">
-        <div class="k">LIVE</div>
-        <div class="stat">race-day</div>
-        <h3>Capture &amp; dashboard</h3>
-        <p>Official realtime odds captured race-day, residual-drift &amp; going context surfaced to a phone dashboard. Informational only — never a bet recommender.</p>
+        <div class="k">NEVER A TIP SHEET</div>
+        <div class="stat">your call</div>
+        <h3>No picks, no rankings</h3>
+        <p>Keibamon surfaces data and structures <em>your</em> read. It never names a winner, ranks runners, or claims a profit. The decision is always yours — and the takeout is always shown.</p>
+      </div>
+      <div class="card">
+        <div class="k">CALIBRATED</div>
+        <div class="stat">even the tail</div>
+        <h3>The market is the yardstick</h3>
+        <p>The de-vigged win market is near-perfectly calibrated, with no exploitable favorite-longshot mispricing. That sound baseline is precisely why the honest numbers in the app hold up.</p>
       </div>
     </div>
 
-    <h2>// How it runs — the architecture</h2>
-    <div class="grid">
-      <div class="card">
-        <div class="k">TOPOLOGY</div>
-        <div class="stat">one host</div>
-        <h3>Local-first, single machine</h3>
-        <p>Consolidating onto one stationary workstation: ingestion, the medallion lake, modeling, race-day capture and the edge push all run on the same local machine — no cloud database of record, no cross-machine handoff. The git repo and the local lake are the only sources of truth.</p>
-      </div>
-      <div class="card">
-        <div class="k">DATA FLOW</div>
-        <div class="stat">source → spine → phone</div>
-        <h3>Lake to edge</h3>
-        <p>Race data lands as immutable bronze, normalizes through silver→gold→marts in DuckDB, and is judged by the evaluation spine. Only curated, derived results push to a throwaway Cloudflare D1 + Worker that a phone reads at the track — if the edge goes stale, the lake is still the truth.</p>
-      </div>
-      <div class="card">
-        <div class="k">MIGRATION</div>
-        <div class="stat">in progress</div>
-        <h3>Retiring the licensed feed</h3>
-        <p>The original two-machine design — a Windows JV-Link host feeding the analytics machine over an airgap — is collapsing to a single, scrape-sourced host. The licensed historical pull is frozen as an immutable cross-check oracle; the new feed must reconcile against it at zero mismatch before the old host is switched off.</p>
-      </div>
-    </div>
-
-    <h2>// Findings — the market-test scoreboard</h2>
+    <h2>// The market-test scoreboard</h2>
     <div class="score">
       <div class="scorerow"><div class="name">Data-mining (DM / TM)<span>JRA-VAN's own time &amp; score models</span></div><span class="tag tag--null">priced in</span></div>
       <div class="scorerow"><div class="name">Going / track-condition handling<span>per-horse wet-vs-firm aptitude</span></div><span class="tag tag--null">priced in</span></div>
       <div class="scorerow"><div class="name">Training times (坂路 · woodchip)<span>final-furlong gallop splits</span></div><span class="tag tag--null">priced in</span></div>
       <div class="scorerow"><div class="name">Odds curve / closing-line<span>announcement→post movement</span></div><span class="tag tag--null">priced in</span></div>
       <div class="scorerow"><div class="name">Exotic pools (Harville / Henery)<span>cross-pool win-implied projection</span></div><span class="tag tag--null">priced in</span></div>
-      <div class="scorerow"><div class="name">Multivariate model (Benter two-stage)<span>real signal alone — but blend weight a=0 with the market in</span></div><span class="tag tag--null">priced in</span></div>
+      <div class="scorerow"><div class="name">Multivariate model (Benter two-stage)<span>real signal alone — blend weight a=0 once the market is in</span></div><span class="tag tag--null">priced in</span></div>
     </div>
-    <p class="note"><b>Six signals tested, six honest nulls.</b> Each was held to the same bar — beat the de-vigged market, out of sample, net of takeout, with the confidence interval clearing zero. The capstone is the cleanest: a full multivariate model that genuinely predicts in isolation (it learns real handicapping signal), yet contributes <em>exactly zero</em> once the market price is in the blend — the market had already priced every scrap. The JRA pari-mutuel prices public information efficiently, across static factors, intraday dynamics, and cross-pool projection. These negative results are the most valuable thing here: knowing the market is efficient beats <em>paying</em> to find out. The public-information edge-hunt is closed.</p>
 
-    <h2>// What the data did reveal</h2>
+    <h2>// How it runs</h2>
     <div class="grid">
       <div class="card">
-        <div class="k">STRUCTURE</div>
-        <h3>Henery γ ≈ 0.856</h3>
-        <p>Favorites are less dominant in 2nd/3rd than naive Harville pricing assumes — reproduced walk-forward, matching the racing-statistics literature (Henery 1981 / Stern 1994).</p>
+        <div class="k">LOCAL-FIRST</div>
+        <h3>Lake to edge</h3>
+        <p>A medallion data lake (bronze→silver→gold) of JRA records and intraday odds curves lives on one machine and is the source of truth. Only curated, derived results push to a Cloudflare edge — if the edge goes stale, the lake is still right.</p>
       </div>
       <div class="card">
-        <div class="k">STRUCTURE</div>
-        <h3>Favorite-longshot bias compounds</h3>
-        <p>In exotics, popular combinations are overbet and thin longshot combos underbet — boxing favorites systematically overpays. A "bet-smarter" nuance, not an edge.</p>
+        <div class="k">SELF-REFRESHING</div>
+        <h3>The Roundup publishes itself</h3>
+        <p>On race day a scheduled job rebuilds the weekend report from the live capture every few minutes — no human in the loop. A staleness guard freezes it honestly if the upstream feed ever stalls, rather than faking freshness.</p>
       </div>
       <div class="card">
-        <div class="k">WHY IT'S TRUSTWORTHY</div>
-        <h3>Market is calibrated — even the tail</h3>
-        <p>The de-vigged win market is near-perfectly calibrated (no exploitable favorite-longshot mispricing). That sound baseline is precisely why the nulls hold up.</p>
+        <div class="k">OPEN</div>
+        <h3>Built in public</h3>
+        <p>122 commits in the first 17 days, the architecture decisions written down as ADRs, and the negative results published alongside the wins. The code and the reasoning are both in the open.</p>
       </div>
     </div>
 
@@ -146,42 +147,37 @@
     <div class="grid">
       <div class="card">
         <div class="k">LIVE NOW</div>
-        <h3>Fair-value bet helper →</h3>
-        <p>The research is done; the fun isn't. The Henery joint-distribution model is now a live tool: turn any race's win odds into honest exacta/quinella/trio/trifecta prices, dodge the overbet chalk, and structure recreational tickets that aren't sucker bets. <a href="/helper">Open the helper →</a></p>
+        <h3>Race-day ready</h3>
+        <p>The companion is live for JRA weekends — Roundup, form, glossary and ticket structuring, in English and 日本語, on your phone at the track.</p>
       </div>
       <div class="card">
-        <div class="k">NEXT</div>
-        <h3>A recreational race companion</h3>
-        <p>The helper is being reworked into a guided five-step flow — pick a race, tell it how you like to play, add your read on the runners, get three honest ticket shapes (Safe / Balanced / Spicy) with plain-language reasons. Fun and legible, never a tip sheet or a profit claim.</p>
-      </div>
-      <div class="card">
-        <div class="k">CONCLUDED</div>
-        <h3>The efficient frontier</h3>
-        <p>Six nulls close the public-information programme. The de-vigged win market is the frontier for public data; any remaining edge needs private data, cross-pool information, or latency at close — none of them recreational.</p>
+        <div class="k">RAMPING</div>
+        <h3>Toward best-in-class</h3>
+        <p>Heading into the summer: a smoother first run for newcomers, deeper form context, and your saved reads carried across the whole weekend — growing into the keiba companion regulars reach for first.</p>
       </div>
       <div class="card">
         <div class="k">ONGOING</div>
-        <h3>The platform lives on</h3>
-        <p>Forward odds-curve capture keeps banking race-day data, the evaluation spine stands ready for any future signal, and the lake remains a clean research instrument — edge or no edge.</p>
+        <h3>The lab lives on</h3>
+        <p>Forward odds-curve capture keeps banking race-day data and the evaluation spine stands ready for any future signal — so if an honest edge ever does appear, this is where it gets caught.</p>
       </div>
     </div>
 
     <h2>// Links</h2>
     <div class="links">
-      <a class="btn btn--turf" href="https://github.com/davidklan-png/keibamon" target="_blank" rel="noreferrer">
+      <a class="btn btn--turf" href="/app/">アプリを開く · Open the app &rarr;</a>
+      <a class="btn" href="/live.html">Live race-day dashboard →</a>
+      <a class="btn" href="https://github.com/davidklan-png/keibamon" target="_blank" rel="noreferrer">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>
         GitHub — keibamon repo
       </a>
-      <a class="btn btn--turf" href="/helper">⚖ Fair-value bet helper</a>
-      <a class="btn" href="/live.html">Live race-day dashboard →</a>
       <a class="btn" href="https://kinokoholic.com" target="_blank" rel="noreferrer">き kinokoholic.com — portfolio</a>
     </div>
 
-    <p class="note">Keibamon is one of the build-in-public projects under <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>. The platform runs locally; only curated, derived results are published here. Nothing on this site is betting advice.</p>
+    <p class="note">Recreational research only. Not betting advice, not a winning method, not a profit guarantee. Pool takeout applies to every ticket. Keibamon is one of the build-in-public projects under <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>.</p>
 
     <footer>
       <span>© 2026 David Klan · built in public</span>
-      <span>JRA · データ分析 &amp; ML · honest validation</span>
+      <span>JRA · 競馬コンパニオン · honest by design</span>
     </footer>
   </main>
 </body>
