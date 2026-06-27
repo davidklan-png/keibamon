@@ -4,6 +4,8 @@ name: Deploy to Cloudflare
 # CI, always built fresh. This eliminates the two failure modes that broke /app/:
 #   - deploying from a stale local checkout (splash/app not rebuilt → bad manifest)
 #   - two deploy identities racing (the concurrency group serializes deploys)
+# Workers Builds (Cloudflare "Connect to Git") was disabled 2026-06-27 after it
+# repeatedly clobbered CI deploys with a build that omitted the frontend step.
 on:
   push:
     branches: [main]
