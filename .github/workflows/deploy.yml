@@ -44,9 +44,19 @@ jobs:
       - name: Frontend tests
         run: npm test
         working-directory: frontend
+      # Vite inlines VITE_* at build time. frontend/.env is gitignored, so CI must
+      # supply the Clerk key + social-Worker base or the bundle ships auth-disabled
+      # (the silent-failure trap in docs/runbooks/deploy-public-app.md). Fail loud
+      # if the key is missing, and assert it actually landed in the bundle.
       - name: Build SPA into splash/app
-        run: npm run build
+        run: |
+          test -n "$VITE_CLERK_PUBLISHABLE_KEY" || { echo "::error::VITE_CLERK_PUBLISHABLE_KEY secret is empty — auth would ship broken"; exit 1; }
+          npm run build
+          grep -rq "pk_" ../splash/app/assets || { echo "::error::Clerk publishable key was not inlined into the bundle"; exit 1; }
         working-directory: frontend
+        env:
+          VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
+          VITE_SOCIAL_API_BASE: ${{ secrets.VITE_SOCIAL_API_BASE }}
 
       # Deploy the Worker + static assets (splash/ incl. the freshly built app).
       - name: Deploy
