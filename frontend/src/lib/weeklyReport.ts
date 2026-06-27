@@ -264,14 +264,14 @@ export const deterministicNarrative: NarrativeProvider = {
   weekendHeadline(input, report) {
     const g1 = input.races.find((r) => r.grade === "G1");
     if (!g1) {
-      return `${input.weekend_label}: a graded-stakes weekend with ${report.glance.length} feature races. Snapshot framing below — research context, not a tip.`;
+      return `${input.weekend_label}: a graded-stakes weekend with ${report.glance.length} feature races.`;
     }
     const shape = marketShape(g1);
     const fav = topByOdds(g1.runners)[0];
     const favClause = fav
       ? ` Early market attention centers on ${fav.horse_name} (No.${fav.horse_number}).`
       : "";
-    return `${input.weekend_label}: the ${g1.name}${g1.name_ja ? ` / ${g1.name_ja}` : ""} anchors the weekend. ${shape.label}${favClause} Analytical snapshot only — not betting advice.`;
+    return `${input.weekend_label}: the ${g1.name}${g1.name_ja ? ` / ${g1.name_ja}` : ""} anchors the weekend. ${shape.label}${favClause}`;
   },
   raceWhy(race) {
     const gradeTier: Record<Grade, string> = {
@@ -308,9 +308,6 @@ export const deterministicNarrative: NarrativeProvider = {
         "Balanced weekend: no single theme dominates — read each race on its own market and shape.",
       );
     }
-    out.push(
-      "Reminder: takeout applies to every pool — none of the above is an edge claim.",
-    );
     return out;
   },
 };
