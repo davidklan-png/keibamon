@@ -67,6 +67,11 @@ def build_runner(raw: dict[str, Any]) -> dict[str, Any]:
         # it doesn't read, and the social Worker selects runner fields by name.
         "jockey_id": raw.get("jockey_id"),
         "jockey_name": raw.get("jockey_name"),
+        # Barrier draw (wakuban/枠) from the shutuba entries scrape. Distinct
+        # from umaban — this is the gate position, not the horse number. None
+        # until entries finalize (Thursday/Friday pre-entries layout has empty
+        # 枠 cells that are JS-filled, so the parser yields None until then).
+        "gate": raw.get("gate"),
     }
 
 
@@ -94,6 +99,13 @@ def build_race(raw: dict[str, Any]) -> dict[str, Any]:
         # one, so older snapshots / marts without these stay readable.
         "surface": raw.get("surface"),
         "distance_m": raw.get("distance_m"),
+        # Track condition (馬場状態) from the shutuba page's RaceData02
+        # <span class="Item03"> cell — posted by JRA race-morning. Normalized
+        # to firm/good/soft/heavy (consistent with jravan.GOING_LABELS +
+        # form_starts.going). None until JRA posts it; the builder leaves
+        # condition_snapshot_at null so the freshness block shows "pending"
+        # honestly.
+        "going": raw.get("going"),
         "status": status,
         "result": result,
         "runners": runners,
@@ -187,6 +199,9 @@ def merge_entries_and_odds(
                 # entries scrape carries both; absent on legacy/manual runners.
                 "jockey_id": e.get("jockey_id"),
                 "jockey_name": e.get("jockey_name"),
+                # Barrier draw (wakuban/枠) from the shutuba scrape. Parsed by
+                # _extract_wakuban; None on the Thursday pre-entries layout.
+                "gate": e.get("gate"),
             }
         )
     return out

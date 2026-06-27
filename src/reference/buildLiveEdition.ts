@@ -100,12 +100,12 @@ export interface LiveEditionRace {
   post_time: string;
   date: string;
   field_size: number;
-  going: null;
+  going: string | null;
   weather: null;
   runners: {
     horse_number: number;
     horse_name: string;
-    gate: null;
+    gate: number | null;
     win_odds: number | null;
   }[];
 }
@@ -241,10 +241,11 @@ export function buildLiveEdition(
       .filter((rn: AnyJson) => rn && typeof rn === "object")
       .map((rn: AnyJson) => {
         const uma = safeNum(rn.umaban ?? rn.horse_number, 0);
+        const gateNum = safeNum(rn.gate, -1);
         return {
           horse_number: uma,
           horse_name: safeStr(rn.name ?? rn.horse_name, `No.${uma}`),
-          gate: null,
+          gate: gateNum >= 0 ? gateNum : null,
           win_odds:
             typeof rn.win_odds === "number" && rn.win_odds > 0
               ? rn.win_odds
@@ -272,7 +273,7 @@ export function buildLiveEdition(
       post_time: safeStr(r.post_time),
       date: safeStr(r.date),
       field_size: runners.length,
-      going: null,
+      going: r.going ? safeStr(r.going) : null,
       weather: null,
       runners,
     });
@@ -295,14 +296,21 @@ export function buildLiveEdition(
   const editionKey = isoWeekOfUTC(anchorDate);
 
   // published_at = now (UTC ISO). odds/card snapshot stamps = the snapshot's
-  // own published_at (when the producer wrote it). gate/condition stay null
-  // until the entries/condition scrapes populate them — the producer chains
-  // those into the same payload, so a richer snapshot upgrades the live row
-  // on the next tick without a code change. The freshness gate above
-  // guarantees meta.published_at is a parseable string, so no fallback needed.
+  // own published_at (when the producer wrote it). gate/condition stamps are
+  // set ONLY when at least one graded race actually carries that field — the
+  // producer parses gate from the shutuba Waku cell (finalizes Thu/Fri) and
+  // going from the RaceData02 <span class="Item03">/ 馬場: TOKEN cell
+  // (posted race-morning), so before those scrape in, the field is
+  // universally null and the freshness block should honestly read "pending"
+  // rather than stamp a fresh-looking time on empty data. When present, they
+  // share the snapshot's heartbeat (same payload), so we reuse
+  // snapshotPublishedAt. The freshness gate above guarantees
+  // meta.published_at is a parseable string, so no fallback needed.
   const meta: AnyJson =
     snap.meta && typeof snap.meta === "object" ? (snap.meta as AnyJson) : {};
   const snapshotPublishedAt = safeStr(meta.published_at);
+  const hasGates = graded.some((g) => g.runners.some((rn) => rn.gate != null));
+  const hasGoing = graded.some((g) => g.going != null);
 
   return {
     edition_key: editionKey,
@@ -311,9 +319,9 @@ export function buildLiveEdition(
     version: LIVE_VERSION,
     published_at: isoUTCNow(now),
     odds_snapshot_at: snapshotPublishedAt,
-    gate_snapshot_at: null,
+    gate_snapshot_at: hasGates ? snapshotPublishedAt : null,
     card_snapshot_at: snapshotPublishedAt,
-    condition_snapshot_at: null,
+    condition_snapshot_at: hasGoing ? snapshotPublishedAt : null,
     races: graded,
   };
 }

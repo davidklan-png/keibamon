@@ -119,6 +119,41 @@ def parse_entries_payload(
     return out
 
 
+# Going (馬場状態) normalization — consistent with jravan.GOING_LABELS and
+# form_starts.going. The Japanese tokens appear on netkeiba's race-day-morning
+# shutuba page in the RaceData02 section as
+# ``<span class="Item03">/ 馬場:良</span>`` etc. Alternation order matters:
+# 稍重 and 不良 must be tried before the single-char 重 and 良 so the longer
+# match wins.
+_GOING_NORMALIZE: dict[str, str] = {
+    "稍重": "good",
+    "不良": "heavy",
+    "重": "soft",
+    "良": "firm",
+}
+
+
+def parse_race_condition(payload_text: str) -> dict[str, Any] | None:
+    """Extract track condition (馬場状態) from a shutuba page payload.
+
+    On race-day morning JRA posts 馬場状態 alongside the race data; before that
+    the cell is absent and this function returns ``None``. The regex targets
+    ``馬場: TOKEN`` anywhere in the page (the format that appears in both the
+    shutuba RaceData02 ``<span class="Item03">`` cell and the result page
+    header). Normalizes to ``firm`` / ``good`` / ``soft`` / ``heavy`` — the
+    same tokens :data:`jravan.GOING_LABELS` and ``form_starts.going`` use.
+
+    Returns ``{"going": "firm"} | None``. Never raises.
+    """
+    m = re.search(r"馬場[：:]\s*(稍重|不良|重|良)", payload_text)
+    if not m:
+        return None
+    going = _GOING_NORMALIZE.get(m.group(1))
+    if not going:
+        return None
+    return {"going": going}
+
+
 def _entry_record(
     race_id: str, raw: dict[str, Any], meta: dict[str, Any]
 ) -> dict[str, Any]:

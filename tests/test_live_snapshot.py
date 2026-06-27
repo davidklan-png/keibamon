@@ -13,7 +13,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from keibamon_core.adapters.netkeiba_entries import parse_entries_payload
+from keibamon_core.adapters.netkeiba_entries import (
+    parse_entries_payload,
+    parse_race_condition,
+)
 from keibamon_core.live.snapshot import (
     build_live_snapshot,
     build_race,
@@ -139,10 +142,11 @@ def test_merge_entries_and_odds_by_umaban():
     ]
     merged = merge_entries_and_odds(entries, {1: 2.8})
     # Milestone-4 form panel: jockey id + name ride along (option-a JOCKEY GAP).
+    # Gate (wakuban) rides along too — None until the entries scrape parses one.
     assert merged[0] == {"umaban": 1, "name": "A", "win_odds": 2.8, "est_odds": 4.0,
-                         "jockey_id": "05201", "jockey_name": "Takeshi"}
+                         "jockey_id": "05201", "jockey_name": "Takeshi", "gate": None}
     assert merged[1] == {"umaban": 2, "name": "B", "win_odds": None, "est_odds": None,
-                         "jockey_id": None, "jockey_name": None}
+                         "jockey_id": None, "jockey_name": None, "gate": None}
 
 
 def test_build_runner_passes_jockey_through():
@@ -522,4 +526,127 @@ def test_partial_flag_clean_for_full_card():
     is_partial, warns = mod.partial_flag(new, card_max=None)
     assert is_partial is False
     assert warns == []
+
+
+# ---------------------------------------------------------------------------
+# Gate (waku/枠) + going (馬場状態) enrichment.
+#
+# The producer parses gate from the shutuba row's Waku cell
+# (`_extract_wakuban`) and going from the RaceData01 section
+# (`parse_race_condition`). The snapshot builder carries both through so the
+# live edition's gate_snapshot_at / condition_snapshot_at flip from "pending"
+# to a real timestamp the moment a graded card actually carries the data —
+# rather than stamping a fresh-looking time on empty fields.
+# Tokens are pinned to firm/good/soft/heavy (matches jravan.GOING_LABELS
+# + form_starts.going) so the lake and the app agree on the going vocabulary.
+# ---------------------------------------------------------------------------
+
+
+def test_build_runner_passes_gate_through():
+    """build_runner carries gate (wakuban) alongside umaban; None when absent
+    (Thursday pre-entries layout has the cell JS-filled)."""
+    r = build_runner({"umaban": 3, "name": "X", "gate": 6})
+    assert r["gate"] == 6
+    bare = build_runner({"umaban": 3, "name": "X"})
+    assert bare["gate"] is None
+
+
+def test_build_race_passes_going_through():
+    """build_race carries going (normalized by the adapter); None until JRA
+    posts the RaceData01 section on race-morning."""
+    with_going = build_race(
+        {
+            "race_no": 11,
+            "going": "firm",
+            "runners": [{"umaban": 1, "win_odds": 5.0}],
+        }
+    )
+    assert with_going["going"] == "firm"
+    legacy = build_race({"race_no": 1, "runners": [{"umaban": 1}]})
+    assert legacy["going"] is None
+
+
+def test_merge_entries_and_odds_passes_gate_through():
+    """merge_entries_and_odds carries gate (option-a JOCKEY GAP pattern) so the
+    entries-scrape gate survives into the runner-input shape build_runner
+    expects. None when the entries scrape didn't parse one."""
+    entries = [
+        {"horse_number": 1, "horse_name": "A", "est_odds": 4.0, "gate": 5},
+        {"horse_number": 2, "horse_name": "B", "est_odds": None},
+    ]
+    merged = merge_entries_and_odds(entries, {1: 2.8})
+    assert merged[0]["gate"] == 5
+    assert merged[1]["gate"] is None
+
+
+def test_parse_race_condition_normalizes_each_token():
+    """All four JRA going tokens normalize to the lake vocabulary. Order in the
+    regex alternation matters: 稍重 and 不良 must be tried before the single-char
+    重 and 良, otherwise 重 would match the second char of 稍重 and yield soft
+    for a 稍重 (good) track."""
+    assert parse_race_condition("馬場:良") == {"going": "firm"}
+    assert parse_race_condition("馬場:稍重") == {"going": "good"}
+    assert parse_race_condition("馬場:重") == {"going": "soft"}
+    assert parse_race_condition("馬場:不良") == {"going": "heavy"}
+    # Full-width colon tolerated (netkeiba occasionally serves one).
+    assert parse_race_condition("馬場：稍重") == {"going": "good"}
+    # Whitespace around the token tolerated.
+    assert parse_race_condition("馬場: 稍重") == {"going": "good"}
+
+
+def test_parse_race_condition_returns_none_when_absent():
+    """Before race-morning the 馬場 cell isn't on the page — no fabrication."""
+    assert parse_race_condition("") is None
+    assert parse_race_condition("<html>no going here</html>") is None
+    # An unrelated 馬場 mention without a recognized token is a non-match too.
+    assert parse_race_condition("馬場:—") is None
+    # The regex needs the 馬場 prefix — a bare 稍重 elsewhere on the page must
+    # NOT match (it could be a jockey note or weather copy).
+    assert parse_race_condition("稍重馬場の京都競馬場") is None
+
+
+def test_parse_race_condition_picks_first_match_in_real_shutuba_fragment():
+    """Real netkeiba RaceData02 fragment (captured 2026-06-14 Hanshin result
+    page). Going sits in ``<span class="Item03">/ 馬場: TOKEN</span>`` alongside
+    weather + surface/distance. The regex anchors on ``馬場:`` (half-width
+    colon, no space) and tolerates the surrounding slash separators."""
+    # Real RaceData02 fragment shape (trimmed from the captured fixture):
+    fragment = (
+        '<div class="RaceData01">\n'
+        '15:40発走 /<!-- <span class="Turf"> --><span> 芝2200m</span> (右 B)\n'
+        '/ 天候:雨<span class="Icon_Weather Weather03"></span>\n'
+        '<span class="Item03">/ 馬場:重</span>\n'
+        "</div>"
+    )
+    assert parse_race_condition(fragment) == {"going": "soft"}
+
+
+def test_parse_race_condition_against_real_result_fixture():
+    """End-to-end: the captured 202609030411 result page (2026-06-14 Hanshin,
+    heavy going that day) parses to going=soft. Pre-race-day shutuba pages
+    have no 馬場 cell yet → None, no fabrication."""
+    result_html = (FIXTURES / "result_202609030411.html").read_text(encoding="utf-8")
+    assert parse_race_condition(result_html) == {"going": "soft"}
+
+    shutuba_html = (FIXTURES / "shutuba_202609030611.html").read_text(encoding="utf-8")
+    assert parse_race_condition(shutuba_html) is None
+
+
+def test_extract_wakuban_against_real_shutuba_fixture():
+    """The 18-runner shutuba fixture parses gates for every row (no None) —
+    confirms the Waku cell regex matches real netkeiba HTML, not just the
+    trimmed test fragments. The same regex backs the entries-scrape gate that
+    flows through merge_entries_and_odds → build_runner → live edition."""
+    html = (FIXTURES / "shutuba_202609030611.html").read_text(encoding="utf-8")
+    runners = parse_entries_payload(html, "202609030611")
+    assert len(runners) == 18
+    # Every runner carries a non-null gate from the Waku cell.
+    assert all(r.get("gate") is not None for r in runners)
+    # Gates are 1..8 (JRA bracket ladder for an 18-horse field) — sanity check
+    # the parser isn't picking up the umaban or another cell by accident.
+    gates = sorted(r["gate"] for r in runners)
+    assert gates[0] == 1
+    assert gates[-1] <= 8
+
+
 

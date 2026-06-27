@@ -33,7 +33,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))  # for publish_d1
 
 from keibamon_core.adapters import netkeiba_http  # noqa: E402
 from keibamon_core.adapters.netkeiba_discovery import discover_card  # noqa: E402
-from keibamon_core.adapters.netkeiba_entries import parse_entries_payload  # noqa: E402
+from keibamon_core.adapters.netkeiba_entries import (  # noqa: E402
+    parse_entries_payload,
+    parse_race_condition,
+)
 from keibamon_core.adapters.netkeiba_payouts import parse_payouts_payload  # noqa: E402
 from keibamon_core.adapters.netkeiba_results import parse_results_payload  # noqa: E402
 from keibamon_core.live.result import build_result  # noqa: E402
@@ -130,15 +133,22 @@ def _live_odds_by_umaban(nk_id: str, race_id: str) -> dict[int, float]:
     return out
 
 
-def _entries_for(nk_id: str) -> list[dict]:
-    """Scrape one shutuba page -> entry runner dicts (carry est_odds)."""
+def _entries_for(nk_id: str) -> tuple[list[dict], dict | None]:
+    """Scrape one shutuba page -> (entry runner dicts, race condition).
+
+    The same fetch yields both runner rows and the race-day track condition
+    (馬場状態). Race condition is ``None`` until JRA posts it race-morning;
+    runners may be empty on a cancelled/missing page. Both degrade gracefully.
+    """
     try:
         url = f"https://race.netkeiba.com/race/shutuba.html?race_id={nk_id}"
         body, _ = netkeiba_http.fetch_payload(url)
-        return parse_entries_payload(body, nk_id)
+        runners = parse_entries_payload(body, nk_id)
+        condition = parse_race_condition(body)
+        return runners, condition
     except Exception as exc:  # noqa: BLE001
         print(f"  {nk_id}: entries fetch skipped ({exc!r})")
-        return []
+        return [], None
 
 
 def _parse_surface_distance(
@@ -283,7 +293,7 @@ def _races_for_date(
     prior_by_race_id = prior_by_race_id or {}
     races = []
     for d in discovered:
-        entries = _entries_for(d.numeric_id)
+        entries, condition = _entries_for(d.numeric_id)
         odds = _live_odds_by_umaban(d.numeric_id, d.canonical_race_id) if entries else {}
         runners = merge_entries_and_odds(entries, odds)
         surface, distance_m = _parse_surface_distance(d.distance)
@@ -297,6 +307,9 @@ def _races_for_date(
             "venue": VENUE_NAMES.get(d.venue_code, d.venue_code),
             "surface": surface,
             "distance_m": distance_m,
+            # Track condition (馬場状態) from the shutuba page — None until
+            # JRA posts it race-morning. Normalized to firm/good/soft/heavy.
+            "going": condition.get("going") if condition else None,
             "runners": runners,
         }
         # ADR-0007 R1: best-effort attach a `result` block for finished races.

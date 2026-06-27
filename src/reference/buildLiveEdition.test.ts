@@ -162,6 +162,84 @@ describe("buildLiveEdition — edition metadata", () => {
     expect(out!.gate_snapshot_at).toBeNull();
     expect(out!.condition_snapshot_at).toBeNull();
   });
+
+  it("gate + going populate race fields AND conditional snapshot timestamps", () => {
+    // The producer parses gate from the shutuba Waku cell (finalizes Thu/Fri)
+    // and going from RaceData02 (race-morning). When either lands, the
+    // matching snapshot stamp flips from null → snapshot.published_at so the
+    // freshness block stops reading "pending" for that field.
+    const snap = snapshot(
+      [
+        gradedRace({
+          race_id: "race-with-everything",
+          going: "firm",
+          runners: [
+            { umaban: 1, name: "A", win_odds: 3.0, gate: 1 },
+            { umaban: 4, name: "B", win_odds: 5.0, gate: 2 },
+          ],
+        }),
+        gradedRace({
+          race_id: "race-no-gate-no-going",
+          grade_label: "G3",
+          // no going, runners without gate
+          runners: [{ umaban: 1, name: "C", win_odds: 9.0 }],
+        }),
+      ],
+      { published_at: "2026-06-27T06:15:00Z" },
+    );
+    const out = buildLiveEdition(snap, NOW);
+    expect(out).not.toBeNull();
+
+    const byId = Object.fromEntries(out!.races.map((r) => [r.race_id, r]));
+    // Going on the populated race; null on the bare one.
+    expect(byId["race-with-everything"].going).toBe("firm");
+    expect(byId["race-no-gate-no-going"].going).toBeNull();
+    // Gate on the populated race's runners; null on the bare one.
+    expect(byId["race-with-everything"].runners.map((r) => r.gate)).toEqual([1, 2]);
+    expect(byId["race-no-gate-no-going"].runners[0].gate).toBeNull();
+
+    // At least one graded race has a gate → stamp.
+    expect(out!.gate_snapshot_at).toBe("2026-06-27T06:15:00Z");
+    // At least one graded race has going → stamp.
+    expect(out!.condition_snapshot_at).toBe("2026-06-27T06:15:00Z");
+    // odds/card unchanged — they were already non-null.
+    expect(out!.odds_snapshot_at).toBe("2026-06-27T06:15:00Z");
+    expect(out!.card_snapshot_at).toBe("2026-06-27T06:15:00Z");
+  });
+
+  it("gate-only snapshot stamps gate_snapshot_at but leaves condition_snapshot_at null", () => {
+    // Thursday/Friday after entries finalize but before race-morning: gates
+    // present, going absent. The freshness block must distinguish them.
+    const snap = snapshot(
+      [
+        gradedRace({
+          going: null,
+          runners: [{ umaban: 1, name: "A", win_odds: 3.0, gate: 5 }],
+        }),
+      ],
+      { published_at: "2026-06-27T06:15:00Z" },
+    );
+    const out = buildLiveEdition(snap, NOW);
+    expect(out!.gate_snapshot_at).toBe("2026-06-27T06:15:00Z");
+    expect(out!.condition_snapshot_at).toBeNull();
+  });
+
+  it("going-only snapshot stamps condition_snapshot_at but leaves gate_snapshot_at null", () => {
+    // Race-morning before gate scrape completes: going present, gates absent.
+    // Defensive — verifies the two flags are computed independently.
+    const snap = snapshot(
+      [
+        gradedRace({
+          going: "good",
+          runners: [{ umaban: 1, name: "A", win_odds: 3.0 /* no gate */ }],
+        }),
+      ],
+      { published_at: "2026-06-27T06:15:00Z" },
+    );
+    const out = buildLiveEdition(snap, NOW);
+    expect(out!.gate_snapshot_at).toBeNull();
+    expect(out!.condition_snapshot_at).toBe("2026-06-27T06:15:00Z");
+  });
 });
 
 // ---------------------------------------------------------------------------
