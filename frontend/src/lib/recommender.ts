@@ -6,10 +6,18 @@
  *   2. Bet-type candidates per personality + complexity.
  *   3. Per-combo scoring (hit rate, payout shape, crowd exposure, flavor,
  *      intuition bonuses/penalties).
- *   4. Group top combos of each type into a Ticket.
+ *   4. Group top combos of each type into a Ticket, with a dominance floor
+ *      that drops lines which can't profit solo and rejects tickets whose
+ *      best realistic hit can't cover the stake.
  *   5. Return up to 3 tickets, diversified by type.
  *
- * Optimizes for coherent recreational structure, NOT expected profit.
+ * Produces honest, non-dominated recreational structure. The project's own
+ * market-baseline research found no public-data edge — so the engine's job
+ * is to surface ticket SHAPES that are coherent with the user's read and
+ * mathematically able to pay back on their best day, not to promise profit.
+ * Wide (multi-win) is handled with true P(≥1) via top-3 enumeration so
+ * co-paying pairs aren't overcounted, and the dominance floor forbids the
+ * "10-pick wide box that loses money even when it hits" failure mode.
  */
 
 import {
@@ -19,6 +27,7 @@ import {
   kPerms,
   rankClass,
   RET,
+  wideTicketStats,
   type BetType,
 } from "./fairvalue";
 import type {
@@ -183,6 +192,27 @@ function scoreCombo(
   // Chalk penalty for non-safe personalities (helper.html behavior).
   if (tag === "chalk" && personality !== "safe") score -= 0.25;
 
+  // Structural-mix reward for the balanced personality. The earlier scoring
+  // (hitW × prob + payW × logFair) naturally bifurcates — high-prob combos
+  // win on the hit term, low-prob combos win on the payout term — so the
+  // balanced tier collapses to all-favorites (under hitW=4) or all-longshots
+  // (under payW=0.35) depending on noise. Genuine balance is structural: a
+  // combo that names at least one favorite AND at least one non-favorite
+  // anchors the likely outcome while opening real upside. Rewarding that
+  // mix at the combo level prevents the tier from drifting to either extreme.
+  if (personality === "balanced") {
+    const order = favOrder(p, allUmas);
+    const favCut = order.slice(0, Math.max(2, Math.ceil(order.length / 3)));
+    const favSet = new Set(favCut);
+    const hasFav = combo.some((u) => favSet.has(u));
+    const hasNonFav = combo.some((u) => !favSet.has(u));
+    if (hasFav && hasNonFav) {
+      score += 0.45; // reward structural mix
+    } else {
+      score -= 0.3; // pure chalk / pure value → non-preferred for balanced
+    }
+  }
+
   // Intuition bonuses.
   for (const u of combo) {
     const tag = intuition[u];
@@ -229,6 +259,37 @@ function satisfiesHardConstraints(
   return true;
 }
 
+/**
+ * Best realistic single-race return for a set of priced lines.
+ *
+ * Non-wide bet types (quinella / exacta / trio / trifecta) are mutually
+ * exclusive: at most ONE line wins per race, so the best case is the top
+ * single-line payout. Wide is the exception — multiple lines can co-hit
+ * (up to C(3,2)=3 pairs when 3 covered horses fill the board) — so we
+ * route through wideTicketStats to capture the multi-pay scenario.
+ *
+ * This is the dominance-floor quantity: a ticket whose best realistic
+ * return ≤ cost is structurally doomed and should be rejected/trimmed.
+ */
+function bestRealisticReturn(
+  type: BetType,
+  lines: ScoredCombo[],
+  p: Record<string, number>,
+  allUmas: string[],
+): number {
+  if (lines.length === 0) return 0;
+  if (type === "wide") {
+    return wideTicketStats(
+      lines.map((l) => ({ combo: l.combo, payout: l.payout })),
+      p,
+      allUmas,
+    ).bestCaseReturn;
+  }
+  let max = 0;
+  for (const l of lines) if (l.payout > max) max = l.payout;
+  return max;
+}
+
 /** Build a single Ticket for a bet type from its top-ranked combos. */
 function buildTicket(
   type: BetType,
@@ -238,35 +299,84 @@ function buildTicket(
   idSuffix: string,
 ): Ticket | null {
   if (ranked.length === 0) return null;
+
+  // ---- Dominance floor --------------------------------------------------
+  // 1. Drop any line whose payout ≤ unit: it can't profit even on a solo
+  //    win, so it's dominated by "don't bet that combo at all". This is a
+  //    per-line filter, applied before any tier/personality shaping — no
+  //    personality wants structurally valueless lines.
+  const profitable = ranked.filter((x) => x.payout > unit);
+  if (profitable.length === 0) return null;
+
+  // 2. Greedy keep-by-score: stop adding lines the moment they become
+  //    value-destroying rather than padding to a fixed count. For wide,
+  //    adding a line can grow bestCaseReturn (multi-pay), so the test is
+  //    bestCaseReturn(after add) > cost(after add). For non-wide, the best
+  //    case is fixed at the max single-line payout, so this naturally caps
+  //    the kept set at floor(maxPayout / unit).
   const wanted = linesWanted(type, input.style.personality);
   const maxLines = Math.max(
     1,
     Math.min(MAX_BUDGET_LINES, Math.floor(input.style.budget / Math.max(1, unit))),
   );
-  const lines = ranked.slice(0, Math.min(wanted, maxLines));
-  if (lines.length === 0) return null;
+  const kept: ScoredCombo[] = [];
+  for (const sc of profitable) {
+    if (kept.length >= wanted || kept.length >= maxLines) break;
+    const tentative = [...kept, sc];
+    const tentativeCost = tentative.length * unit;
+    const tentativeBest = bestRealisticReturn(
+      type,
+      tentative,
+      input.p,
+      input.allUmas,
+    );
+    if (tentativeBest <= tentativeCost) break; // value-destroying — stop here
+    kept.push(sc);
+  }
+  if (kept.length === 0) return null;
 
-  const hitProb = clamp(
-    lines.reduce((s, x) => s + x.prob, 0),
-    0,
-    0.98,
-  );
-  const cost = lines.length * unit;
-  const expectedReturn = lines.reduce((s, x) => s + x.prob * x.payout, 0);
-  const avgPayout = lines.reduce((s, x) => s + x.payout, 0) / lines.length;
-  const core = unique(lines.flatMap((x) => x.combo));
-  const tag = rankClass(core, input.p, input.allUmas);
-  // High-variance label: low hit rate OR very large avg payout relative to unit.
-  const variance: "high" | "low" =
-    hitProb < 0.15 || avgPayout / Math.max(1, unit) > 30 ? "high" : "low";
+  // 3. Final non-dominated check on the trimmed set. Defensively recompute
+  //    in case the greedy walk stopped early on a score-order artifact.
+  const cost = kept.length * unit;
+  const bestCase = bestRealisticReturn(type, kept, input.p, input.allUmas);
+  if (bestCase <= cost) return null;
 
-  const ticketLines: TicketLine[] = lines.map((x) => ({
+  // ---- Probabilities + payouts -----------------------------------------
+  // hitProb: wide routes through wideTicketStats (true P(≥1 covered pair
+  // finishes top-3)); the naive Σ overcounts because wide pairs overlap.
+  // Non-wide types keep the existing mutually-exclusive Σ (at most one
+  // quinella/exacta/trio/trifecta combo wins per race → Σ IS the true hit
+  // probability for those types).
+  const ticketLines: TicketLine[] = kept.map((x) => ({
     combo: x.combo,
     prob: x.prob,
     fairOdds: x.fairOdds,
     payout: x.payout,
     tag: x.tag,
   }));
+  const wideStats =
+    type === "wide"
+      ? wideTicketStats(
+          ticketLines.map((l) => ({ combo: l.combo, payout: l.payout })),
+          input.p,
+          input.allUmas,
+        )
+      : null;
+  const hitProb = type === "wide"
+    ? clamp(wideStats!.hitProb, 0, 0.98)
+    : clamp(kept.reduce((s, x) => s + x.prob, 0), 0, 0.98);
+
+  // expectedReturn is correct by linearity for ALL bet types — the
+  // multi-pay scenario for wide is already encoded in Σ p_line × payout_line
+  // (each line's contribution to EV is its hit probability × its payout,
+  // independent of what other lines do). Keep it unchanged.
+  const expectedReturn = kept.reduce((s, x) => s + x.prob * x.payout, 0);
+  const avgPayout = kept.reduce((s, x) => s + x.payout, 0) / kept.length;
+  const core = unique(kept.flatMap((x) => x.combo));
+  const tag = rankClass(core, input.p, input.allUmas);
+  // High-variance label: low hit rate OR very large avg payout relative to unit.
+  const variance: "high" | "low" =
+    hitProb < 0.15 || avgPayout / Math.max(1, unit) > 30 ? "high" : "low";
 
   // Rationale keys are i18n lookups used by the Explain screen.
   const rationaleKeys: string[] = [];
@@ -288,6 +398,7 @@ function buildTicket(
     cost,
     expectedReturn,
     avgPayout,
+    bestCaseReturn: bestCase,
     core,
     tag,
     unit,
@@ -412,7 +523,7 @@ function ticketCoherenceScore(t: Ticket, input: RecommendInput): number {
     // balanced
     s = hit * 4 + avgPrice * 0.35 + fairReturnRatio * 1.6;
   }
-  if (t.tag === "blend") s += 0.16;
+  if (t.tag === "blend") s += 0.5;
   return s;
 }
 

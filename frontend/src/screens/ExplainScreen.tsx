@@ -80,8 +80,20 @@ export function ExplainScreen(props: ExplainScreenProps) {
           </dd>
           <dt>{t("explain.upside")}</dt>
           <dd>
-            {t("tickets.avgPayout")}: {yen(ticket.avgPayout)} ·{" "}
-            {t("tickets.cost")}: {yen(ticket.cost)}
+            {/* Wide can pay multiple lines in one race (up to C(3,2)=3 pairs).
+             * Show the best-case multi-pay scenario so the displayed "if it
+             * hits" return never looks like a net loss on a real win. */}
+            {ticket.type === "wide" ? (
+              <>
+                {t("tickets.wideBestCase")}: {yen(ticket.bestCaseReturn)} ·{" "}
+                {t("tickets.cost")}: {yen(ticket.cost)}
+              </>
+            ) : (
+              <>
+                {t("tickets.avgPayout")}: {yen(ticket.avgPayout)} ·{" "}
+                {t("tickets.cost")}: {yen(ticket.cost)}
+              </>
+            )}
           </dd>
           <dt>{t("explain.fragility")}</dt>
           <dd>

@@ -6,6 +6,7 @@ import {
   expandPlacings,
   type RaceResult,
 } from "./settle";
+import { winProbs, wideTicketStats, type Runner } from "./fairvalue";
 import type { Ticket } from "./types";
 import type { BetType } from "./fairvalue";
 
@@ -28,6 +29,7 @@ function ticket(type: BetType, combos: string[][], unit = 100, avgPayout = 5000)
     cost: combos.length * unit,
     expectedReturn: combos.length * unit * 0.9,
     avgPayout,
+    bestCaseReturn: 1000,
     core: Array.from(new Set(combos.flat())),
     tag: "blend",
     unit,
@@ -634,5 +636,118 @@ describe("settle.resolveTicket — placings precedence over legacy forms", () =>
     const out = resolveTicket(t, 100, legacyTie);
     expect(out.state).toBe("won");
     expect((out as { returned: number }).returned).toBe(600);
+  });
+});
+
+// ============================================================================
+// ADR-wide-co-win — settlement vs prediction consistency for WIDE.
+//
+// Wide is the only JRA bet where multiple lines can win in a single race
+// (up to C(3,2)=3 pairs when the ticket's covered horses fill the board).
+// The settlement resolver must credit every winning line against the
+// publisher's payouts (it does — resolveTicket loops every line and sums
+// yen for each that hits), and the recommender's wideTicketStats must
+// produce a best-case return that AGREES with what settlement credits on
+// the same top-3 outcome. This pins the two paths to the same answer so
+// prediction and settlement can't drift.
+// ============================================================================
+describe("wide multi-win — settlement credits every winning pair", () => {
+  // Realistic 6-horse market so the trio kernel has clean probabilities.
+  const WIDE_RUNNERS: Runner[] = [
+    { uma: "1", odds: 2.4 },
+    { uma: "2", odds: 3.5 },
+    { uma: "3", odds: 6.2 },
+    { uma: "4", odds: 9.0 },
+    { uma: "5", odds: 18.5 },
+    { uma: "6", odds: 51.0 },
+  ];
+  const { p } = winProbs(WIDE_RUNNERS);
+  const allUmas = WIDE_RUNNERS.map((r) => r.uma);
+
+  it("resolveTicket credits the sum of all wide pairs that hit the top-3", () => {
+    // Ticket holds all 3 pairs of {1,2,3}. Day-of: top-3 = [1,2,4] → only
+    // pair {1,2} hits. Settlement credits just that pair's payout row.
+    const tk: Ticket = {
+      id: "wide-test",
+      type: "wide",
+      lines: [
+        { combo: ["1", "2"], prob: 0.3, fairOdds: 3, payout: 410, tag: "blend" },
+        { combo: ["1", "3"], prob: 0.2, fairOdds: 5, payout: 700, tag: "blend" },
+        { combo: ["2", "3"], prob: 0.15, fairOdds: 7, payout: 900, tag: "blend" },
+      ],
+      hitProb: 0,
+      cost: 300,
+      expectedReturn: 0,
+      avgPayout: 670,
+      bestCaseReturn: 0,
+      core: ["1", "2", "3"],
+      tag: "blend",
+      unit: 100,
+      variance: "low",
+      rationaleKeys: [],
+    };
+    const result: RaceResult = {
+      finishers: [1, 2, 4, 5, 6],
+      payouts: [{ pool: "wide", combo: "1-2", yen: 410 }],
+    };
+    const out = resolveTicket(tk, 100, result);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(410);
+  });
+
+  it("when all 3 covered horses fill the board, settlement credits all 3 pairs", () => {
+    // Same ticket, day-of: top-3 = [1,2,3] → all 3 pairs hit. Settlement
+    // sums the 3 payout rows (mirrors what a real bettor receives).
+    const tk: Ticket = {
+      id: "wide-test",
+      type: "wide",
+      lines: [
+        { combo: ["1", "2"], prob: 0.3, fairOdds: 3, payout: 410, tag: "blend" },
+        { combo: ["1", "3"], prob: 0.2, fairOdds: 5, payout: 700, tag: "blend" },
+        { combo: ["2", "3"], prob: 0.15, fairOdds: 7, payout: 900, tag: "blend" },
+      ],
+      hitProb: 0,
+      cost: 300,
+      expectedReturn: 0,
+      avgPayout: 670,
+      bestCaseReturn: 0,
+      core: ["1", "2", "3"],
+      tag: "blend",
+      unit: 100,
+      variance: "low",
+      rationaleKeys: [],
+    };
+    const result: RaceResult = {
+      finishers: [1, 2, 3, 4, 5],
+      payouts: [
+        { pool: "wide", combo: "1-2", yen: 410 },
+        { pool: "wide", combo: "1-3", yen: 700 },
+        { pool: "wide", combo: "2-3", yen: 900 },
+      ],
+    };
+    const out = resolveTicket(tk, 100, result);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(410 + 700 + 900);
+  });
+
+  it("wideTicketStats.bestCaseReturn matches the all-three-hit settlement lines", () => {
+    // Consistency pin: the recommender's predicted best-case (over the
+    // Henery γ model) and the resolver's actual credit (over the day's
+    // payouts) agree on WHICH LINES pay in the all-three-hit scenario.
+    // The numerical payouts differ (one is fair-value est, the other is
+    // the real payout table), but the SET of paying lines is identical —
+    // 3 pairs from {1,2,3}.
+    const lines = [
+      { combo: ["1", "2"], payout: 410 },
+      { combo: ["1", "3"], payout: 700 },
+      { combo: ["2", "3"], payout: 900 },
+    ];
+    const stats = wideTicketStats(lines, p, allUmas);
+    // All 3 lines pay in the all-three-hit case → best case = sum.
+    expect(stats.bestCaseReturn).toBe(410 + 700 + 900);
+    // A 3-pair box covering exactly 3 horses wins iff those 3 finish top-3;
+    // in that case 3 lines pay, so E[winning lines] = 3 × P(they fill board).
+    expect(stats.expWinningLines).toBeLessThanOrEqual(3.0);
+    expect(stats.expWinningLines).toBeGreaterThan(0);
   });
 });

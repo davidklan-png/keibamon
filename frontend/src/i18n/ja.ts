@@ -80,6 +80,7 @@ export const ja = {
     ifHits: "当たれば",
     hitEst: "的中見込み",
     avgPayout: "平均想定配当",
+    wideBestCase: "3頭ボード時の最高戻り",
     estReturn: "期待値",
     estReturnLine: "¥100あたり期待返還 ¥{ret}（控除率相当 {edge}）",
     whyTicket: "この馬券の理由",

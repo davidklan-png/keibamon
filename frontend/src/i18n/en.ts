@@ -81,6 +81,7 @@ export const en = {
     ifHits: "If it hits",
     hitEst: "Hit est.",
     avgPayout: "Avg payout",
+    wideBestCase: "Best 3-way hit",
     estReturn: "Expected return",
     estReturnLine: "Expected return per ¥100: ¥{ret} ({edge} house edge).",
     whyTicket: "Why this ticket",

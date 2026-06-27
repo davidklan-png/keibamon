@@ -45,6 +45,16 @@ export interface Ticket {
   cost: number;
   expectedReturn: number; // Σ p * payout across lines
   avgPayout: number;
+  /**
+   * Best realistic single-race return — what the bettor gets back on the
+   * most lucrative hit scenario. For non-wide bet types this is the top
+   * single-line payout (at most one line wins per race). For wide it's the
+   * wideTicketStats.bestCaseReturn (the all-covered-horses-fill-the-board
+   * multi-pay scenario, where up to C(k,2) lines pay at once). Used by the
+   * dominance floor + the Explain screen's "if it hits" display so a wide
+   * ticket never shows an impossible net-loss-on-win.
+   */
+  bestCaseReturn: number;
   core: string[]; // distinct umas in the ticket
   tag: ValueTag;
   unit: number;

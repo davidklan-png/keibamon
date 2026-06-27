@@ -20,6 +20,7 @@ function mk(id: string, createdAt = 0): CommittedTicket {
       cost: 100,
       expectedReturn: 90,
       avgPayout: 1000,
+      bestCaseReturn: 1000,
       core: ["1", "2"],
       tag: "blend",
       unit: 100,

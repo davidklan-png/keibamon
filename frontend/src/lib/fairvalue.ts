@@ -268,3 +268,85 @@ export function evaluateCombos(
     })
     .filter((x) => isFinite(x.fairOdds) && x.prob > 0);
 }
+
+// ---------------------------------------------------------------------------
+// WIDE multi-win statistics.
+//
+// Wide is the ONLY JRA bet type where multiple lines can win in a single
+// race: if k of a ticket's selected horses finish top-3, the number of
+// winning wide pairs is C(k,2) → 0, 0, 1, 3 for k = 0, 1, 2, 3. The naive
+// `Σ line.prob` overcounts because those pair-probabilities OVERLAP — the
+// events "pair (a,b) ⊆ top3" and "pair (a,c) ⊆ top3" are not disjoint
+// (both happen whenever {a,b,c} ⊆ top3). True hit probability is
+// P(at least one selected wide line is a subset of the top-3).
+//
+// Method: enumerate the C(n,3) possible top-3 sets, compute each set's
+// probability via the trio kernel (P(this exact set is the top-3 in any
+// order) = comboProb("trio", set, ...)). For each set, count how many
+// ticket lines hit. Field sizes are ≤18 → C(18,3) = 816 enumerations max,
+// each O(lines.length) — cheap and exact.
+//
+// `bestCaseReturn` is the payout sum on the single most lucrative top-3
+// outcome (the "all covered horses fill the board" multi-pay scenario).
+// This is the user-facing "what you'd get back on the best realistic hit"
+// — required so wide tickets can't display an impossible "net loss on
+// win" when their average line pays less than the stake but their 3-way
+// co-hit pays well above it.
+//
+// Non-wide bet types do NOT route through this helper: their lines are
+// genuinely mutually exclusive (at most one quinella/exacta/trio/trifecta
+// line wins per race), so Σ line.prob stays the correct hitProb.
+// ---------------------------------------------------------------------------
+export interface WideTicketStats {
+  /** True P(at least one selected wide line finishes in the top-3). */
+  hitProb: number;
+  /** E[number of winning lines on the day] = Σ_top3 P(top3) × winningLines. */
+  expWinningLines: number;
+  /** Max over top-3 outcomes of Σ(line.payout for lines hitting that outcome).
+   *  The "all-covered-horses-fill-the-board" multi-pay scenario. */
+  bestCaseReturn: number;
+}
+
+/**
+ * Compute true wide-aware hit probability + the multi-pay best-case return.
+ *
+ * Caller passes the ticket's already-priced lines (each line carries its
+ * `combo` and `payout`). `p` + `allUmas` are the de-vigged market the lines
+ * were priced against — used to enumerate top-3 outcomes and weight them.
+ */
+export function wideTicketStats(
+  lines: { combo: string[]; payout: number }[],
+  p: Record<string, number>,
+  allUmas: string[],
+): WideTicketStats {
+  if (lines.length === 0 || allUmas.length < 3) {
+    return { hitProb: 0, expWinningLines: 0, bestCaseReturn: 0 };
+  }
+  // Restrict enumeration to the field the lines actually reference. A ticket
+  // covering 4 horses in an 18-horse field still only cares about top-3 sets
+  // containing ≥2 of its horses — but enumerating ALL C(n,3) top-3 sets is
+  // O(816) worst case and the math is cleaner (the trio kernel handles the
+  // weight), so we don't optimize further.
+  const top3Sets = kCombos(allUmas, 3);
+  let hitProb = 0;
+  let expWinningLines = 0;
+  let bestCaseReturn = 0;
+  for (const set of top3Sets) {
+    const pt = comboProb("trio", set, p, allUmas);
+    if (!(pt > 0)) continue;
+    const setHas = new Set(set);
+    let winningLines = 0;
+    let payoutSum = 0;
+    for (const line of lines) {
+      if (line.combo.length === 2 && setHas.has(line.combo[0]) && setHas.has(line.combo[1])) {
+        winningLines += 1;
+        payoutSum += line.payout;
+      }
+    }
+    if (winningLines === 0) continue;
+    hitProb += pt;
+    expWinningLines += pt * winningLines;
+    if (payoutSum > bestCaseReturn) bestCaseReturn = payoutSum;
+  }
+  return { hitProb, expWinningLines, bestCaseReturn };
+}
