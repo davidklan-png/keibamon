@@ -1,0 +1,63 @@
+name: Deploy to Cloudflare
+
+# Single source of truth for production: only a push to main deploys, only from
+# CI, always built fresh. This eliminates the two failure modes that broke /app/:
+#   - deploying from a stale local checkout (splash/app not rebuilt → bad manifest)
+#   - two deploy identities racing (the concurrency group serializes deploys)
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+# Never run two prod deploys at once; never cancel a deploy mid-flight.
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      # Root suite (Worker: weekly/form/settle) — gate the deploy on green.
+      - name: Install root deps
+        run: npm ci
+      - name: Root tests
+        run: npm test
+
+      # Frontend: test, then build INTO splash/app so the deploy manifest is fresh.
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+      - name: Frontend tests
+        run: npm test
+        working-directory: frontend
+      - name: Build SPA into splash/app
+        run: npm run build
+        working-directory: frontend
+
+      # Deploy the Worker + static assets (splash/ incl. the freshly built app).
+      - name: Deploy
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Fail loudly if the live app shell isn't 200 right after deploy.
+      - name: Smoke-check /app/
+        run: |
+          code=$(curl -s -o /dev/null -w "%{http_code}" https://keibamon.com/app/)
+          echo "/app/ → $code"
+          test "$code" = "200"
