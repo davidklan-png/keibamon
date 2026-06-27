@@ -353,4 +353,22 @@ export const ja = {
     },
     intuitionHint: "メモは馬券の形を整えるためのもの — 結果を予言するものではありません。",
   },
+  // ADR-0011 Phase 2 — 2つの入り口（おまかせ / リサーチ）とオッズ変動チップ。
+  // 両方の経路は同じドリルダウンとメモストアを共有するため、どちらで付け
+  // たメモももう一方に表示されます。変動チップは事実の描述のみで、投票を
+  // 推奨しません。グイドレール準拠（"lock / guaranteed / sure thing" 禁止）。
+  lane: {
+    quick: "おまかせ",
+    research: "リサーチ",
+    quickHint: "ライブカードからすぐ馬券作成へ。",
+    researchHint: "週末まとめを開き、有力馬をドリルダウン。",
+    introTitle: "2つの入り口",
+    switchedTo: "経路を保存しました",
+  },
+  drift: {
+    likedAt: "メモ時",
+    nowAt: "現在",
+    shorter: "人気上昇",
+    longer: "人気下降",
+  },
 };

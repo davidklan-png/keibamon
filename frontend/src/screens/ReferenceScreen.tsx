@@ -25,13 +25,25 @@ import {
   type WeeklyReport,
 } from "../lib/weeklyReport";
 import { pickGradedUpcoming } from "../lib/upcoming";
+import type { ImpressionMap } from "../lib/impressions";
 import { GlossaryView } from "./GlossaryView";
 import { RoundupView } from "./RoundupView";
 import { Footer } from "../components/Footer";
 
 type Tab = "glossary" | "roundup";
 
-export function ReferenceScreen({ onBack }: { onBack: () => void }) {
+export interface ReferenceScreenProps {
+  onBack: () => void;
+  /** ADR-0011 Phase 2: the impression store + setter, threaded through to the
+   * Roundup contender drill-down so marks made there share the same spine as
+   * marks made on the live-card FormPanel. */
+  impressions: ImpressionMap;
+  onSetImpressions: (next: ImpressionMap) => void;
+  oddsSnapshotAt: string | null;
+}
+
+export function ReferenceScreen(props: ReferenceScreenProps) {
+  const { onBack, impressions, onSetImpressions, oddsSnapshotAt } = props;
   const { t, lang, setLang } = useI18n();
   const [tab, setTab] = useState<Tab>("glossary");
 
@@ -86,7 +98,15 @@ export function ReferenceScreen({ onBack }: { onBack: () => void }) {
 
       <p className="reference-subtitle">{t("reference.subtitle")}</p>
 
-      {tab === "glossary" ? <GlossaryView /> : <RoundupTab />}
+      {tab === "glossary" ? (
+        <GlossaryView />
+      ) : (
+        <RoundupTab
+          impressions={impressions}
+          onSetImpressions={onSetImpressions}
+          oddsSnapshotAt={oddsSnapshotAt}
+        />
+      )}
 
       <Footer />
     </main>
@@ -99,7 +119,15 @@ export function ReferenceScreen({ onBack }: { onBack: () => void }) {
 // graded stakes from /api/live).
 // ---------------------------------------------------------------------------
 
-function RoundupTab() {
+function RoundupTab({
+  impressions,
+  onSetImpressions,
+  oddsSnapshotAt,
+}: {
+  impressions: ImpressionMap;
+  onSetImpressions: (next: ImpressionMap) => void;
+  oddsSnapshotAt: string | null;
+}) {
   const { t } = useI18n();
   const [resp, setResp] = useState<WeeklyReportResponse>({ status: "empty" });
   const [loaded, setLoaded] = useState(false);
@@ -165,7 +193,12 @@ function RoundupTab() {
           </label>
         </div>
 
-        <RoundupView report={report} />
+        <RoundupView
+          report={report}
+          impressions={impressions}
+          onSetImpressions={onSetImpressions}
+          oddsSnapshotAt={oddsSnapshotAt}
+        />
       </section>
     );
   }

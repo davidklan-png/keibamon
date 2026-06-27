@@ -12,11 +12,11 @@ import { DEFAULT_STYLE, moodKey } from "./lib/types";
 import {
   loadImpressions,
   saveImpressions,
-  setImpression,
   impressionsByRace,
   clearRace as clearRaceForReset,
   type ImpressionMap,
 } from "./lib/impressions";
+import { loadFunnel, saveFunnel, type FunnelLane } from "./lib/funnel";
 import { normalizeName } from "./lib/normalizeName";
 import {
   fetchLiveSnapshot,
@@ -28,7 +28,7 @@ import { raceHasLiveOdds, snapshotRace } from "./lib/mytickets-view";
 import { useAuth } from "./auth/AuthProvider";
 import { postTicket } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
-import { RaceScreen, type MarkPayload } from "./screens/RaceScreen";
+import { RaceScreen } from "./screens/RaceScreen";
 import { StyleScreen } from "./screens/StyleScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
 import { ExplainScreen } from "./screens/ExplainScreen";
@@ -73,6 +73,11 @@ function App() {
   const [impressions, setImpressions] = useState<ImpressionMap>(() =>
     loadImpressions(),
   );
+  // ADR-0011 Phase 2: top-of-funnel lane choice ("quick" ticket-build vs
+  // "research" roundup). Both lanes share the same drill-down + impression
+  // store; this only picks the entry screen. null on first launch → the intro
+  // card is shown until the user picks a lane.
+  const [funnel, setFunnel] = useState<FunnelLane | null>(() => loadFunnel());
   const [tickets, setTickets] = useState<Ticket[]>([]);
   const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   // Transient status line on the Tickets screen (marks-applied / place result).
@@ -187,28 +192,18 @@ function App() {
     setRaceId("manual");
   }
 
-  // ADR-0011 Phase 1: write a mark through to the impression store. The
-  // child (RaceScreen / ExplainScreen) builds the MarkPayload with the
-  // runner's current odds + the snapshot heartbeat already attached — App
-  // just adapts it to the store's value shape. Toggle-off (mark === null)
-  // deletes the entry, mirroring the old `delete copy[uma]` semantics.
-  function handleMark(payload: MarkPayload) {
-    setImpressions((prev) =>
-      setImpression(prev, payload.raceId, payload.horseName, {
-        mark: payload.mark,
-        umaban: payload.umaban,
-        odds_when_marked: payload.oddsWhenMarked,
-        odds_snapshot_at: payload.oddsSnapshotAt,
-      }),
-    );
-  }
-
   // Persist the impression store whenever it changes. Best-effort: failures
   // (quota / disabled storage) degrade silently to in-memory only — the
   // store layer swallows the throw so the React render never sees it.
   useEffect(() => {
     saveImpressions(impressions);
   }, [impressions]);
+
+  // ADR-0011 Phase 2: persist the funnel lane choice. Same best-effort shell
+  // as the impression store.
+  useEffect(() => {
+    if (funnel) saveFunnel(funnel);
+  }, [funnel]);
 
   // ---------- Derived: de-vigged probs ----------
   const { p } = useMemo(() => winProbs(runners), [runners]);
@@ -396,9 +391,19 @@ function App() {
 
   // Reference section: bilingual glossary + weekend graded-stakes roundup.
   // Full-screen, non-auth-gated (reference material). "Back to race builder"
-  // (onBack) returns here.
+  // (onBack) returns here. ADR-0011 Phase 2: threads the impression store so
+  // the Roundup contender drill-down can read/write marks on the same spine.
   if (view === "reference") {
-    return <ReferenceScreen onBack={() => setView("browse")} />;
+    return (
+      <ReferenceScreen
+        onBack={() => setView("browse")}
+        impressions={impressions}
+        onSetImpressions={setImpressions}
+        oddsSnapshotAt={
+          snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+        }
+      />
+    );
   }
 
   return (
@@ -423,6 +428,33 @@ function App() {
           aria-label="toggle language"
         >
           {t("app.langToggle")}
+        </button>
+        {/* ADR-0011 Phase 2: two-path entry. "Quick ticket" jumps to the live
+            card (browse); "Research" opens the Roundup. Both lanes share the
+            same drill-down + impression store, so a mark made on either surface
+            shows on the other. The active lane is visually marked. */}
+        <button
+          className={`lane-pill ${funnel === "quick" ? "on" : ""}`}
+          onClick={() => {
+            setFunnel("quick");
+            setView("browse");
+            setStep("race");
+          }}
+          aria-label={t("lane.quick")}
+          aria-pressed={funnel === "quick"}
+        >
+          {t("lane.quick")}
+        </button>
+        <button
+          className={`lane-pill ${funnel === "research" ? "on" : ""}`}
+          onClick={() => {
+            setFunnel("research");
+            setView("reference");
+          }}
+          aria-label={t("lane.research")}
+          aria-pressed={funnel === "research"}
+        >
+          {t("lane.research")}
         </button>
         {/* My Tickets tab — auth-gated. Triggers Clerk's sign-in modal when
             signed out (or age not yet self-attested) instead of navigating
@@ -465,6 +497,26 @@ function App() {
         ))}
       </nav>
 
+      {/* ADR-0011 Phase 2: first-launch intro card. Shown only when the user
+          hasn't picked a lane yet AND is still on the race picker (no race in
+          flight). One short paragraph per lane, single-disclaimer posture.
+          Dismissed on first selection (the lane pills set `funnel`). */}
+      {funnel === null && step === "race" && (
+        <section className="section lane-intro">
+          <h2>{t("lane.introTitle")}</h2>
+          <div className="lane-introw-cols">
+            <div className="lane-introw-col">
+              <strong>{t("lane.quick")}</strong>
+              <p className="hint">{t("lane.quickHint")}</p>
+            </div>
+            <div className="lane-introw-col">
+              <strong>{t("lane.research")}</strong>
+              <p className="hint">{t("lane.researchHint")}</p>
+            </div>
+          </div>
+        </section>
+      )}
+
       {step === "race" && (
         <RaceScreen
           runners={runners}
@@ -489,7 +541,7 @@ function App() {
           oddsSnapshotAt={
             snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
           }
-          onMark={handleMark}
+          onSetImpressions={setImpressions}
         />
       )}
 
@@ -529,7 +581,7 @@ function App() {
           oddsSnapshotAt={
             snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
           }
-          onMark={handleMark}
+          onSetImpressions={setImpressions}
         />
       )}
 

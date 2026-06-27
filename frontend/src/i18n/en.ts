@@ -363,4 +363,25 @@ export const en = {
     },
     intuitionHint: "Marks shape your ticket — they don't predict outcomes.",
   },
+  // ADR-0011 Phase 2 — two-path entry (Quick ticket / Research) + odds-drift
+  // chip. Both lanes share the same drill-down + impression store, so a mark
+  // made on either surface shows on the other. Copy stays factual: the drift
+  // chip describes the change, never recommends a wager. Guardrail-clean (no
+  // "lock / guaranteed / sure thing / beat the market").
+  lane: {
+    quick: "Quick ticket",
+    research: "Research",
+    quickHint:
+      "Jump straight to building tickets from the live card.",
+    researchHint:
+      "Open the weekend roundup and drill into any contender.",
+    introTitle: "Two ways in",
+    switchedTo: "Lane saved",
+  },
+  drift: {
+    likedAt: "marked at",
+    nowAt: "now",
+    shorter: "shorter",
+    longer: "longer",
+  },
 };

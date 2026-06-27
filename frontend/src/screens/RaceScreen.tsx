@@ -6,28 +6,11 @@
 import { useState } from "react";
 import { useI18n } from "../i18n";
 import type { Runner } from "../lib/fairvalue";
-import type { IntuitionState } from "../lib/types";
-import type { ImpressionMap, Impression } from "../lib/impressions";
-import { getImpression } from "../lib/impressions";
+import type { ImpressionMap } from "../lib/impressions";
 import type { LiveSnapshot, LiveRace } from "../api";
 import { raceHasLiveOdds } from "../lib/mytickets-view";
 import { fmt } from "../lib/format";
 import { FormPanel } from "./FormPanel";
-
-/**
- * Payload the parent (App) uses to write a single impression. Built per-tap
- * by RaceScreen using the open runner's current odds + the snapshot's
- * heartbeat. umaban comes from the runner (already numeric in the live path;
- * Runner.uma is a string so we Number() it at the call site).
- */
-export interface MarkPayload {
-  raceId: string;
-  horseName: string;
-  umaban: number;
-  oddsWhenMarked: number | null;
-  oddsSnapshotAt: string | null;
-  mark: IntuitionState;
-}
 
 // ---------------------------------------------------------------------------
 // Grade ladder — one source for both the badge render and the popularScore
@@ -67,17 +50,17 @@ export interface RaceScreenProps {
   onRefine: () => void;
   raceStatus: string;
   /**
-   * ADR-0011 Phase 1: replaces the old `intuition: Record<uma, IntuitionState>`
-   * + `onIntuition(uma, next)` props. The parent (App) owns the full store;
-   * RaceScreen reads via `getImpression(impressions, raceId, runner.name)`
-   * and writes via `onMark(payload)` with the full odds context.
+   * ADR-0011 Phase 2: the parent (App) owns the full impression store;
+   * RaceScreen threads it + the store setter through to FormPanel, whose
+   * HorseDrillView reads/writes marks directly. The drift chip uses the
+   * open runner's current odds against the stored odds_when_marked.
    */
   raceId: string;
   impressions: ImpressionMap;
   /** Snapshot's heartbeat, stamped into each impression at mark time. */
   oddsSnapshotAt: string | null;
-  /** Write a mark through to the parent's impression store. */
-  onMark: (payload: MarkPayload) => void;
+  /** App-level setter — FormPanel's HorseDrillView writes marks through this. */
+  onSetImpressions: (next: ImpressionMap) => void;
 }
 
 export function RaceScreen(props: RaceScreenProps) {
@@ -99,7 +82,7 @@ export function RaceScreen(props: RaceScreenProps) {
     raceId,
     impressions,
     oddsSnapshotAt,
-    onMark,
+    onSetImpressions,
   } = props;
 
   // Milestone 4: which runner's form panel is open. null = closed.
@@ -353,24 +336,21 @@ export function RaceScreen(props: RaceScreenProps) {
           <>
             {openRunner && (
               <FormPanel
-                horseName={openRunner.name || `#${openRunner.uma}`}
-                jockeyId={openRunner.jockey_id ?? null}
-                jockeyName={openRunner.jockey_name ?? null}
-                impression={getImpression(impressions, raceId, openRunner.name)}
-                // Stamp odds context at mark time: the runner's current odds
-                // (live win_odds when the pool is open, est when registered)
-                // + the snapshot's heartbeat. The parent's onMark writes
-                // this into the impression store keyed by (raceId, horse_key).
-                onMark={(next) =>
-                  onMark({
-                    raceId,
-                    horseName: openRunner.name ?? "",
-                    umaban: Number(openRunner.uma),
-                    oddsWhenMarked: openRunner.odds > 0 ? openRunner.odds : null,
-                    oddsSnapshotAt,
-                    mark: next,
-                  })
-                }
+                raceId={raceId}
+                horse={{
+                  umaban: Number(openRunner.uma),
+                  name: openRunner.name ?? "",
+                  jockeyId: openRunner.jockey_id ?? null,
+                  jockeyName: openRunner.jockey_name ?? null,
+                }}
+                // currentOdds feeds the drift chip: the runner's live win_odds
+                // (or est when registered) compared against the stored
+                // odds_when_marked. HorseDrillView writes marks directly into
+                // the store via onSetImpressions, stamping umaban + odds context.
+                currentOdds={openRunner.odds > 0 ? openRunner.odds : null}
+                impressions={impressions}
+                onSetImpressions={onSetImpressions}
+                oddsSnapshotAt={oddsSnapshotAt}
                 onClose={() => setOpenUma(null)}
                 onReturnToTickets={() => {
                   // Close the panel AND route to tickets so the

@@ -20,8 +20,22 @@ import type {
   WatchlistEntry,
   RacePick,
 } from "../lib/weeklyReport";
+import type { ImpressionMap } from "../lib/impressions";
+import { getImpression } from "../lib/impressions";
+import { HorseDrillView } from "./HorseDrillView";
 
-export function RoundupView({ report }: { report: WeeklyReport }) {
+export interface RoundupViewProps {
+  report: WeeklyReport;
+  /** ADR-0011 Phase 2: the impression store + setter, threaded through to the
+   * contender drill-down. Marks made here share the same spine as the live-card
+   * FormPanel — a mark on either surface shows on the other. */
+  impressions: ImpressionMap;
+  onSetImpressions: (next: ImpressionMap) => void;
+  oddsSnapshotAt: string | null;
+}
+
+export function RoundupView(props: RoundupViewProps) {
+  const { report, impressions, onSetImpressions, oddsSnapshotAt } = props;
   const { t, tFmt } = useI18n();
   // Tiny freshness stamp — "as of HH:MM JST" sourced from the odds snapshot
   // (the producer's capture time), falling back to the publish instant when
@@ -52,7 +66,13 @@ export function RoundupView({ report }: { report: WeeklyReport }) {
       <GlanceTable report={report} />
 
       {report.deep_dives.map((d) => (
-        <RaceDeepDiveBlock key={d.race_id} dive={d} />
+        <RaceDeepDiveBlock
+          key={d.race_id}
+          dive={d}
+          impressions={impressions}
+          onSetImpressions={onSetImpressions}
+          oddsSnapshotAt={oddsSnapshotAt}
+        />
       ))}
 
       <ThemesBlock themes={report.weekend_themes} />
@@ -149,7 +169,17 @@ function GlanceTable({ report }: { report: WeeklyReport }) {
 
 // ---------------------------------------------------------------------------
 
-function RaceDeepDiveBlock({ dive }: { dive: RaceDeepDive }) {
+function RaceDeepDiveBlock({
+  dive,
+  impressions,
+  onSetImpressions,
+  oddsSnapshotAt,
+}: {
+  dive: RaceDeepDive;
+  impressions: ImpressionMap;
+  onSetImpressions: (next: ImpressionMap) => void;
+  oddsSnapshotAt: string | null;
+}) {
   const { t } = useI18n();
   const [open, setOpen] = useState(false);
   return (
@@ -176,7 +206,13 @@ function RaceDeepDiveBlock({ dive }: { dive: RaceDeepDive }) {
           <DeepLine heading={t("roundup.gateImpact")}>{dive.gate_draw_impact}</DeepLine>
           <DeepLine heading={t("roundup.pace")}>{dive.pace_map}</DeepLine>
 
-          <ContenderGroupsBlock groups={dive.contender_groups} />
+          <ContenderGroupsBlock
+            groups={dive.contender_groups}
+            raceId={dive.race_id}
+            impressions={impressions}
+            onSetImpressions={onSetImpressions}
+            oddsSnapshotAt={oddsSnapshotAt}
+          />
 
           <div className="deep-line">
             <h5>{t("roundup.trend")}</h5>
@@ -227,10 +263,23 @@ function DeepLine({
 
 function ContenderGroupsBlock({
   groups,
+  raceId,
+  impressions,
+  onSetImpressions,
+  oddsSnapshotAt,
 }: {
   groups: RaceDeepDive["contender_groups"];
+  raceId: string;
+  impressions: ImpressionMap;
+  onSetImpressions: (next: ImpressionMap) => void;
+  oddsSnapshotAt: string | null;
 }) {
   const { t } = useI18n();
+  // Per-race expand state (mirrors RaceScreen's openUma pattern). Only one
+  // contender drill is open at a time per race. null = all collapsed; the
+  // mount IS the lazy-fetch gate (collapsed rows never fetch form data).
+  const [openUma, setOpenUma] = useState<number | null>(null);
+
   const block = (label: string, refs: ContenderRef[]) => (
     <div className="contender-group" key={label}>
       <h6>{label}</h6>
@@ -238,17 +287,51 @@ function ContenderGroupsBlock({
         <p className="hint">—</p>
       ) : (
         <ul>
-          {refs.map((r) => (
-            <li key={r.horse_number}>
-              <span className="contender-name">
-                No.{r.horse_number} {r.horse_name}
-              </span>
-              {r.win_odds != null && (
-                <span className="contender-odds">~{r.win_odds.toFixed(1)}</span>
-              )}
-              <span className="contender-reason">{r.reason}</span>
-            </li>
-          ))}
+          {refs.map((r) => {
+            const isOpen = openUma === r.horse_number;
+            const mark = getImpression(impressions, raceId, r.horse_name)?.mark;
+            return (
+              <li key={r.horse_number} className={`contender-row ${isOpen ? "on" : ""}`}>
+                <button
+                  type="button"
+                  className="contender-toggle"
+                  aria-expanded={isOpen}
+                  onClick={() => setOpenUma(isOpen ? null : r.horse_number)}
+                >
+                  {mark && (
+                    <span className="combo-chip intuition-mark on contender-mark-chip">
+                      {t(`form.intuition.${mark}`)}
+                    </span>
+                  )}
+                  <span className="contender-name">
+                    No.{r.horse_number} {r.horse_name}
+                  </span>
+                  {r.win_odds != null && (
+                    <span className="contender-odds">~{r.win_odds.toFixed(1)}</span>
+                  )}
+                  <span className="contender-caret">{isOpen ? "▾" : "▸"}</span>
+                </button>
+                <span className="contender-reason">{r.reason}</span>
+                {/* Mount = lazy fetch gate. Collapsed rows never fetch; the
+                    HorseDrillView's useEffect owns the form fetch on mount. */}
+                {isOpen && (
+                  <div className="contender-drill">
+                    <HorseDrillView
+                      raceId={raceId}
+                      horse={{
+                        umaban: r.horse_number,
+                        name: r.horse_name,
+                      }}
+                      currentOdds={r.win_odds}
+                      impressions={impressions}
+                      onSetImpressions={onSetImpressions}
+                      oddsSnapshotAt={oddsSnapshotAt}
+                    />
+                  </div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

@@ -107,7 +107,7 @@ function renderHtml() {
       raceId="test-race"
       impressions={{}}
       oddsSnapshotAt={null}
-      onMark={() => {}}
+      onSetImpressions={() => {}}
     />,
   );
 }

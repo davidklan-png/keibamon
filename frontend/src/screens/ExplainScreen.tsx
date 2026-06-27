@@ -6,13 +6,11 @@
 import { useState } from "react";
 import { useI18n } from "../i18n";
 import { RET, type BetType, type Runner } from "../lib/fairvalue";
-import type { Ticket, StyleState, IntuitionState } from "../lib/types";
+import type { Ticket, StyleState } from "../lib/types";
 import { moodKey } from "../lib/types";
 import { yen, fmt } from "../lib/format";
 import type { ImpressionMap } from "../lib/impressions";
-import { getImpression } from "../lib/impressions";
 import { FormPanel } from "./FormPanel";
-import type { MarkPayload } from "./RaceScreen";
 
 export interface ExplainScreenProps {
   ticket: Ticket | null;
@@ -22,19 +20,19 @@ export interface ExplainScreenProps {
    * surface a form/context panel for each horse on the ticket. */
   runners: Runner[];
   /**
-   * ADR-0011 Phase 1: replaces the old uma-keyed intuition record. Same shape
-   * as RaceScreen — parent owns the store; this screen reads via lookup +
-   * writes through onMark with the full odds-context payload.
+   * ADR-0011 Phase 2: parent owns the store; this screen threads it through to
+   * FormPanel's HorseDrillView, which reads/writes marks directly.
    */
   raceId: string;
   impressions: ImpressionMap;
   oddsSnapshotAt: string | null;
-  onMark: (payload: MarkPayload) => void;
+  /** App-level setter — FormPanel's HorseDrillView writes marks through this. */
+  onSetImpressions: (next: ImpressionMap) => void;
 }
 
 export function ExplainScreen(props: ExplainScreenProps) {
   const { t, tFmt } = useI18n();
-  const { ticket, style, onBack, runners, raceId, impressions, oddsSnapshotAt, onMark } = props;
+  const { ticket, style, onBack, runners, raceId, impressions, oddsSnapshotAt, onSetImpressions } = props;
   const [openUma, setOpenUma] = useState<string | null>(null);
   if (!ticket) {
     return (
@@ -165,20 +163,17 @@ export function ExplainScreen(props: ExplainScreenProps) {
               if (!r) return null;
               return (
                 <FormPanel
-                  horseName={r.name || `#${r.uma}`}
-                  jockeyId={r.jockey_id ?? null}
-                  jockeyName={r.jockey_name ?? null}
-                  impression={getImpression(impressions, raceId, r.name)}
-                  onMark={(next) =>
-                    onMark({
-                      raceId,
-                      horseName: r.name ?? "",
-                      umaban: Number(r.uma),
-                      oddsWhenMarked: r.odds > 0 ? r.odds : null,
-                      oddsSnapshotAt,
-                      mark: next,
-                    })
-                  }
+                  raceId={raceId}
+                  horse={{
+                    umaban: Number(r.uma),
+                    name: r.name ?? "",
+                    jockeyId: r.jockey_id ?? null,
+                    jockeyName: r.jockey_name ?? null,
+                  }}
+                  currentOdds={r.odds > 0 ? r.odds : null}
+                  impressions={impressions}
+                  onSetImpressions={onSetImpressions}
+                  oddsSnapshotAt={oddsSnapshotAt}
                   onClose={() => setOpenUma(null)}
                 />
               );

@@ -2714,3 +2714,143 @@ select:focus {
   color: var(--soft);
   text-align: center;
 }
+
+/* ===========================================================================
+ * ADR-0011 Phase 2 — two-path entry + Roundup inline drill + drift chip.
+ * Recreational research framing only. No betting-advice / edge language.
+ * =========================================================================== */
+
+/* Lane CTA pills — sit next to the lang toggle in the browse header. Same
+ * compact pill shape as .lang-toggle so the header stays tidy on phone-width.
+ * The active lane wears .on (gold accent). */
+.lane-pill {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--ink);
+  background: var(--panel);
+  font: 800 12px/1 ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  text-transform: none;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.lane-pill.on {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(245, 196, 76, 0.18), var(--tint-2) 60%);
+  color: var(--ink);
+}
+
+.lane-pill:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* First-launch intro card — shown once, top of the browse view, until the
+ * user picks a lane. Two short paragraphs, single-disclaimer posture. */
+.lane-intro {
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+  background: var(--tint-2);
+  padding: 14px;
+}
+
+.lane-intro h2 {
+  margin: 0 0 8px;
+  font-size: 15px;
+  color: var(--ink);
+}
+
+.lane-introw-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.lane-introw-col strong {
+  display: block;
+  font-size: 12.5px;
+  color: var(--ink);
+}
+
+.lane-introw-col .hint {
+  margin: 2px 0 0;
+}
+
+/* Contender rows in the Roundup deep-dive — tappable to expand an inline
+ * HorseDrillView. The toggle button holds the mark chip + name + odds; the
+ * reason line sits below; the drill mounts only when expanded (lazy fetch). */
+.contender-row {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.contender-row.on {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(245, 196, 76, 0.12), var(--tint-2) 60%);
+}
+
+.contender-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.contender-toggle:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.contender-mark-chip {
+  flex: 0 0 auto;
+  font-size: 10px;
+}
+
+.contender-toggle .contender-name {
+  flex: 1 1 auto;
+}
+
+.contender-toggle .contender-odds {
+  flex: 0 0 auto;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.contender-caret {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.contender-drill {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* Drift chip — factual odds-drift indicator inside HorseDrillView. Describes
+ * the marked-at vs now change; never recommends a wager. */
+.drift-chip-line {
+  margin: 8px 0 0;
+}
+
+.drift-chip {
+  background: var(--tint);
+  font-size: 11px;
+}
+
