@@ -74,6 +74,26 @@ def test_race_status_registered_then_open_then_result():
     assert done["status"] == "result"
 
 
+def test_build_race_passes_surface_and_distance_through():
+    """Item 3: surface + distance_m from discover_card's RaceList_ItemLong
+    cell must round-trip build_race so the app can render them on cards."""
+    turf = build_race(
+        {
+            "race_no": 11,
+            "surface": "turf",
+            "distance_m": 2200,
+            "runners": [{"umaban": 1, "win_odds": 5.0}],
+        }
+    )
+    assert turf["surface"] == "turf"
+    assert turf["distance_m"] == 2200
+
+    # Absent fields degrade to None — older snapshots without these stay readable.
+    legacy = build_race({"race_no": 1, "runners": [{"umaban": 1}]})
+    assert legacy["surface"] is None
+    assert legacy["distance_m"] is None
+
+
 def test_snapshot_counts_and_sort():
     snap = build_live_snapshot(
         [
@@ -215,6 +235,24 @@ def test_expose_live_default_dates_include_weekend_cards():
     assert mod._default_dates(datetime(2026, 6, 21, 10, tzinfo=jst), "race") == [
         "20260621",
     ]
+
+
+def test_parse_surface_distance_handles_index_cell_forms():
+    """Item 3: _parse_surface_distance must split netkeiba's
+    RaceList_ItemLong cell ("芝1800m" / "ダ1400m") into surface + distance_m
+    without ever fabricating values."""
+    mod = _load_expose_live()
+    parse = mod._parse_surface_distance
+
+    # Standard forms from the day-index page.
+    assert parse("芝1800m") == ("turf", 1800)
+    assert parse("ダ1400m") == ("dirt", 1400)
+    assert parse(" 芝2200m ") == ("turf", 2200)  # tolerates whitespace
+
+    # Absent / empty / unrecognised → (None, None). Never fabricate.
+    assert parse(None) == (None, None)
+    assert parse("") == (None, None)
+    assert parse("—") == (None, None)
 
 
 def test_est_odds_parser_captures_rendered_number():

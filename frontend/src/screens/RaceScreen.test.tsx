@@ -23,7 +23,7 @@ vi.mock("./FormPanel", () => ({
   FormPanel: () => React.createElement("div", { "data-testid": "form-panel-stub" }),
 }));
 
-import { RaceScreen } from "./RaceScreen";
+import { RaceScreen, gradeClass } from "./RaceScreen";
 import type { LiveSnapshot } from "../api";
 
 const OPEN_RACE = {
@@ -168,5 +168,70 @@ describe("RaceScreen — registered-races-visible", () => {
     // Sanity for the bug: a card with 0-runner registered races still shows
     // the card list, not the empty state.
     expect(renderHtml()).not.toMatch(/No live card available/i);
+  });
+});
+
+describe("RaceScreen — grade badge", () => {
+  beforeEach(() => {
+    setLang("en");
+  });
+
+  it("renders a grade-chip.grade-G3 for a graded race on the popular race-card", () => {
+    const html = renderHtml();
+    // Hakodate Kinen is grade_label "G3" → badge present with grade-G3 class.
+    expect(html).toMatch(/grade-chip[^"]*grade-G3/);
+    // The badge text is the canonical label.
+    expect(html).toContain(">G3<");
+  });
+
+  it("renders a grade badge inside the all-races list too", () => {
+    const html = renderHtml();
+    // At least one race-row carries a grade-chip (the snapshot has 3 graded
+    // G3 races + 1 ungraded result race).
+    expect(html).toMatch(/race-row[\s\S]*grade-chip[\s\S]*grade-G3/);
+  });
+
+  it("does NOT render a grade-chip for an ungraded race", () => {
+    const html = renderHtml();
+    // RESULT_RACE has no grade_label. Its name must appear, but never inside
+    // a grade-chip wrapper.
+    expect(html).toContain("Sample Race");
+    // Strip each grade-chip span and confirm "Sample Race" isn't inside one.
+    const chips = html.match(/<span[^>]*grade-chip[^>]*>[\s\S]*?<\/span>/g) || [];
+    for (const chip of chips) {
+      expect(chip).not.toContain("Sample Race");
+    }
+  });
+});
+
+describe("gradeClass", () => {
+  it("maps ASCII and roman forms to G1/G2/G3", () => {
+    expect(gradeClass("G1")).toBe("G1");
+    expect(gradeClass("G2")).toBe("G2");
+    expect(gradeClass("G3")).toBe("G3");
+    expect(gradeClass("GI")).toBe("G1");
+    expect(gradeClass("GII")).toBe("G2");
+    expect(gradeClass("GIII")).toBe("G3");
+  });
+
+  it("folds case, full-width, and surrounding whitespace", () => {
+    expect(gradeClass("g1")).toBe("G1");
+    expect(gradeClass(" G1 ")).toBe("G1");
+    // Full-width G１ (U+FF27 U+FF11) folds under NFKC.
+    expect(gradeClass("Ｇ１")).toBe("G1");
+    // Roman numeral Ⅲ (U+2162) folds to "III" under NFKC.
+    expect(gradeClass("GⅢ")).toBe("G3");
+  });
+
+  it("returns null for ungraded, empty, and dirt-Jpn grades", () => {
+    expect(gradeClass("OP")).toBeNull();
+    expect(gradeClass("Listed")).toBeNull();
+    expect(gradeClass("")).toBeNull();
+    expect(gradeClass(null)).toBeNull();
+    expect(gradeClass(undefined)).toBeNull();
+    // Dirt grades are a separate system — must not wear a turf-G badge.
+    expect(gradeClass("JpnI")).toBeNull();
+    expect(gradeClass("JpnII")).toBeNull();
+    expect(gradeClass("JpnIII")).toBeNull();
   });
 });

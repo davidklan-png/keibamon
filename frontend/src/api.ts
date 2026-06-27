@@ -31,6 +31,12 @@ export interface LiveRace {
   grade_label?: string | null;
   post_time?: string | null;
   venue?: string | null;
+  /** "turf" (芝) or "dirt" (ダート). null when the day-index page omitted the
+   *  RaceList_ItemLong cell. Parsed off the same field discover_card already
+   *  scrapes — no extra fetch. */
+  surface?: string | null;
+  /** Race distance in meters (e.g. 1800). null when unparsable / absent. */
+  distance_m?: number | null;
   status?: RaceStatus;
   /**
    * Phase 2 (ADR-0007): result block when status==='result'. Today's

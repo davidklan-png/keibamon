@@ -1,0 +1,233 @@
+{
+  "edition_key": "2026-W26",
+  "edition_label": "Saturday edition",
+  "weekend_label": "June 27–28, 2026",
+  "version": 2,
+  "published_at": "2026-06-27T01:45:13Z",
+  "odds_snapshot_at": "2026-06-27T01:45:13Z",
+  "gate_snapshot_at": null,
+  "card_snapshot_at": "2026-06-27T01:45:13Z",
+  "condition_snapshot_at": null,
+  "races": [
+    {
+      "race_id": "jra-20260628-03-11",
+      "name": "Radio NIKKEI Sho",
+      "name_ja": "ラジオNIKKEI賞",
+      "grade": "G3",
+      "venue": "Fukushima",
+      "venue_ja": "福島",
+      "surface": "turf",
+      "distance_m": 1800,
+      "post_time": "15:45",
+      "date": "2026-06-28",
+      "field_size": 16,
+      "going": null,
+      "weather": null,
+      "runners": [
+        {
+          "horse_number": 1,
+          "horse_name": "ルージュボヤージュ",
+          "gate": null,
+          "win_odds": 8.4
+        },
+        {
+          "horse_number": 2,
+          "horse_name": "クカイリモク",
+          "gate": null,
+          "win_odds": 8.7
+        },
+        {
+          "horse_number": 3,
+          "horse_name": "ジーネキング",
+          "gate": null,
+          "win_odds": 21.2
+        },
+        {
+          "horse_number": 4,
+          "horse_name": "サイモンシャリオ",
+          "gate": null,
+          "win_odds": 66.2
+        },
+        {
+          "horse_number": 5,
+          "horse_name": "リッツパーティー",
+          "gate": null,
+          "win_odds": 5.9
+        },
+        {
+          "horse_number": 6,
+          "horse_name": "コルテオソレイユ",
+          "gate": null,
+          "win_odds": 12.1
+        },
+        {
+          "horse_number": 7,
+          "horse_name": "ショウナンガルフ",
+          "gate": null,
+          "win_odds": 38.6
+        },
+        {
+          "horse_number": 8,
+          "horse_name": "ディールメーカー",
+          "gate": null,
+          "win_odds": 18.2
+        },
+        {
+          "horse_number": 9,
+          "horse_name": "キンググローリー",
+          "gate": null,
+          "win_odds": 20.2
+        },
+        {
+          "horse_number": 10,
+          "horse_name": "ガリレア",
+          "gate": null,
+          "win_odds": 55.4
+        },
+        {
+          "horse_number": 11,
+          "horse_name": "コロナドブリッジ",
+          "gate": null,
+          "win_odds": 50.2
+        },
+        {
+          "horse_number": 12,
+          "horse_name": "ローベルクランツ",
+          "gate": null,
+          "win_odds": 7.2
+        },
+        {
+          "horse_number": 13,
+          "horse_name": "サノノグレーター",
+          "gate": null,
+          "win_odds": 7.0
+        },
+        {
+          "horse_number": 14,
+          "horse_name": "スカイスプレンダー",
+          "gate": null,
+          "win_odds": 5.8
+        },
+        {
+          "horse_number": 15,
+          "horse_name": "バドリナート",
+          "gate": null,
+          "win_odds": 21.5
+        },
+        {
+          "horse_number": 16,
+          "horse_name": "スペルーチェ",
+          "gate": null,
+          "win_odds": 24.5
+        }
+      ]
+    },
+    {
+      "race_id": "jra-20260628-02-11",
+      "name": "Hakodate Kinen",
+      "name_ja": "函館記念",
+      "grade": "G3",
+      "venue": "Hakodate",
+      "venue_ja": "函館",
+      "surface": "turf",
+      "distance_m": 2000,
+      "post_time": "15:20",
+      "date": "2026-06-28",
+      "field_size": 15,
+      "going": null,
+      "weather": null,
+      "runners": [
+        {
+          "horse_number": 1,
+          "horse_name": "バルナバ",
+          "gate": null,
+          "win_odds": 31.4
+        },
+        {
+          "horse_number": 2,
+          "horse_name": "ファウストラーゼン",
+          "gate": null,
+          "win_odds": 5.5
+        },
+        {
+          "horse_number": 3,
+          "horse_name": "ピースワンデュック",
+          "gate": null,
+          "win_odds": 17.0
+        },
+        {
+          "horse_number": 4,
+          "horse_name": "マジックサンズ",
+          "gate": null,
+          "win_odds": 9.4
+        },
+        {
+          "horse_number": 5,
+          "horse_name": "イガッチ",
+          "gate": null,
+          "win_odds": 5.7
+        },
+        {
+          "horse_number": 6,
+          "horse_name": "サンストックトン",
+          "gate": null,
+          "win_odds": 45.1
+        },
+        {
+          "horse_number": 7,
+          "horse_name": "チャックネイト",
+          "gate": null,
+          "win_odds": 44.1
+        },
+        {
+          "horse_number": 8,
+          "horse_name": "ケイアイセナ",
+          "gate": null,
+          "win_odds": 6.3
+        },
+        {
+          "horse_number": 9,
+          "horse_name": "オニャンコポン",
+          "gate": null,
+          "win_odds": 21.6
+        },
+        {
+          "horse_number": 10,
+          "horse_name": "ケリフレッドアスク",
+          "gate": null,
+          "win_odds": 24.7
+        },
+        {
+          "horse_number": 11,
+          "horse_name": "ジュタ",
+          "gate": null,
+          "win_odds": 9.3
+        },
+        {
+          "horse_number": 12,
+          "horse_name": "エコロディノス",
+          "gate": null,
+          "win_odds": 9.9
+        },
+        {
+          "horse_number": 13,
+          "horse_name": "アラタ",
+          "gate": null,
+          "win_odds": 46.6
+        },
+        {
+          "horse_number": 14,
+          "horse_name": "フィーリウス",
+          "gate": null,
+          "win_odds": 8.4
+        },
+        {
+          "horse_number": 15,
+          "horse_name": "デビットバローズ",
+          "gate": null,
+          "win_odds": 16.4
+        }
+      ]
+    }
+  ]
+}

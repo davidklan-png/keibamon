@@ -507,6 +507,16 @@ a {
   font-weight: 800;
 }
 
+/* Grade badge shared by RaceScreen race cards/rows and roundup ReferenceScreen.
+   JRA turf grades G1/G2/G3 only. Capital `.grade-G1/G2/G3` is the canonical
+   casing app-wide (gradeClass in RaceScreen.tsx returns "G1"/"G2"/"G3"). */
+.race-card-id,
+.race-row-no {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .selected-race {
   display: grid;
   align-content: center;
@@ -2208,7 +2218,7 @@ select:focus {
 
 .form-recent-row {
   display: grid;
-  grid-template-columns: 56px 1fr 32px 56px 1fr;
+  grid-template-columns: 56px 1fr 32px 56px 44px 48px 1fr;
   gap: 6px;
   align-items: center;
   font-size: 12px;
@@ -2224,6 +2234,14 @@ select:focus {
 .form-recent-row .fr-odds {
   font: 700 11px/1 ui-monospace, monospace;
   color: var(--muted);
+}
+
+.form-recent-row .fr-surf,
+.form-recent-row .fr-dist {
+  font: 700 11px/1 ui-monospace, monospace;
+  color: var(--muted);
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .form-recent-row .fr-style {
@@ -2525,8 +2543,8 @@ select:focus {
   color: var(--soft);
 }
 .grade-chip.grade-G1 { background: var(--gold); color: var(--gold-ink); }
-.grade-chip.grade-G2 { background: var(--aqua); color: #0d3b37; }
-.grade-chip.grade-G3 { background: var(--tint); color: var(--soft); }
+.grade-chip.grade-G2 { background: var(--sky); color: #fff; }
+.grade-chip.grade-G3 { background: var(--turf-deep); color: #fff; }
 .glance-card dl {
   display: grid;
   grid-template-columns: auto 1fr;

@@ -12,6 +12,29 @@ import { raceHasLiveOdds } from "../lib/mytickets-view";
 import { fmt } from "../lib/format";
 import { FormPanel } from "./FormPanel";
 
+// ---------------------------------------------------------------------------
+// Grade ladder — one source for both the badge render and the popularScore
+// sort key. Normalizes defensively: full-width → half-width (NFKC), uppercase,
+// trim, then accept "G1"/"GI" (and the JRA roman Ⅰ/Ⅱ/Ⅲ that NFKC folds to
+// I/II/III). Returns null for ungraded ("OP", "Listed", "") and for the dirt
+// Jpn grades (JpnI/JpnII/JpnIII) — those are a different system and must not
+// wear a turf-G badge.
+//
+// Casing: returns the CANONICAL "G1"/"G2"/"G3" form so it slots directly into
+// the shared `.grade-chip grade-G1/G2/G3` CSS (same convention the roundup
+// ReferenceScreen uses — single grade-chip system app-wide).
+// ---------------------------------------------------------------------------
+export function gradeClass(
+  gradeLabel: string | null | undefined,
+): "G1" | "G2" | "G3" | null {
+  if (!gradeLabel) return null;
+  const g = gradeLabel.normalize("NFKC").toUpperCase().trim();
+  if (g === "G1" || g === "GI") return "G1";
+  if (g === "G2" || g === "GII") return "G2";
+  if (g === "G3" || g === "GIII") return "G3";
+  return null;
+}
+
 export interface RaceScreenProps {
   runners: Runner[];
   raceLabel: string;
@@ -113,13 +136,13 @@ export function RaceScreen(props: RaceScreenProps) {
 
   function popularScore(race: LiveRace): number {
     const name = race.name || "";
-    const grade = (race.grade_label || "").toUpperCase();
+    const gc = gradeClass(race.grade_label);
     const gradeLike =
       /(g1|g2|g3|gⅠ|gⅡ|gⅢ|gi|gii|giii|ＧⅠ|ＧⅡ|ＧⅢ|重賞|ステークス|カップ|杯|賞|記念|derby|oaks|cup|stakes|kinen|sho|hai|takarazuka|arima|yasuda|tenno|japan cup)/i.test(
         name,
       );
     return (
-      (grade === "G1" ? 300 : grade === "G2" ? 240 : grade === "G3" ? 220 : 0) +
+      (gc === "G1" ? 300 : gc === "G2" ? 240 : gc === "G3" ? 220 : 0) +
       (gradeLike ? 100 : 0) +
       (race.race_no >= 10 ? 30 : 0) +
       (raceHasLiveOdds(race) ? 10 : 0) +
@@ -133,9 +156,14 @@ export function RaceScreen(props: RaceScreenProps) {
 
   function RaceMeta({ race }: { race: LiveRace }) {
     const runnerCount = race.runners?.length || 0;
+    const surfDist =
+      race.surface || race.distance_m
+        ? `${race.surface ?? "-"}${race.distance_m ? ` ${race.distance_m}m` : ""}`
+        : null;
     return (
       <span className="race-meta">
-        {race.venue || "-"} · R{race.race_no} ·{" "}
+        {race.venue || "-"} · R{race.race_no}
+        {surfDist ? ` · ${surfDist}` : ""} ·{" "}
         {runnerCount === 0 ? (
           <span className="entries-pending-chip">{t("race.entriesPending")}</span>
         ) : (
@@ -143,6 +171,12 @@ export function RaceScreen(props: RaceScreenProps) {
         )}
       </span>
     );
+  }
+
+  function GradeBadge({ race }: { race: LiveRace }) {
+    const gc = gradeClass(race.grade_label);
+    if (!gc) return null;
+    return <span className={`grade-chip grade-${gc}`}>{gc}</span>;
   }
 
   return (
@@ -194,7 +228,10 @@ export function RaceScreen(props: RaceScreenProps) {
                       onClick={() => onApplyRace(r, fallbackDate)}
                     >
                       <span className="race-card-top">
-                        <span>R{r.race_no}</span>
+                        <span className="race-card-id">
+                          <GradeBadge race={r} />
+                          R{r.race_no}
+                        </span>
                         <span>{statusLabel(r)}</span>
                       </span>
                       <strong>{raceTitle(r)}</strong>
@@ -222,7 +259,10 @@ export function RaceScreen(props: RaceScreenProps) {
                               className={`race-row ${keyFor(r) === activeRaceKey ? "on" : ""} ${pending ? "is-pending" : ""}`}
                               onClick={() => onApplyRace(r, fallbackDate)}
                             >
-                              <span className="race-row-no">R{r.race_no}</span>
+                              <span className="race-row-no">
+                                <GradeBadge race={r} />
+                                R{r.race_no}
+                              </span>
                               <span className="race-row-name">{raceTitle(r)}</span>
                               <span className="race-row-status">{statusLabel(r)}</span>
                             </button>

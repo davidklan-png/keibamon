@@ -177,6 +177,10 @@ export function FormPanelView(props: FormPanelViewProps) {
                   <span className="fr-course">{f.racecourse ?? "-"}</span>
                   <span className="fr-pos">#{f.finish_position ?? "-"}</span>
                   <span className="fr-odds">{fmt(f.win_odds ?? undefined, 1)}x</span>
+                  <span className="fr-surf">{f.surface ?? ""}</span>
+                  <span className="fr-dist">
+                    {f.distance_m ? `${f.distance_m}m` : ""}
+                  </span>
                   <span className="fr-style">{f.style_signal ?? ""}</span>
                 </li>
               ))}

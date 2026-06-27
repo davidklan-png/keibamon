@@ -141,6 +141,9 @@ describe("FormPanel view", () => {
     expect(html).toContain("15 starts");
     // Recent finishes surfaced.
     expect(html).toContain("Tokyo");
+    // Surface + distance cells render (Item 2: form-recent-row enrichment).
+    expect(html).toContain("turf");
+    expect(html).toContain("2500m");
     // Jockey block surfaced (jockey_id present).
     expect(html).toContain("J. Rider");
   });

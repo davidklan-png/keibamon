@@ -21,6 +21,7 @@ floor between discovery cycles, not a license to hammer. Ctrl-C to stop.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import time
 from datetime import datetime, timedelta, timezone
@@ -138,6 +139,32 @@ def _entries_for(nk_id: str) -> list[dict]:
     except Exception as exc:  # noqa: BLE001
         print(f"  {nk_id}: entries fetch skipped ({exc!r})")
         return []
+
+
+def _parse_surface_distance(
+    distance: str | None,
+) -> tuple[str | None, int | None]:
+    """Parse netkeiba's RaceList_ItemLong cell (e.g. "芝1800m" / "ダ1400m")
+    into (surface, distance_m).
+
+    Surface: 芝→"turf", ダ→"dirt" (ダート abbreviated to ダ on the index page).
+    Distance_m: the integer before the trailing 'm'. Returns (None, None) on
+    any miss — never fabricates. Source: discover_card already extracts this
+    field from the day-index page; no extra fetch needed here.
+    """
+    if not distance:
+        return None, None
+    s = distance.strip()
+    surface: str | None = None
+    if s.startswith("芝"):
+        surface = "turf"
+    elif s.startswith("ダ"):
+        surface = "dirt"
+    # Distance: first run of digits anywhere in the cell. tolerate missing
+    # trailing 'm' and surrounding whitespace.
+    m = re.search(r"(\d+)\s*m?", s)
+    dist_m = int(m.group(1)) if m else None
+    return surface, dist_m
 
 
 def _maybe_result(
@@ -259,6 +286,7 @@ def _races_for_date(
         entries = _entries_for(d.numeric_id)
         odds = _live_odds_by_umaban(d.numeric_id, d.canonical_race_id) if entries else {}
         runners = merge_entries_and_odds(entries, odds)
+        surface, distance_m = _parse_surface_distance(d.distance)
         race: dict = {
             "date": d.date_yyyymmdd,
             "race_no": d.race_no,
@@ -267,6 +295,8 @@ def _races_for_date(
             "grade_label": d.grade_label,
             "post_time_jst": d.post_time_jst,
             "venue": VENUE_NAMES.get(d.venue_code, d.venue_code),
+            "surface": surface,
+            "distance_m": distance_m,
             "runners": runners,
         }
         # ADR-0007 R1: best-effort attach a `result` block for finished races.

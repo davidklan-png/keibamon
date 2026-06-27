@@ -89,6 +89,11 @@ def build_race(raw: dict[str, Any]) -> dict[str, Any]:
         "grade_label": raw.get("grade_label"),
         "post_time": raw.get("post_time") or raw.get("post_time_jst"),
         "venue": raw.get("venue"),
+        # Surface + distance from discover_card's RaceList_ItemLong cell
+        # (芝1800m / ダ1400m). Additive — null when the producer didn't parse
+        # one, so older snapshots / marts without these stay readable.
+        "surface": raw.get("surface"),
+        "distance_m": raw.get("distance_m"),
         "status": status,
         "result": result,
         "runners": runners,
