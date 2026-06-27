@@ -56,6 +56,12 @@ function App() {
   const [raceLabel, setRaceLabel] = useState<string>("");
   const [selectedRaceDate, setSelectedRaceDate] = useState<string>("");
   const [selectedRaceKey, setSelectedRaceKey] = useState<string>("");
+  // Frozen LiveRace object at selection time. placeTicket snapshots THIS
+  // rather than re-finding the race in `snap`, which is replaced every 45s by
+  // refreshSnap — a refresh that rotates the card (race ran and dropped off,
+  // name drifted, meta.date rolled) would otherwise make the race-key lookup
+  // miss silently and every Place-ticket tap bail with no POST, no toast.
+  const [selectedRace, setSelectedRace] = useState<LiveRace | null>(null);
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
   const [snapLoading, setSnapLoading] = useState(false);
   const [snapError, setSnapError] = useState<string>("");
@@ -171,6 +177,7 @@ function App() {
     setRaceLabel(race.name || `${t("race.placeholderRace")} ${race.race_no}`);
     setSelectedRaceDate(date);
     setSelectedRaceKey(raceKey(race, date));
+    setSelectedRace(race);
     setRaceStatus(race.status ?? (raceHasLiveOdds(race) ? "open" : "registered"));
     // ADR-0011 Phase 1: switch the active race namespace. JRA race_id when
     // present, else the composite `date|venue|race_no|name` key — marks land
@@ -189,6 +196,7 @@ function App() {
     setRaceLabel(t("race.placeholderRace"));
     setSelectedRaceDate("");
     setSelectedRaceKey("");
+    setSelectedRace(null);
     setRaceStatus("manual");
     // Manual mode has no race_id and no composite key — use a stable
     // namespace so in-session marks work (they won't survive reload to a
@@ -332,10 +340,22 @@ function App() {
       openSignIn();
       return;
     }
-    const race = (snap?.races || []).find(
-      (r) => raceKey(r, snap?.meta?.date) === selectedRaceKey,
-    );
-    if (!race) return; // no race to snapshot — can't commit
+    // Use the race frozen at selection time. Re-finding it in `snap` would
+    // miss whenever the 45s live refresh rotated the card (race ran / name
+    // drifted / date rolled) — the silent-bail bug that made every tap no-op.
+    const race = selectedRace;
+    if (!race) {
+      // This should not happen post-fix (selectedRace is set in applyRace).
+      // Surface it loudly in DEV so a regression of the volatile-snap lookup
+      // can't hide as a silent no-op again.
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[placeTicket] no selectedRace — Place tapped without a race context",
+        );
+      }
+      return; // no race to snapshot — can't commit
+    }
     const id = "kb-" + Date.now().toString(36);
     const serial = "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
     const committed: CommittedTicket = {
