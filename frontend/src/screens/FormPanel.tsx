@@ -105,8 +105,6 @@ export function FormPanelView(props: FormPanelViewProps) {
         </button>
       </header>
 
-      <p className="form-context-note">{t("form.contextNote")}</p>
-
       {loading && <p className="hint">…</p>}
       {err && (
         <div className="form-error">
@@ -139,7 +137,6 @@ export function FormPanelView(props: FormPanelViewProps) {
             onIntuition={onIntuition}
             onReturnToTickets={onReturnToTickets}
           />
-          <p className="hint form-takeout">{t("form.takeoutReminder")}</p>
         </>
       )}
     </section>

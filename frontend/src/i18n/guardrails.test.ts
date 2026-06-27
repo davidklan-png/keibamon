@@ -3,9 +3,12 @@ import { en } from "./en";
 import { ja } from "./ja";
 
 /**
- * ADR-0005 Phase 4 — honesty guardrails as behavior. The simplified surface must
- * not start making edge/advice claims, and the takeout reminder must still exist
- * so it stays one tap from any ticket.
+ * Honesty guardrails as behavior. Two jobs:
+ *   1. The full EN copy tree stays free of edge/advice phrases
+ *      (guaranteed / sure thing / "lock" / beat the market).
+ *   2. The single app-wide disclaimer (auth.disclaimer, acknowledged once at
+ *      the 20+ age gate) exists in both EN and JA and carries every required
+ *      clause. Scanned here so the wording can't drift by accident.
  */
 
 function values(obj: unknown): string[] {
@@ -24,19 +27,28 @@ const BANNED = [
 
 describe("honesty guardrails", () => {
   it("English copy makes no edge/advice claims", () => {
-    const all = values(en).join("  ");
+    const all = values(en).join(" ");
     for (const re of BANNED) expect(all).not.toMatch(re);
   });
 
-  it("takeout reminder copy still exists in both languages", () => {
-    expect(en.tickets.houseEdgeNote.length).toBeGreaterThan(0);
-    expect(en.explain.takeoutReminder.length).toBeGreaterThan(0);
-    expect(ja.tickets.houseEdgeNote.length).toBeGreaterThan(0);
-    expect(ja.explain.takeoutReminder.length).toBeGreaterThan(0);
-  });
-
-  it("not-betting-advice footer is present in both languages", () => {
-    expect(en.footer.notAdvice).toMatch(/not betting advice/i);
-    expect(ja.footer.notAdvice.length).toBeGreaterThan(0);
+  it("auth.disclaimer carries every required clause in both languages", () => {
+    // The single app-wide disclaimer, acknowledged once at the 20+ gate. Each
+    // language must carry every clause so the wording can't drift by accident.
+    const enRequired = [
+      /not betting advice/i,
+      /winning method/i,
+      /profit guarantee/i,
+      /takeout/i,
+    ];
+    const jaRequired = [
+      /投資助言/, // "betting advice" equivalent (lit. investment advice)
+      /必勝法/, // "winning method"
+      /利益の保証/, // "profit guarantee"
+      /控除率/, // "takeout"
+    ];
+    expect(en.auth.disclaimer.length).toBeGreaterThan(0);
+    expect(ja.auth.disclaimer.length).toBeGreaterThan(0);
+    for (const re of enRequired) expect(en.auth.disclaimer).toMatch(re);
+    for (const re of jaRequired) expect(ja.auth.disclaimer).toMatch(re);
   });
 });

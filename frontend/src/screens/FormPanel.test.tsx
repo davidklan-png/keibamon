@@ -2,13 +2,15 @@
 // FormPanel tests (Milestone 4).
 //
 // What this pins:
-//   - The guardrail copy ("Form context — not betting advice.") renders visibly.
 //   - A canned horse+jockey card renders the career line, a recent-finishes
 //     block, and the jockey block when a jockey_id is supplied.
 //   - The no_history branch (status === "no_history") renders the empty copy
 //     and never throws.
 //   - The honesty guardrails hold: no "guaranteed / sure thing / lock / beat
 //     the market" anywhere in the rendered HTML.
+//
+// The single app-wide disclaimer lives at the 20+ age gate (auth.disclaimer),
+// not in this panel — see i18n/guardrails.test.ts for the clause scan.
 //
 // Strategy: render the PURE FormPanelView (no useEffect / fetch) with already-
 // loaded cards. Same renderToStaticMarkup + vitest pattern as i18n.test.tsx.
@@ -132,10 +134,8 @@ describe("FormPanel view", () => {
     setLang("en");
   });
 
-  it("renders the guardrail context note + career line for an ok horse card", () => {
+  it("renders the career line for an ok horse card", () => {
     const html = render(HORSE_CARD_OK, JOCKEY_CARD_OK);
-    // Visible guardrail banner.
-    expect(html).toMatch(/not betting advice/i);
     // Career block surfaced with starts + record.
     expect(html).toContain("Danon Decile");
     expect(html).toContain("15 starts");
@@ -166,8 +166,8 @@ describe("FormPanel view", () => {
 
   it("renders the loading state without throwing", () => {
     const html = render(null, null, { loading: true });
-    // Loading renders the context note (always present) + the ellipsis body.
-    expect(html).toMatch(/not betting advice/i);
+    // Loading renders the ellipsis body without throwing.
+    expect(html).toContain("…");
   });
 
   it("renders the error + retry affordance when fetch failed", () => {
@@ -191,8 +191,6 @@ describe("FormPanel view", () => {
     expect(html).toMatch(/no past form on record for this jockey/i);
     // The old "Coming this weekend" stub must NOT render.
     expect(html).not.toMatch(/coming this weekend/i);
-    // The guardrail context note is still visible.
-    expect(html).toMatch(/not betting advice/i);
   });
 
   it("contains no banned honesty words in the rendered output", () => {

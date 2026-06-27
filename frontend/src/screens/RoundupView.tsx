@@ -22,7 +22,14 @@ import type {
 } from "../lib/weeklyReport";
 
 export function RoundupView({ report }: { report: WeeklyReport }) {
-  const { t } = useI18n();
+  const { t, tFmt } = useI18n();
+  // Tiny freshness stamp — "as of HH:MM JST" sourced from the odds snapshot
+  // (the producer's capture time), falling back to the publish instant when
+  // the odds aren't open yet (e.g. the Friday edition pre-pool). Visible in
+  // the subtitle so users can tell at a glance how current the odds are.
+  const asOfIso =
+    report.freshness.odds_snapshot_at ?? report.freshness.published_at;
+  const asOfStamp = asOfIso ? tFmt("roundup.asOf", { time: jstHHMM(asOfIso) }) : null;
   return (
     <section className="section roundup">
       <div className="section-title">
@@ -30,7 +37,8 @@ export function RoundupView({ report }: { report: WeeklyReport }) {
           {t("roundup.title")} · {report.weekend_label}
         </h2>
         <small>
-          {report.edition_label} · v{report.version} · {t("reference.notAdvice")}
+          {report.edition_label}
+          {asOfStamp && <> · {asOfStamp}</>}
         </small>
       </div>
 
@@ -50,8 +58,6 @@ export function RoundupView({ report }: { report: WeeklyReport }) {
       <ThemesBlock themes={report.weekend_themes} />
       <WatchlistBlock entries={report.watchlist} />
       <TicketLensBlock lens={report.ticket_lens} />
-
-      <p className="hint roundup-reminder">{report.not_advice_reminder}</p>
     </section>
   );
 }
@@ -62,6 +68,22 @@ function tsLabel(value: string | null, fallbackKey: string): string {
   if (!value) return fallbackKey;
   // Show the ISO instant as-is (UTC). Stable + honest about PIT.
   return new Date(value).toISOString().replace("T", " ").replace(/\.\d{3}Z$/, "Z");
+}
+
+/**
+ * "HH:MM JST" for the tiny freshness stamp. Converts a UTC ISO instant to the
+ * JST clock time (UTC+9, no DST). Host-tz-independent — always renders in JST
+ * regardless of the viewer's locale, because JRA post times + odds cadence
+ * are JST-anchored and readers expect that frame.
+ */
+function jstHHMM(isoUtc: string | null): string {
+  if (!isoUtc) return "";
+  const d = new Date(isoUtc);
+  if (Number.isNaN(d.getTime())) return "";
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  const hh = String(jst.getUTCHours()).padStart(2, "0");
+  const mm = String(jst.getUTCMinutes()).padStart(2, "0");
+  return `${hh}:${mm} JST`;
 }
 
 function FreshnessBlock({ report }: { report: WeeklyReport }) {

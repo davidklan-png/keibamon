@@ -156,7 +156,7 @@ def build_live_snapshot(
             },
             "message": message
             or "Races appear as soon as they are registered. Grayed = odds not "
-            "open yet (estimated odds shown where available). Not betting advice.",
+            "open yet (estimated odds shown where available).",
             "published_at": published_at or _utc_now_iso(),
         },
         "races": built,

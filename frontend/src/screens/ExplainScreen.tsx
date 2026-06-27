@@ -99,8 +99,7 @@ export function ExplainScreen(props: ExplainScreenProps) {
             {tFmt("tickets.estReturnLine", {
               ret: ev.toFixed(0),
               edge: `${edgePct}%`,
-            })}{" "}
-            {t("tickets.houseEdgeNote")}
+            })}
           </div>
           <p className="math">
             <strong>{t("explain.math")}:</strong>
@@ -110,9 +109,6 @@ export function ExplainScreen(props: ExplainScreenProps) {
             <span style={{ color: "var(--muted)" }}>
               RET[{ticket.type}] = {RET[ticket.type as BetType]} · γ = 0.856
             </span>
-          </p>
-          <p className="hint" style={{ marginTop: 12 }}>
-            {t("explain.takeoutReminder")}
           </p>
         </details>
 

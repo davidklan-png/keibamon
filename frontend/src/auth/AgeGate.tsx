@@ -36,6 +36,7 @@ export function AgeGate() {
     <main className="auth-screen">
       <div className="auth-card age-gate" aria-labelledby="age-title">
         <h1 id="age-title">{t("auth.ageTitle")}</h1>
+        <p className="auth-legal auth-disclaimer">{t("auth.disclaimer")}</p>
         <label className="age-check">
           <input
             type="checkbox"

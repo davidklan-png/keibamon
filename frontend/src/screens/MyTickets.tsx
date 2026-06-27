@@ -1062,8 +1062,6 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
               </div>
             );
           })}
-
-          <div className="mt-microline">{t("mine.notAdvice")}</div>
         </div>
 
         <button className="mt-fab" onClick={() => setView("new")}>
@@ -1605,7 +1603,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                 <div className="mt-card-foot-mark">競</div>
                 <div style={{ lineHeight: 1.2 }}>
                   <div className="mt-handle">{t("mine.handle")}</div>
-                  <div className="mt-card-foot-micro" data-not-advice="">{t("mine.notAdvice")}</div>
+                  <div className="mt-card-foot-micro" data-not-advice="">{t("auth.disclaimer")}</div>
                 </div>
                 <div className="mt-barcode" />
               </div>

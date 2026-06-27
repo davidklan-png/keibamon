@@ -19,6 +19,7 @@
 
 import { handleFormRoutes } from "./form/index";
 import { handleWeeklyReportRoutes } from "./reference/weekly";
+import { buildLiveEdition, LIVE_VERSION, snapshotFreshness } from "./reference/buildLiveEdition";
 
 export default {
   async fetch(request, env) {
@@ -96,5 +97,88 @@ export default {
 
     // Everything else: serve from the static-assets binding (splash/).
     return env.ASSETS.fetch(request);
+  },
+
+  // -------------------------------------------------------------------------
+  // scheduled — ADR-0010 rolling live roundup edition.
+  //
+  // Every 5 minutes (per wrangler.jsonc triggers.crons), read the latest
+  // live_snapshot (key='current'), turn its graded races into a WeekendInput
+  // via buildLiveEdition, and UPSERT it as version LIVE_VERSION (90) under
+  // the weekend's edition_key. The single rolling row joins the same edition
+  // as the manual Friday/Saturday publishes; the read path's ORDER BY version
+  // DESC surfaces it as the latest.
+  //
+  // STALENESS GUARD — buildLiveEdition refuses to build when the snapshot's
+  // heartbeat (meta.published_at) is older than MAX_SNAPSHOT_STALENESS_MS
+  // (20min). On a stalled producer the existing v90 row freezes in place
+  // rather than being republished with stale odds under a fresh-looking
+  // "auto-refreshed" label. The handler emits a console.warn so the stall is
+  // visible in wrangler tail; the routine no-graded/off-day no-op stays silent.
+  //
+  // SAFETY — a scheduled run MUST NEVER throw. Every step is wrapped in
+  // try/catch and a no-graded/no-snapshot/malformed/stale case is a no-op
+  // (returns without writing). The handler never DELETEs; the only write is
+  // the INSERT ... ON CONFLICT UPDATE below, which can only update row
+  // (edition_key, LIVE_VERSION) and never touches manual v1/v2/etc. A bad
+  // snapshot therefore can't blank existing editions — it simply fails to
+  // upsert.
+  //
+  // `event` is unused (no cron-rerun semantics needed); `ctx` is unused (no
+  // waitUntil — work completes inline). Both are required by the Workers
+  // scheduled signature. `now` is an optional test-injection knob — the
+  // Workers runtime passes exactly 3 args, so production defaults to
+  // `new Date()`; tests pass a fixed instant for determinism.
+  // -------------------------------------------------------------------------
+  async scheduled(event, env, ctx, now = new Date()) {
+    try {
+      if (!env || !env.DB) return;
+      const row = await env.DB
+        .prepare("SELECT payload FROM live_snapshot WHERE key = ?")
+        .bind("current")
+        .first();
+      if (!row || !row.payload) return;
+
+      let snapshot;
+      try {
+        snapshot = JSON.parse(row.payload);
+      } catch {
+        // Malformed payload in the snapshot table — no-op, don't crash.
+        return;
+      }
+
+      const live = buildLiveEdition(snapshot, now);
+      if (!live) {
+        // Distinguish "stalled producer" (snapshot heartbeat older than
+        // MAX_SNAPSHOT_STALENESS_MS) from the routine no-graded/off-day no-op.
+        // Both freeze the existing v90 row in place; only staleness is a
+        // health signal worth surfacing via wrangler tail.
+        if (snapshotFreshness(snapshot, now) === "stale") {
+          console.warn(
+            "scheduled live-edition skipped: snapshot stale (producer stalled?)",
+          );
+        }
+        return;
+      }
+
+      const payload = JSON.stringify(live);
+      // UPSERT the rolling row. ON CONFLICT(edition_key, version) requires the
+      // PRIMARY KEY from migrations/keibamon-live/0002_weekly_report.sql. The
+      // manual v1/v2 rows have different versions and are left untouched.
+      await env.DB
+        .prepare(
+          `INSERT INTO weekly_report (edition_key, version, payload, published_at)
+           VALUES (?, ?, ?, ?)
+           ON CONFLICT(edition_key, version) DO UPDATE SET
+             payload = excluded.payload,
+             published_at = excluded.published_at`,
+        )
+        .bind(live.edition_key, LIVE_VERSION, payload, live.published_at)
+        .run();
+    } catch (err) {
+      // Last-resort swallow — a transient D1 error, a schema drift, anything.
+      // Observability picks it up via wrangler tail; users see the prior tick.
+      console.error("scheduled live-edition publish failed", err);
+    }
   },
 };

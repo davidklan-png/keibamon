@@ -27,5 +27,16 @@
   ],
   "compatibility_flags": [
     "nodejs_compat"
-  ]
+  ],
+  // ADR-0010 — auto-publish a rolling "live" Weekend Roundup edition. Every 5
+  // min is comfortably fresher than JRA's ~120s odds cadence without version
+  // churn (the handler UPSERTs a single rolling row at LIVE_VERSION=90, not a
+  // new version per tick). The in-handler no-graded/no-snapshot no-op makes
+  // off-days free, so window gating lives in code (buildLiveEdition returns
+  // null) rather than a brittle cron expression. Tighten to weekend hours
+  // later by replacing the expression — e.g. "*/5 0-15 * * 6,0" for Sat/Sun
+  // JST-daytime only — once the cadence has proven itself.
+  "triggers": {
+    "crons": ["*/5 * * * *"]
+  }
 }

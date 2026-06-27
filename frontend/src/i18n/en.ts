@@ -4,8 +4,7 @@ export const en = {
     title: "Keibamon",
     subtitle: "競馬モン — turn race intuition into ticket shapes.",
     tagline:
-      "Mix the odds with how you want to cheer. A recreational ticket-structure helper — not a tip sheet, not a winning formula.",
-    notAdvice: "Recreational use. Not betting advice.",
+      "Mix the odds with how you want to cheer. A recreational ticket-structure helper.",
     langToggle: "JA",
   },
   nav: {
@@ -84,7 +83,6 @@ export const en = {
     avgPayout: "Avg payout",
     estReturn: "Expected return",
     estReturnLine: "Expected return per ¥100: ¥{ret} ({edge} house edge).",
-    houseEdgeNote: "Pool takeout doesn't go away.",
     whyTicket: "Why this ticket",
     placeCta: "Place ticket",
     placeSignIn: "Sign in to place",
@@ -117,7 +115,6 @@ export const en = {
     close: "Close",
     back: "Back",
     fairValue: "Fair odds",
-    takeoutReminder: "Takeout applies as always.",
   },
   valueTag: {
     chalk: "Chalk",
@@ -170,7 +167,6 @@ export const en = {
     uncheered: "Un-cheered",
     cannotCheerOwn: "You can't cheer your own ticket.",
     rateLimited: "Too many actions — wait a moment and retry.",
-    notAdvice: "For fun — not betting advice.",
     count: "{n} total",
     handle: "@you",
     setHandleTitle: "Pick your handle",
@@ -214,14 +210,17 @@ export const en = {
     signInLegal:
       "Recreational use only. Under-20 betting is prohibited by law.",
     ageTitle: "Before you continue",
-    ageConfirm: "I confirm I'm 20 or older",
+    ageConfirm: "I confirm I'm 20 or older and acknowledge the disclaimer below",
     ageContinue: "Continue",
     ageDeclineNote:
       "You can browse without signing in. Betting is restricted to those 20+.",
+    // Single app-wide disclaimer — acknowledged once at the 20+ gate. The four
+    // required clauses (not betting advice / winning method / profit guarantee /
+    // takeout) are scanned by guardrails.test.ts so they can't drift.
+    disclaimer:
+      "Recreational research only. Not betting advice, not a winning method, not a profit guarantee. Pool takeout applies to every ticket.",
   },
   footer: {
-    notAdvice:
-      "Recreational ticket-structure tool. Not betting advice, not a winning method, not a profit guarantee. Under-20 betting is prohibited by law.",
     back: "Keibamon home",
   },
   // Reference section — bilingual glossary + weekend graded-stakes roundup.
@@ -236,11 +235,10 @@ export const en = {
     glossary: "Glossary",
     roundup: "Weekend roundup",
     back: "Back to race builder",
-    notAdvice: "Research framing — not betting advice.",
   },
   glossary: {
     title: "Racing glossary",
-    subtitle: "Bilingual reference — English / 日本語. Not betting advice.",
+    subtitle: "Bilingual reference — English / 日本語.",
     search: "Search terms…",
     noMatch: "No terms match that search.",
     columnEn: "English",
@@ -255,6 +253,7 @@ export const en = {
     saturday: "Saturday refresh",
     glance: "Weekend at a glance",
     headline: "Weekend headline",
+    asOf: "as of {time}",
     deepDives: "Race-by-race",
     themes: "Weekend themes",
     watchlist: "Odds movement watchlist",
@@ -316,8 +315,7 @@ export const en = {
   // the betting sense of "lock".
   form: {
     title: "Form",
-    subtitle: "Context to shape your intuition — not betting advice.",
-    contextNote: "Form context — not betting advice.",
+    subtitle: "Context to shape your intuition.",
     career: "Career",
     starts: "{n} starts",
     record: "{wins}-{top3} (win {win}% · top3 {top3Pct}%)",
@@ -354,7 +352,6 @@ export const en = {
       "Form context lands soon — the betting loop works as usual.",
     close: "Close",
     tapHint: "Tap a runner for form context.",
-    takeoutReminder: "Pool takeout applies as always.",
     intuitionTitle: "Your mark",
     intuition: {
       like: "Like",

@@ -1,17 +1,17 @@
 // ============================================================================
-// Item 4 (gated production publish) — validate the REAL 2026-W26 Saturday-
-// refresh WeekendInput through generateReport BEFORE the D1 INSERT.
+// 2026-W26 publish-validation gate. Pinned the LATEST edition (now v3,
+// Saturday midday refresh — fresh odds snapshot over the same rosters).
 //
-// This test is the confirmation gate: if generateReport produces clean output
-// (no banned phrases, structural invariants hold, both graded races surface),
-// the WeekendInput is fit to publish. The INSERT statement is generated
-// alongside (printed to stdout when run with --reporter=verbose); David runs
-// it on the Mac after sign-off.
+// Each version is a new row in weekly_report keyed by (edition_key, version);
+// prior versions stay reviewable. This test gates the LATEST publish only —
+// bump the version assertion + overwrite the fixture when a new refresh is
+// cut. The fixture's published_at is the real per-cut timestamp.
 //
 // Fixture: src/data/weekend_2026_w26.json — built from keibamon.com /api/live
-// (rosters + odds) + netkeiba day-index (surface + distance_m via Item 3
-// producer path). Edition covers the two real graded races on 2026-06-28:
-// Hakodate Kinen G3 (函館記念) and Radio NIKKEI Sho G3 (ラジオNIKKEI賞).
+// (rosters + odds) + netkeiba day-index (surface + distance_m via the
+// _parse_surface_distance producer path). Edition covers the two real graded
+// races on 2026-06-28: Hakodate Kinen G3 (函館記念) + Radio NIKKEI Sho G3
+// (ラジオNIKKEI賞).
 // ============================================================================
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
@@ -47,7 +47,7 @@ describe("weeklyReport — 2026-W26 Saturday edition (real publish)", () => {
 
   it("WeekendInput fixture covers exactly the 2 real graded G3 races on 2026-06-28", () => {
     expect(input.edition_key).toBe("2026-W26");
-    expect(input.version).toBe(2);
+    expect(input.version).toBe(3);
     expect(input.races).toHaveLength(2);
     expect(input.races.map((r) => r.grade)).toEqual(["G3", "G3"]);
     expect(input.races.map((r) => r.date)).toEqual(["2026-06-28", "2026-06-28"]);

@@ -3,8 +3,7 @@ export const ja = {
     title: "ケイバモン",
     subtitle: "競馬モン — 直感を、馬券のかたちに。",
     tagline:
-      "オッズと「こう来てほしい」を混ぜて、楽しむための馬券の構成案を出します。投資勧誘でも必勝法でもありません。",
-    notAdvice: "レクリエーション用です。投票助言ではありません。",
+      "オッズと「こう来てほしい」を混ぜて、楽しむための馬券の構成案を出します。",
     langToggle: "EN",
   },
   nav: {
@@ -83,7 +82,6 @@ export const ja = {
     avgPayout: "平均想定配当",
     estReturn: "期待値",
     estReturnLine: "¥100あたり期待返還 ¥{ret}（控除率相当 {edge}）",
-    houseEdgeNote: "プールの控除率は消えません。",
     whyTicket: "この馬券の理由",
     placeCta: "馬券を登録",
     placeSignIn: "登録にはサインイン",
@@ -116,7 +114,6 @@ export const ja = {
     close: "閉じる",
     back: "戻る",
     fairValue: "フェア値",
-    takeoutReminder: "控除率はいつものとおり効きます。",
   },
   valueTag: {
     chalk: "人気過多",
@@ -168,7 +165,6 @@ export const ja = {
     uncheered: "応援を取り消しました",
     cannotCheerOwn: "自分の馬券は応援できません。",
     rateLimited: "操作が多すぎます — しばらくしてから再試行してください。",
-    notAdvice: "遊びです — 投票助言ではありません。",
     count: "{n}件",
     handle: "@あなた",
     setHandleTitle: "ハンドルを決める",
@@ -210,14 +206,17 @@ export const ja = {
     signInSubtitle: "週末のレースを、自分の好みで楽しむ。",
     signInLegal: "レクリエーション用です。20歳未満の投票は法律で禁止されています。",
     ageTitle: "続行する前に",
-    ageConfirm: "20歳以上です",
+    ageConfirm: "20歳以上であり、下記の免責事項に同意します",
     ageContinue: "続行",
     ageDeclineNote:
       "サインインしなくても閲覧はできます。投票は20歳以上限定です。",
+    // アプリ全体で唯一の免責事項。20歳以上のゲートで一度だけ承認します。
+    // 4つの必須事項（投資助言ではない／必勝法ではない／利益保証ではない／控除率）は
+    // guardrails.test.ts がスキャンし、表記揺れを検知します。
+    disclaimer:
+      "娯楽目的のリサーチのみ。投資助言ではなく、必勝法でも利益の保証でもありません。すべての馬券に控除率が適用されます。",
   },
   footer: {
-    notAdvice:
-      "レクリエーション用の馬券構成ツールです。投票助言・必勝法・利益保証ではありません。20歳未満の投票は法律で禁止されています。",
     back: "ケイバモン トップへ",
   },
   // リファレンス — 用語集と週末重賞リサーチ。研究目的のみ。投票助言・エッジ主張は一切なし。
@@ -229,11 +228,10 @@ export const ja = {
     glossary: "用語集",
     roundup: "週末まとめ",
     back: "レース作成に戻る",
-    notAdvice: "リサーチ目的 — 投票助言ではありません。",
   },
   glossary: {
     title: "競馬 用語集",
-    subtitle: "英語 / 日本語 のバイリンガル参考。投票助言ではありません。",
+    subtitle: "英語 / 日本語 のバイリンガル参考。",
     search: "用語を検索…",
     noMatch: "該当する用語がありません。",
     columnEn: "English",
@@ -248,6 +246,7 @@ export const ja = {
     saturday: "土曜更新",
     glance: "週末の概要",
     headline: "週末の見どころ",
+    asOf: "{time} 時点",
     deepDives: "レース別分析",
     themes: "週末のテーマ",
     watchlist: "オッズ動向ウォッチ",
@@ -306,8 +305,7 @@ export const ja = {
   // beat the market" 系の表現は guardrails.test.ts で禁止。「軸」はユーザーのマーク表示。
   form: {
     title: "成績",
-    subtitle: "直感を形作るための参考 — 投票助言ではありません。",
-    contextNote: "成績は参考です — 投票助言ではありません。",
+    subtitle: "直感を形作るための参考。",
     career: "通算",
     starts: "{n}戦",
     record: "{wins}勝・3着内{top3}回（勝率{win}%・連対帯{top3Pct}%）",
@@ -344,7 +342,6 @@ export const ja = {
       "成績コンテキストは近日追加予定です。馬券ループはいつもの通り使えます。",
     close: "閉じる",
     tapHint: "出走馬をタップして成績を見る。",
-    takeoutReminder: "控除率はいつものとおり効きます。",
     intuitionTitle: "あなたのメモ",
     intuition: {
       like: "好感触",

@@ -52,6 +52,9 @@ venv32/
 venv64/
 logs/
 
+# Python build artifact (pip install -e .)
+*.egg-info/
+
 # JV-Link manifest airlock (per-card manifests are machine-local, never commit)
 tools/jravan/manifests/
 

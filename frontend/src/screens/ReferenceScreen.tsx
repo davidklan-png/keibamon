@@ -158,7 +158,7 @@ function RoundupTab() {
             >
               {ordered.map((w, i) => (
                 <option key={`${w.edition_key}-v${w.version}`} value={i}>
-                  {w.edition_label ?? w.edition_key} · v{w.version} · {w.weekend_label}
+                  {w.edition_label ?? w.edition_key} · {w.weekend_label}
                 </option>
               ))}
             </select>
