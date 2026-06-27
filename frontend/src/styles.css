@@ -2854,3 +2854,621 @@ select:focus {
   font-size: 11px;
 }
 
+/* ===========================================================================
+ * ADR-0011 Phase 3a — set-family box view (Option A) + fill guide (Option B).
+ * Renders the user's OWN marked set. Descriptive only; no edge language.
+ * =========================================================================== */
+
+/* Shared modal layer for the SetFamilyView + FillGuide mount. Lightweight
+ * overlay: tinted backdrop + centered card, phone-first. */
+.kbm-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(8, 18, 12, 0.45);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 12px;
+}
+
+.kbm-modal-card {
+  width: 100%;
+  max-width: 520px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.18);
+}
+
+.kbm-modal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.kbm-modal-head strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+
+/* TicketStudio body — stacks the three structural views with breathing room. */
+.kbm-modal-body {
+  display: grid;
+  gap: 10px;
+}
+
+/* SetFamilyView — one consolidated row per set-family bet type. */
+.setfamily-view {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--tint-2);
+  padding: 10px;
+}
+
+.setfamily-head {
+  margin-bottom: 8px;
+}
+
+.setfamily-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.setfamily-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.setfamily-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 2px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.setfamily-row:hover:not(:disabled) {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(245, 196, 76, 0.1), var(--tint-2) 60%);
+}
+
+.setfamily-row:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+.setfamily-row:disabled {
+  cursor: default;
+}
+
+.setfamily-row-bracket {
+  cursor: default;
+  background: var(--tint);
+  border-style: dashed;
+}
+
+.setfamily-row-bracket:hover {
+  border-color: var(--line);
+  background: var(--tint);
+}
+
+.setfamily-label {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.setfamily-points {
+  grid-column: 2;
+  grid-row: 1;
+  font: 700 12px/1 ui-monospace, monospace;
+  color: var(--turf-deep);
+  white-space: nowrap;
+}
+
+.setfamily-cost {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  font-size: 12px;
+  color: var(--ink);
+}
+
+.setfamily-cost-label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.setfamily-hit,
+.setfamily-best {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* FillGuide — JRA-style fill card. Not an OMR replica; a legible mobile card. */
+.fillguide {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--tint-2);
+  padding: 12px;
+}
+
+.fillguide-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.fillguide-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.fillguide-shibetsu {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.fillguide-type {
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--turf-deep);
+}
+
+.fillguide-box-badge {
+  background: var(--gold);
+  color: var(--gold-ink);
+  font: 800 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.fillguide-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 5px;
+  margin-bottom: 12px;
+}
+
+.fillguide-cell {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  aspect-ratio: 1 / 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  font: 800 13px/1 ui-monospace, monospace;
+  color: var(--muted);
+}
+
+.fillguide-cell.on {
+  background: var(--turf);
+  border-color: var(--turf-deep);
+  color: #fff;
+}
+
+/* Forward-compatible bracket coloring (3b): when a 枠連 ticket reaches the
+ * fill guide, the grid colors by bracket instead of a flat "on" highlight. */
+.fillguide-cell.bracket-1 { background: #fff; border-color: var(--ink); color: var(--ink); }
+.fillguide-cell.bracket-2 { background: #000; border-color: #000; color: #fff; }
+.fillguide-cell.bracket-3 { background: var(--turf); border-color: var(--turf-deep); color: #fff; }
+.fillguide-cell.bracket-4 { background: var(--sky); border-color: var(--sky); color: #fff; }
+.fillguide-cell.bracket-5 { background: var(--gold); border-color: var(--gold-deep); color: var(--gold-ink); }
+.fillguide-cell.bracket-6 { background: var(--turf-deep); border-color: var(--turf-deep); color: #fff; }
+.fillguide-cell.bracket-7 { background: var(--gold-amber); border-color: var(--gold-deep); color: var(--gold-ink); }
+.fillguide-cell.bracket-8 { background: var(--ink); border-color: var(--ink); color: #fff; }
+
+.fillguide-summary {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 0;
+}
+
+.fillguide-summary div {
+  text-align: center;
+}
+
+.fillguide-summary dt {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 2px;
+}
+
+.fillguide-summary dd {
+  margin: 0;
+  font: 800 14px/1 ui-monospace, monospace;
+  color: var(--ink);
+}
+
+@media (min-width: 420px) {
+  .fillguide-grid {
+    grid-template-columns: repeat(8, 1fr);
+  }
+}
+
+/* ---- ADR-0011 Phase 3b: ordered structural cards + share foot ------------ */
+
+/* Formation / wheel badges mirror the box badge; distinct hues so the card
+ * header distinguishes the three structural families at a glance. */
+.fillguide-formation-badge {
+  background: var(--sky);
+  color: #fff;
+  font: 800 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+.fillguide-wheel-badge {
+  background: var(--turf-deep);
+  color: #fff;
+  font: 800 10px/1 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  padding: 3px 6px;
+  border-radius: 6px;
+}
+
+/* Ordered position columns with directional arrows. Replaces the flat number
+ * grid for formation/wheel tickets. */
+.fillguide-ordered {
+  display: flex;
+  align-items: stretch;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.fillguide-pos-col {
+  flex: 1 1 0;
+  min-width: 70px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 6px;
+}
+
+.fillguide-pos-label {
+  font-size: 10px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.fillguide-pos-tag {
+  background: var(--turf-deep);
+  color: #fff;
+  font: 800 9px/1 ui-monospace, monospace;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+
+.fillguide-pos-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+
+.fillguide-pos-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 1px solid var(--turf-deep);
+  border-radius: 5px;
+  background: var(--tint);
+  font: 800 12px/1 ui-monospace, monospace;
+  color: var(--ink);
+}
+
+.fillguide-arrow {
+  display: flex;
+  align-items: center;
+  font: 800 16px/1 ui-monospace, monospace;
+  color: var(--gold);
+}
+
+/* Share foot: not-advice micro-line (satisfies the exportTicketCard gate) +
+ * share button. Mirrors the MyTickets detail-card foot convention. */
+.fillguide-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.fillguide-micro {
+  font-size: 9px;
+  color: var(--muted);
+  line-height: 1.3;
+  flex: 1 1 auto;
+}
+
+.fillguide-share {
+  flex: 0 0 auto;
+  border: 1px solid var(--gold);
+  background: var(--gold);
+  color: var(--gold-ink);
+  font: 800 12px/1 inherit;
+  padding: 7px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.fillguide-share:active {
+  background: var(--gold-deep);
+}
+
+/* ---- FormationView (Option A — ordered box rows) ------------------------- */
+
+.formation-view {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--tint-2);
+  padding: 10px;
+}
+
+.formation-head {
+  margin-bottom: 8px;
+}
+
+.formation-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.formation-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.formation-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 2px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.formation-row:hover:not(:disabled) {
+  border-color: var(--sky);
+  background: linear-gradient(135deg, rgba(45, 140, 240, 0.08), var(--tint-2) 60%);
+}
+
+.formation-row:focus-visible {
+  outline: 2px solid var(--sky);
+  outline-offset: 2px;
+}
+
+.formation-row:disabled {
+  cursor: default;
+}
+
+.formation-label {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.formation-points {
+  grid-column: 2;
+  grid-row: 1;
+  font: 700 12px/1 ui-monospace, monospace;
+  color: var(--sky);
+  white-space: nowrap;
+}
+
+.formation-posline {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.formation-pos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.formation-pos-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.formation-pos-set {
+  font: 700 12px/1 ui-monospace, monospace;
+  color: var(--ink);
+}
+
+.formation-arrow {
+  font: 800 13px/1 ui-monospace, monospace;
+  color: var(--gold);
+}
+
+.formation-cost,
+.formation-hit {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+/* ---- WheelView (Option A — axis wheel rows) ------------------------------ */
+
+.wheel-view {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--tint-2);
+  padding: 10px;
+}
+
+.wheel-head {
+  margin-bottom: 8px;
+}
+
+.wheel-head h3 {
+  margin: 0;
+  font-size: 14px;
+  color: var(--ink);
+}
+
+.wheel-rows {
+  display: grid;
+  gap: 6px;
+}
+
+.wheel-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto auto;
+  gap: 2px 8px;
+  align-items: center;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s;
+}
+
+.wheel-row:hover:not(:disabled) {
+  border-color: var(--turf-deep);
+  background: linear-gradient(135deg, rgba(15, 96, 56, 0.08), var(--tint-2) 60%);
+}
+
+.wheel-row:focus-visible {
+  outline: 2px solid var(--turf-deep);
+  outline-offset: 2px;
+}
+
+.wheel-row:disabled {
+  cursor: default;
+}
+
+.wheel-label {
+  grid-column: 1;
+  grid-row: 1;
+  font-weight: 800;
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.wheel-points {
+  grid-column: 2;
+  grid-row: 1;
+  font: 700 12px/1 ui-monospace, monospace;
+  color: var(--turf-deep);
+  white-space: nowrap;
+}
+
+.wheel-posline {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.wheel-pos {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.wheel-pos-axis {
+  /* The axis column gets a turf accent border to distinguish it from the
+   * opponent columns at a glance. */
+  border-left: 3px solid var(--turf-deep);
+  padding-left: 4px;
+}
+
+.wheel-pos-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.wheel-pos-tag {
+  background: var(--turf-deep);
+  color: #fff;
+  font: 800 8px/1 ui-monospace, monospace;
+  padding: 2px 3px;
+  border-radius: 3px;
+}
+
+.wheel-pos-set {
+  font: 700 12px/1 ui-monospace, monospace;
+  color: var(--ink);
+}
+
+.wheel-arrow {
+  font: 800 13px/1 ui-monospace, monospace;
+  color: var(--gold);
+}
+
+.wheel-cost,
+.wheel-hit {
+  grid-column: 1 / -1;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+

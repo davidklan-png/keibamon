@@ -3,14 +3,17 @@
 // Behavior-preserving move; no logic changes. Lists the live card, lets the
 // user pick a race, seeds runners, and offers standard/refine CTAs.
 // ============================================================================
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
-import type { Runner } from "../lib/fairvalue";
+import { winProbs, type Runner } from "../lib/fairvalue";
 import type { ImpressionMap } from "../lib/impressions";
+import { impressionsByRace } from "../lib/impressions";
+import { normalizeName } from "../lib/normalizeName";
 import type { LiveSnapshot, LiveRace } from "../api";
 import { raceHasLiveOdds } from "../lib/mytickets-view";
 import { fmt } from "../lib/format";
 import { FormPanel } from "./FormPanel";
+import { TicketStudio } from "./TicketStudio";
 
 // ---------------------------------------------------------------------------
 // Grade ladder — one source for both the badge render and the popularScore
@@ -61,6 +64,11 @@ export interface RaceScreenProps {
   oddsSnapshotAt: string | null;
   /** App-level setter — FormPanel's HorseDrillView writes marks through this. */
   onSetImpressions: (next: ImpressionMap) => void;
+  /**
+   * ADR-0011 Phase 3a: per-point stake for the structural box views. Defaults
+   * to 100 when absent (no stake-chooser UI in 3a). App passes style.unit.
+   */
+  unitStake?: number;
 }
 
 export function RaceScreen(props: RaceScreenProps) {
@@ -83,11 +91,52 @@ export function RaceScreen(props: RaceScreenProps) {
     impressions,
     oddsSnapshotAt,
     onSetImpressions,
+    unitStake,
   } = props;
 
   // Milestone 4: which runner's form panel is open. null = closed.
   const [openUma, setOpenUma] = useState<string | null>(null);
   const openRunner = openUma ? runners.find((r) => r.uma === openUma) ?? null : null;
+
+  // ADR-0011 Phase 3a/3b: structural ticket-studio modal. `boxOpen` mounts the
+  // shared TicketStudio (SetFamilyView + FormationView + WheelView + FillGuide).
+  // The marked set + anchor are derived from the impression store: horses
+  // carrying anchor/like/priceHorse marks form the set; the anchor mark is the
+  // wheel axis (WheelView omitted when no anchor exists).
+  const [boxOpen, setBoxOpen] = useState(false);
+  const stake = unitStake ?? 100;
+
+  // Derive the marked set + anchor from the impression store for the active
+  // race. Mirrors App.deriveIntuitionRecord: normalize runner name → horse_key
+  // → look up the mark. Only the "include" marks (anchor/like/priceHorse) form
+  // the set; avoid/distrust are excluded by design.
+  const { markedSet, anchorUma } = useMemo(() => {
+    if (!raceId) return { markedSet: [] as string[], anchorUma: null as string | null };
+    const byHorseKey = impressionsByRace(impressions, raceId);
+    const out: string[] = [];
+    let anchor: string | null = null;
+    for (const r of runners) {
+      const hk = normalizeName(r.name);
+      if (!hk) continue;
+      const imp = byHorseKey[hk];
+      if (!imp) continue;
+      if (
+        imp.mark === "anchor" ||
+        imp.mark === "like" ||
+        imp.mark === "priceHorse"
+      ) {
+        out.push(r.uma);
+        if (imp.mark === "anchor") anchor = r.uma;
+      }
+    }
+    return { markedSet: out, anchorUma: anchor };
+  }, [raceId, impressions, runners]);
+
+  // De-vigged probs + full uma list for the box views. Derived locally so the
+  // SetFamilyView doesn't depend on App's lifted state.
+  const { p } = useMemo(() => winProbs(runners), [runners]);
+  const allUmas = useMemo(() => runners.map((r) => r.uma), [runners]);
+  const hasMarket = runners.some((r) => r.odds > 0);
 
   // Race-first UX: list EVERY race in the snapshot, including registered races
   // that haven't finalized entries. A 0-runner registered race is OPENABLE
@@ -399,6 +448,19 @@ export function RaceScreen(props: RaceScreenProps) {
       <p className="hint" style={{ textAlign: "center", marginTop: 8 }}>
         {t("race.standardHint")}
       </p>
+      {/* ADR-0011 Phase 3a: "Box these N horses" — appears only when the user
+          has marked ≥2 include horses (anchor/like/priceHorse) AND a market
+          exists. Opens the SetFamilyView modal (Option A); tapping a box row
+          opens the FillGuide (Option B) as a second layer. */}
+      {markedSet.length >= 2 && hasMarket && (
+        <button
+          className="btn gold"
+          style={{ width: "100%", marginTop: 8 }}
+          onClick={() => setBoxOpen(true)}
+        >
+          {tFmt("setFamily.boxThese", { n: markedSet.length })}
+        </button>
+      )}
       <button
         className="btn ghost"
         style={{ width: "100%", marginTop: 8 }}
@@ -407,6 +469,22 @@ export function RaceScreen(props: RaceScreenProps) {
       >
         {t("race.refine")}
       </button>
+
+      {/* TicketStudio modal — shared surface (SetFamilyView + FormationView +
+          WheelView + FillGuide). A second layer (FillGuide) mounts inside the
+          studio when a row is tapped. */}
+      {boxOpen && (
+        <TicketStudio
+          markedSet={markedSet}
+          anchorUma={anchorUma}
+          runners={runners}
+          p={p}
+          allUmas={allUmas}
+          unitStake={stake}
+          title={tFmt("setFamily.boxThese", { n: markedSet.length })}
+          onClose={() => setBoxOpen(false)}
+        />
+      )}
     </>
   );
 }

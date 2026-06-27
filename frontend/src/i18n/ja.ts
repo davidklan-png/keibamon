@@ -283,6 +283,7 @@ export const ja = {
     chaos: "カオス枠",
     trend: "傾向分析",
     tickets: "馬券構成メモ",
+    buildTickets: "メモ{n}頭から馬券を組み立てる",
     safeish: "堅実",
     balanced: "バランス",
     spicy: "大穴 / 波乱狙い",
@@ -370,5 +371,38 @@ export const ja = {
     nowAt: "現在",
     shorter: "人気上昇",
     longer: "人気下降",
+  },
+  // ADR-0011 Phase 3a — セット族ボックス表示 (Option A) + 記入ガイド (Option B)。
+  // ユーザーがメモした馬を1つのボックスとして券種ごとに表示します。描述のみで
+  // 投資助言ではありません。グイドレール準拠。
+  setFamily: {
+    title: "この馬たちをボックス",
+    boxThese: "この{n}頭をボックス",
+    points: "点",
+    cost: "コスト",
+    hitProb: "的中見込み",
+    bestCase: "当たれば",
+    bracketQuinella: "枠連",
+  },
+  fillGuide: {
+    title: "記入ガイド",
+    box: "ボックス",
+    formation: "フォーメーション",
+    wheel: "流し",
+    axis: "軸",
+    ordered: "着順指定",
+    pos1: "1着",
+    pos2: "2着",
+    pos3: "3着",
+    unit: "点数",
+    total: "総額",
+    perPoint: "1点",
+    share: "共有",
+  },
+  formation: {
+    title: "着順ボックス",
+  },
+  wheel: {
+    title: "軸1頭流し",
   },
 };

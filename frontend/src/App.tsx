@@ -162,6 +162,10 @@ function App() {
       // legacy/manual runners; the panel then hides the jockey block.
       jockey_id: r.jockey_id ?? null,
       jockey_name: r.jockey_name ?? null,
+      // ADR-0011 Phase 3b: carry the bracket (gate) through so the structural
+      // views light up 枠連 on the live path. null when the draw isn't
+      // published yet → bracketQuinellaAgg omits the row cleanly.
+      gate: r.gate ?? null,
     }));
     setRunners(next);
     setRaceLabel(race.name || `${t("race.placeholderRace")} ${race.race_no}`);
@@ -542,6 +546,7 @@ function App() {
             snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
           }
           onSetImpressions={setImpressions}
+          unitStake={style.unit}
         />
       )}
 

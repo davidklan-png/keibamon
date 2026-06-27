@@ -195,6 +195,7 @@ function RoundupTab({
 
         <RoundupView
           report={report}
+          edition={current}
           impressions={impressions}
           onSetImpressions={onSetImpressions}
           oddsSnapshotAt={oddsSnapshotAt}

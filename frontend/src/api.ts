@@ -18,6 +18,15 @@ export interface LiveRunner {
    */
   jockey_id?: string | null;
   jockey_name?: string | null;
+  /**
+   * ADR-0011 Phase 3b: bracket (枠) number, 1-8. The /api/live producer
+   * (snapshot.py) already emits this on each runner; the frontend type now
+   * carries it through to the RaceScreen builder so bracketQuinellaAgg gets
+   * brackets on the live path (the 枠連 row lights up). null/absent on races
+   * where the entries scrape hasn't published the draw yet — the structural
+   * views omit 枠連 cleanly in that case.
+   */
+  gate?: number | null;
 }
 
 /** Race lifecycle the app renders against (ADR-0006). */

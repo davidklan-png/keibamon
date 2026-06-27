@@ -29,6 +29,7 @@ import {
   RET,
   wideTicketStats,
   type BetType,
+  type Runner,
 } from "./fairvalue";
 import type {
   PersonalityId,
@@ -37,6 +38,9 @@ import type {
   Ticket,
   TicketLine,
   IntuitionState,
+  BoxPayload,
+  WheelPayload,
+  FormationPayload,
 } from "./types";
 import { applyPersonality } from "./types";
 
@@ -538,4 +542,389 @@ export function allCombosForType(
   return evaluateCombos(type, umas, p, allUmas).sort(
     (a, b) => a.fairOdds - b.fairOdds,
   );
+}
+
+// ===========================================================================
+// ADR-0011 Phase 3a — structural ticket builders (presentation layer).
+//
+// These do NOT change the pricing engine. `buildBoxTicket` expands a user's
+// marked set into the SAME combos `evaluateCombos` would produce over that set
+// (unordered kCombos for quinella/wide/trio), prices each line via the SAME
+// `comboProb` + `RET[type]` path, and tags the result `structure:"box"` so the
+// SetFamilyView renders the set as ONE box instead of C(n,k) flat rows.
+//
+// Wide routes `hitProb` + `bestCaseReturn` through `wideTicketStats` (true
+// P(≥1), multi-pay best case) — never the naive Σ that overcounts overlapping
+// pairs. Quinella/trio keep the mutually-exclusive Σ (at most one line wins).
+// Round-trip: for the same type + set + market, buildBoxTicket's line
+// probs/payouts are byte-identical to evaluateCombos → no pricing drift.
+// ===========================================================================
+
+/**
+ * Build a structural "box" Ticket over a user's selected set. The set is
+ * expanded into unordered k-combos (k=2 for quinella/wide, k=3 for trio) and
+ * priced exactly as `evaluateCombos` would price them. Returns null when the
+ * set is too small for the bet type or any selected horse is scratched (p===0).
+ *
+ * Only the unordered bet types (quinella / wide / trio) are supported — an
+ * exacta/trifecta "box" is conventionally ordered and is out of scope for 3a.
+ */
+export function buildBoxTicket(
+  type: BetType,
+  set: string[],
+  p: Record<string, number>,
+  allUmas: string[],
+  unitStake: number,
+  idSuffix: string,
+): Ticket | null {
+  // Only unordered box types are supported in 3a.
+  if (type !== "quinella" && type !== "wide" && type !== "trio") return null;
+  const k = type === "trio" ? 3 : 2;
+  if (set.length < k) return null;
+  // Any scratched horse (p===0) → can't price the box.
+  for (const u of set) {
+    if (!(p[u] > 0)) return null;
+  }
+
+  const combos = kCombos(set, k);
+  const ret = RET[type];
+  const lines: TicketLine[] = [];
+  for (const combo of combos) {
+    const prob = comboProb(type, combo, p, allUmas);
+    if (!(prob > 0)) continue;
+    const payout = (ret / prob) * unitStake;
+    lines.push({
+      combo,
+      prob,
+      fairOdds: 1 / prob,
+      payout,
+      tag: rankClass(combo, p, allUmas),
+    });
+  }
+  if (lines.length === 0) return null;
+
+  // hitProb + bestCaseReturn: wide routes through wideTicketStats (true P(≥1),
+  // multi-pay); quinella/trio keep the mutually-exclusive Σ + max line payout.
+  const wideStats =
+    type === "wide"
+      ? wideTicketStats(
+          lines.map((l) => ({ combo: l.combo, payout: l.payout })),
+          p,
+          allUmas,
+        )
+      : null;
+  const hitProb =
+    type === "wide"
+      ? clamp(wideStats!.hitProb, 0, 0.98)
+      : clamp(lines.reduce((s, x) => s + x.prob, 0), 0, 0.98);
+  const bestCaseReturn =
+    type === "wide"
+      ? wideStats!.bestCaseReturn
+      : lines.reduce((m, x) => (x.payout > m ? x.payout : m), 0);
+
+  const cost = lines.length * unitStake;
+  const expectedReturn = lines.reduce((s, x) => s + x.prob * x.payout, 0);
+  const avgPayout = lines.reduce((s, x) => s + x.payout, 0) / lines.length;
+  const core = unique(lines.flatMap((x) => x.combo));
+  const tag = rankClass(core, p, allUmas);
+  const variance: "high" | "low" =
+    hitProb < 0.15 || avgPayout / Math.max(1, unitStake) > 30 ? "high" : "low";
+
+  const payload: BoxPayload = { set: set.slice() };
+
+  return {
+    id: `box-${type}-${idSuffix}`,
+    type,
+    lines,
+    hitProb,
+    cost,
+    expectedReturn,
+    avgPayout,
+    bestCaseReturn,
+    core,
+    tag,
+    unit: unitStake,
+    variance,
+    rationaleKeys: [],
+    structure: "box",
+    structurePayload: payload,
+    unitStake,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 枠連 (bracket quinella) — aggregation over the quinella kernel, NO new
+// BetType. A 枠連 point is a bracket-PAIR; the probability of a bracket-pair
+// filling 1st-2nd is the sum of quinella probabilities over every horse-pair
+// that crosses the two brackets. Bracket-pairs are mutually exclusive (exactly
+// one bracket-pair fills 1st-2st in a race) → hitProb = Σ pairProb, same
+// exclusion logic as quinella. bestCaseReturn = the single highest-paying
+// bracket-pair (only one can win).
+//
+// Returns null when ANY selected runner lacks a numeric gate — SetFamilyView
+// then omits the 枠連 row rather than guessing brackets.
+// ---------------------------------------------------------------------------
+
+/** Result of a 枠連 aggregation over a selected set. */
+export interface BracketQuinellaAgg {
+  points: number;
+  cost: number;
+  hitProb: number;
+  bestCaseReturn: number;
+  /** Distinct bracket numbers present in the selected set, sorted ascending. */
+  brackets: number[];
+}
+
+/**
+ * Aggregate a 枠連 (bracket quinella) over the selected runners. Each runner
+ * carries a `gate` (bracket 1-8). Returns null when any selected runner lacks a
+ * numeric gate so the view omits the row cleanly.
+ */
+export function bracketQuinellaAgg(
+  selected: Runner[],
+  p: Record<string, number>,
+  allUmas: string[],
+  unitStake: number,
+): BracketQuinellaAgg | null {
+  if (selected.length < 2) return null;
+  // Any runner without a numeric gate → omit rather than guess.
+  for (const r of selected) {
+    if (typeof r.gate !== "number" || !Number.isFinite(r.gate)) return null;
+  }
+  const brackets = Array.from(
+    new Set(selected.map((r) => r.gate as number)),
+  ).sort((a, b) => a - b);
+  if (brackets.length < 2) return null; // all in one bracket → no pair
+
+  // Group runners by bracket.
+  const byBracket = new Map<number, string[]>();
+  for (const r of selected) {
+    const g = r.gate as number;
+    const list = byBracket.get(g) || [];
+    list.push(r.uma);
+    byBracket.set(g, list);
+  }
+
+  const ret = RET.quinella;
+  let hitProb = 0;
+  let bestCaseReturn = 0;
+  let points = 0;
+  // Enumerate bracket-pairs (B1 < B2) — unordered, like quinella.
+  for (let i = 0; i < brackets.length; i++) {
+    for (let j = i + 1; j < brackets.length; j++) {
+      const horsesA = byBracket.get(brackets[i])!;
+      const horsesB = byBracket.get(brackets[j])!;
+      let pairProb = 0;
+      for (const h1 of horsesA) {
+        for (const h2 of horsesB) {
+          pairProb += comboProb("quinella", [h1, h2], p, allUmas);
+        }
+      }
+      if (!(pairProb > 0)) continue;
+      points += 1;
+      hitProb += pairProb;
+      const pairPayout = (ret / pairProb) * unitStake;
+      if (pairPayout > bestCaseReturn) bestCaseReturn = pairPayout;
+    }
+  }
+  if (points === 0) return null;
+
+  return {
+    points,
+    cost: points * unitStake,
+    hitProb: clamp(hitProb, 0, 0.98),
+    bestCaseReturn,
+    brackets,
+  };
+}
+
+// ===========================================================================
+// ADR-0011 Phase 3b — ordered structural tickets (formation + wheel).
+//
+// Like `buildBoxTicket`, these do NOT change the pricing engine. They expand
+// the user's per-position contender sets into the SAME ordered tuples
+// `evaluateCombos` would produce (the cartesian product, filtered by no-repeat)
+// and price each line through the SAME `comboProb` + `RET[type]` path
+// (orderProb under the hood for exacta/trifecta). Ordered bet types are
+// mutually exclusive (at most one ordered sequence wins per race) →
+// hitProb = Σ line.prob, bestCaseReturn = max single-line payout.
+//
+// Round-trip: for positions where every position set is the same `set`,
+// buildFormationTicket produces the same tuples + probs + payouts as
+// evaluateCombos(type, set) → no pricing drift (verified in
+// recommender.formation.test.ts).
+//
+// A wheel is a formation with `positions[i] = axis if i+1 === position else
+// opponents`; buildWheelTicket delegates to buildFormationTicket and re-tags
+// the result so the FillGuide renders the axis-labeled card.
+// ===========================================================================
+
+/** Cartesian product of arrays (positions[i] → contender set for (i+1)th place). */
+function cartesianProduct<T>(arrays: T[][]): T[][] {
+  const out: T[][] = [];
+  (function rec(i: number, acc: T[]) {
+    if (i === arrays.length) {
+      out.push(acc.slice());
+      return;
+    }
+    for (const item of arrays[i]) {
+      acc.push(item);
+      rec(i + 1, acc);
+      acc.pop();
+    }
+  })(0, []);
+  return out;
+}
+
+/**
+ * Build an ordered structural Ticket over per-position contender sets. Each
+ * ordered tuple in the cartesian product is kept only when no horse repeats
+ * across positions (a horse can't finish twice). Returns null when:
+ *   - `type` is not an ordered bet type (exacta / trifecta)
+ *   - `positions.length` doesn't match the bet type's depth
+ *   - any position set is empty
+ *   - any contender is scratched (p===0)
+ *   - the no-repeat filter leaves zero viable tuples
+ *
+ * When every `positions[i]` is the same `set`, the expansion degenerates to
+ * an ordered box (kPerms(set, k)) and round-trips to evaluateCombos.
+ */
+export function buildFormationTicket(
+  type: BetType,
+  positions: string[][],
+  p: Record<string, number>,
+  allUmas: string[],
+  unitStake: number,
+  idSuffix: string,
+): Ticket | null {
+  // Only ordered bet types are supported.
+  if (type !== "exacta" && type !== "trifecta") return null;
+  const k = type === "trifecta" ? 3 : 2;
+  if (positions.length !== k) return null;
+  // Validate each position set: non-empty, all contenders present in the market.
+  for (const posSet of positions) {
+    if (posSet.length === 0) return null;
+    for (const u of posSet) {
+      if (!(p[u] > 0)) return null;
+    }
+  }
+
+  // Cartesian product, filtered by no-repeat (a horse can't finish twice).
+  const tuples = cartesianProduct(positions).filter(
+    (t) => new Set(t).size === t.length,
+  );
+  if (tuples.length === 0) return null;
+
+  const ret = RET[type];
+  const lines: TicketLine[] = [];
+  for (const combo of tuples) {
+    const prob = comboProb(type, combo, p, allUmas); // orderProb under the hood
+    if (!(prob > 0)) continue;
+    const payout = (ret / prob) * unitStake;
+    lines.push({
+      combo,
+      prob,
+      fairOdds: 1 / prob,
+      payout,
+      tag: rankClass(combo, p, allUmas),
+    });
+  }
+  if (lines.length === 0) return null;
+
+  // Ordered bet types are mutually exclusive (at most one ordered sequence
+  // wins per race) → Σ line.prob is the true hitProb; max line.payout is the
+  // best single-race return. No wide-style overlap correction needed.
+  const hitProb = clamp(lines.reduce((s, x) => s + x.prob, 0), 0, 0.98);
+  const bestCaseReturn = lines.reduce(
+    (m, x) => (x.payout > m ? x.payout : m),
+    0,
+  );
+
+  const cost = lines.length * unitStake;
+  const expectedReturn = lines.reduce((s, x) => s + x.prob * x.payout, 0);
+  const avgPayout = lines.reduce((s, x) => s + x.payout, 0) / lines.length;
+  const core = unique(lines.flatMap((x) => x.combo));
+  const tag = rankClass(core, p, allUmas);
+  const variance: "high" | "low" =
+    hitProb < 0.15 || avgPayout / Math.max(1, unitStake) > 30 ? "high" : "low";
+
+  const payload: FormationPayload = {
+    positions: positions.map((s) => s.slice()),
+  };
+
+  return {
+    id: `formation-${type}-${idSuffix}`,
+    type,
+    lines,
+    hitProb,
+    cost,
+    expectedReturn,
+    avgPayout,
+    bestCaseReturn,
+    core,
+    tag,
+    unit: unitStake,
+    variance,
+    rationaleKeys: [],
+    structure: "formation",
+    structurePayload: payload,
+    unitStake,
+  };
+}
+
+/**
+ * Build a wheel Ticket: the `axis` horse(s) are pinned to a fixed finishing
+ * `position`; the `opponents` are permuted across the remaining positions.
+ * Delegates to `buildFormationTicket` (positions[i] = axis if i+1 === position
+ * else opponents) and re-tags the result `structure: "wheel"` with a
+ * `WheelPayload` so the FillGuide renders the axis-labeled card.
+ *
+ * Returns null for the same reasons as `buildFormationTicket`, plus when the
+ * axis is empty or `position` is out of range for the bet type's depth.
+ */
+export function buildWheelTicket(
+  type: BetType,
+  axis: string[],
+  opponents: string[],
+  position: 1 | 2 | 3,
+  p: Record<string, number>,
+  allUmas: string[],
+  unitStake: number,
+  idSuffix: string,
+): Ticket | null {
+  // Only ordered bet types are supported.
+  if (type !== "exacta" && type !== "trifecta") return null;
+  const k = type === "trifecta" ? 3 : 2;
+  if (position < 1 || position > k) return null;
+  if (axis.length === 0) return null;
+
+  // Construct the positions array: axis at `position`, opponents elsewhere.
+  const positions: string[][] = [];
+  for (let i = 1; i <= k; i++) {
+    positions.push(i === position ? axis.slice() : opponents.slice());
+  }
+
+  const ticket = buildFormationTicket(
+    type,
+    positions,
+    p,
+    allUmas,
+    unitStake,
+    idSuffix,
+  );
+  if (!ticket) return null;
+
+  // Re-tag as wheel with the axis/opponents/position payload.
+  const payload: WheelPayload = {
+    axis: axis.slice(),
+    opponents: opponents.slice(),
+    position,
+  };
+
+  return {
+    ...ticket,
+    id: `wheel-${type}-${idSuffix}`,
+    structure: "wheel",
+    structurePayload: payload,
+  };
 }

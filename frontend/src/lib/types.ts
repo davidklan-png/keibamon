@@ -37,6 +37,47 @@ export interface TicketLine {
   tag: ValueTag;
 }
 
+/**
+ * ADR-0011 Phase 3a/3b: structural ticket classification. A plain recommender
+ * Ticket has no `structure` (renders as flat chips). A box ticket built by
+ * `buildBoxTicket` carries `structure: "box"` + a `BoxPayload` so the
+ * SetFamilyView / FillGuide can render the user's selected set as ONE box
+ * rather than C(n,k) flat lines. Phase 3b adds `"wheel"` (axis-anchored, via
+ * `buildWheelTicket`) and `"formation"` (per-position contender sets, via
+ * `buildFormationTicket`) for the ordered bet types (exacta / trifecta).
+ */
+export type TicketStructure = "single" | "box" | "wheel" | "formation";
+
+/** Horses covered by a box ticket (the user's marked set). */
+export interface BoxPayload {
+  set: string[];
+}
+
+/**
+ * ADR-0011 Phase 3b: axis-anchored wheel. The `axis` horse(s) are pinned to a
+ * fixed finishing `position` (1, 2, or 3); the `opponents` are permuted across
+ * the remaining positions. A wheel IS a formation with
+ * `positions[i] = axis if i+1 === position else opponents` — `buildWheelTicket`
+ * delegates to `buildFormationTicket`. The dedicated payload keeps the FillGuide
+ * render axis-labeled (1着軸 → 2・3着相手) rather than as a free formation.
+ */
+export interface WheelPayload {
+  axis: string[];
+  opponents: string[];
+  position: 1 | 2 | 3;
+}
+
+/**
+ * ADR-0011 Phase 3b: per-position contender sets. `positions[i]` is the set of
+ * horses that can finish in (i+1)th place. The expansion is the cartesian
+ * product filtered by no-repeat (a horse can't finish twice). Length matches
+ * the bet type: 2 for exacta, 3 for trifecta. When every positions[i] is the
+ * same set, the formation degenerates to an ordered box (kPerms(set, k)).
+ */
+export interface FormationPayload {
+  positions: string[][];
+}
+
 export interface Ticket {
   id: string;
   type: BetType;
@@ -45,6 +86,23 @@ export interface Ticket {
   cost: number;
   expectedReturn: number; // Σ p * payout across lines
   avgPayout: number;
+  /**
+   * ADR-0011 Phase 3a: structural classification. Absent on plain recommender
+   * tickets → flat-chip render unchanged. Present ("box") only on tickets built
+   * by `buildBoxTicket`. Pure presentation layer — no pricing math forks.
+   */
+  structure?: TicketStructure;
+  /**
+   * Payload for the structural view. null/absent on plain tickets. 3a populates
+   * "box" only; 3b adds "wheel" + "formation". Narrow by `structure` before
+   * reading (box → BoxPayload, wheel → WheelPayload, formation → FormationPayload).
+   */
+  structurePayload?: BoxPayload | WheelPayload | FormationPayload | null;
+  /**
+   * Canonical per-point stake for the structural views. Defaults to `unit` when
+   * absent so plain tickets render identically. Set by `buildBoxTicket`.
+   */
+  unitStake?: number;
   /**
    * Best realistic single-race return — what the bettor gets back on the
    * most lucrative hit scenario. For non-wide bet types this is the top

@@ -56,6 +56,13 @@ export interface Runner {
    */
   jockey_id?: string | null;
   jockey_name?: string | null;
+  /**
+   * ADR-0011 Phase 3a: bracket (枠) number, 1-8. Absent on the live path
+   * (LiveRunner doesn't carry it yet) → SetFamilyView omits the 枠連 row via
+   * bracketQuinellaAgg returning null. Present on the roundup/weekly path.
+   * The pricing engine ignores this; only the structural aggregation reads it.
+   */
+  gate?: number | null;
 }
 
 /** A de-vigged win-probability map plus the raw book sum (overround). */

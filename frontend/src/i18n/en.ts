@@ -290,6 +290,7 @@ export const en = {
     chaos: "Chaos slots",
     trend: "Trend analysis",
     tickets: "Ticket construction notes",
+    buildTickets: "Build tickets from my {n} reads",
     safeish: "Safe-ish",
     balanced: "Balanced",
     spicy: "Spicy / Longshot Hunter",
@@ -383,5 +384,39 @@ export const en = {
     nowAt: "now",
     shorter: "shorter",
     longer: "longer",
+  },
+  // ADR-0011 Phase 3a — set-family box view (Option A) + fill guide (Option B).
+  // Renders the user's OWN marked set as one box per bet type. Descriptive
+  // copy only; never betting advice. Guardrail-clean (no lock/guaranteed/
+  // sure thing/beat the market).
+  setFamily: {
+    title: "Box these horses",
+    boxThese: "Box these {n} horses",
+    points: "pts",
+    cost: "Cost",
+    hitProb: "Hit est.",
+    bestCase: "If it hits",
+    bracketQuinella: "Bracket quinella",
+  },
+  fillGuide: {
+    title: "Fill guide",
+    box: "BOX",
+    formation: "FORMATION",
+    wheel: "WHEEL",
+    axis: "axis",
+    ordered: "Ordered finish",
+    pos1: "1st",
+    pos2: "2nd",
+    pos3: "3rd",
+    unit: "Points",
+    total: "Total",
+    perPoint: "Per point",
+    share: "Share",
+  },
+  formation: {
+    title: "Ordered boxes",
+  },
+  wheel: {
+    title: "Axis wheels",
   },
 };

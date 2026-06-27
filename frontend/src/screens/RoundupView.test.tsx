@@ -23,7 +23,7 @@ import { setLang } from "../i18n";
 import { fetchHorseForm } from "../api";
 import { RoundupView } from "./RoundupView";
 import { setImpression } from "../lib/impressions";
-import type { WeeklyReport } from "../lib/weeklyReport";
+import type { WeeklyReport, WeekendInput } from "../lib/weeklyReport";
 
 // Mock the api layer so HorseDrillView's mount-fetch is observable + controlled.
 vi.mock("../api", () => ({
@@ -231,5 +231,172 @@ describe("RoundupView — inline contender drill-down", () => {
     // (fetches again). Just assert no spurious double-fetch from the single
     // expand action.
     expect(fetchHorseFormMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0011 Phase 3b — research→tickets bridge.
+// ---------------------------------------------------------------------------
+
+/** Build a WeekendInput whose single race matches buildReport()'s deep dive. */
+function buildEdition(): WeekendInput {
+  return {
+    edition_key: "2026-W26",
+    edition_label: "Friday edition",
+    weekend_label: "June 27–28, 2026",
+    version: 1,
+    published_at: "2026-06-26T20:00:00Z",
+    odds_snapshot_at: null,
+    gate_snapshot_at: null,
+    card_snapshot_at: null,
+    condition_snapshot_at: null,
+    races: [
+      {
+        race_id: RACE_ID,
+        name: "Test Stakes",
+        name_ja: "テストステークス",
+        grade: "G3",
+        venue: "Tokyo",
+        venue_ja: "東京",
+        surface: "turf",
+        distance_m: 2000,
+        post_time: "15:35",
+        date: "2026-06-28",
+        runners: [
+          { horse_number: 1, horse_name: "Alpha Horse", gate: 1, win_odds: 3.2 },
+          { horse_number: 4, horse_name: "Beta Horse", gate: 4, win_odds: 5.6 },
+          { horse_number: 7, horse_name: "Gamma Horse", gate: 7, win_odds: 12.0 },
+        ],
+      },
+    ],
+  };
+}
+
+describe("RoundupView — research→tickets bridge (Phase 3b)", () => {
+  beforeEach(() => {
+    setLang("en");
+    fetchHorseFormMock.mockReset();
+    fetchHorseFormMock.mockReturnValue(new Promise(() => {}));
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  it("shows the 'build tickets' CTA when ≥2 include marks + a market exist", () => {
+    const report = buildReport();
+    const edition = buildEdition();
+    // Pre-seed an anchor (Alpha) + a like (Beta) in this race.
+    let store = setImpression({}, RACE_ID, "Alpha Horse", {
+      mark: "anchor",
+      umaban: 1,
+      odds_when_marked: 3.2,
+      odds_snapshot_at: null,
+    });
+    store = setImpression(store, RACE_ID, "Beta Horse", {
+      mark: "like",
+      umaban: 4,
+      odds_when_marked: 5.6,
+      odds_snapshot_at: null,
+    });
+    const { container } = render(
+      <RoundupView
+        report={report}
+        edition={edition}
+        impressions={store}
+        onSetImpressions={() => {}}
+        oddsSnapshotAt={null}
+      />,
+    );
+    expandDeepDive(container);
+    const cta = container.querySelector("button.btn.gold");
+    expect(cta, "build-tickets CTA rendered").toBeTruthy();
+    expect(cta!.textContent).toContain("Build tickets");
+    expect(cta!.textContent).toContain("2");
+  });
+
+  it("omits the CTA when fewer than 2 include marks exist", () => {
+    const report = buildReport();
+    const edition = buildEdition();
+    // Only one mark.
+    const store = setImpression({}, RACE_ID, "Alpha Horse", {
+      mark: "anchor",
+      umaban: 1,
+      odds_when_marked: 3.2,
+      odds_snapshot_at: null,
+    });
+    const { container } = render(
+      <RoundupView
+        report={report}
+        edition={edition}
+        impressions={store}
+        onSetImpressions={() => {}}
+        oddsSnapshotAt={null}
+      />,
+    );
+    expandDeepDive(container);
+    // No gold CTA (the bridge requires ≥2 marks).
+    expect(container.querySelector("button.btn.gold")).toBeNull();
+  });
+
+  it("omits the CTA when no edition is threaded (bridge hidden)", () => {
+    const report = buildReport();
+    let store = setImpression({}, RACE_ID, "Alpha Horse", {
+      mark: "anchor",
+      umaban: 1,
+      odds_when_marked: 3.2,
+      odds_snapshot_at: null,
+    });
+    store = setImpression(store, RACE_ID, "Beta Horse", {
+      mark: "like",
+      umaban: 4,
+      odds_when_marked: 5.6,
+      odds_snapshot_at: null,
+    });
+    const { container } = render(
+      <RoundupView
+        report={report}
+        impressions={store}
+        onSetImpressions={() => {}}
+        oddsSnapshotAt={null}
+      />,
+    );
+    expandDeepDive(container);
+    expect(container.querySelector("button.btn.gold")).toBeNull();
+  });
+
+  it("opens the TicketStudio (SetFamilyView rows) when the CTA is tapped", () => {
+    const report = buildReport();
+    const edition = buildEdition();
+    let store = setImpression({}, RACE_ID, "Alpha Horse", {
+      mark: "anchor",
+      umaban: 1,
+      odds_when_marked: 3.2,
+      odds_snapshot_at: null,
+    });
+    store = setImpression(store, RACE_ID, "Beta Horse", {
+      mark: "like",
+      umaban: 4,
+      odds_when_marked: 5.6,
+      odds_snapshot_at: null,
+    });
+    const { container } = render(
+      <RoundupView
+        report={report}
+        edition={edition}
+        impressions={store}
+        onSetImpressions={() => {}}
+        oddsSnapshotAt={null}
+      />,
+    );
+    expandDeepDive(container);
+    const cta = container.querySelector("button.btn.gold") as HTMLButtonElement;
+    act(() => cta.click());
+    // TicketStudio modal mounts with the structural views. The SetFamilyView
+    // renders box rows; the anchor mark drives the WheelView.
+    expect(container.querySelector(".kbm-modal")).toBeTruthy();
+    expect(container.querySelector(".setfamily-view")).toBeTruthy();
+    expect(container.querySelector(".formation-view")).toBeTruthy();
+    // Anchor exists → WheelView mounts.
+    expect(container.querySelector(".wheel-view")).toBeTruthy();
   });
 });

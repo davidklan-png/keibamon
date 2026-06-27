@@ -10,22 +10,33 @@
 // from the generator (guardrail-tested) and the i18n dictionary (also
 // guardrail-tested). Nothing here instructs a wager.
 // ============================================================================
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
 import type {
   WeeklyReport,
+  WeekendInput,
+  RaceInput,
   RaceDeepDive,
   ContenderRef,
   TicketNote,
   WatchlistEntry,
   RacePick,
 } from "../lib/weeklyReport";
+import { effectiveOdds } from "../lib/weeklyReport";
 import type { ImpressionMap } from "../lib/impressions";
-import { getImpression } from "../lib/impressions";
+import { getImpression, impressionsByRace } from "../lib/impressions";
+import { normalizeName } from "../lib/normalizeName";
+import { winProbs, type Runner } from "../lib/fairvalue";
 import { HorseDrillView } from "./HorseDrillView";
+import { TicketStudio } from "./TicketStudio";
 
 export interface RoundupViewProps {
   report: WeeklyReport;
+  /** ADR-0011 Phase 3b: the source edition (WeekendInput) so the per-race
+   * bridge can build Runner[] + de-vigged probs from the real runner field +
+   * odds. Optional — when absent, the "build tickets" bridge is omitted (the
+   * report still renders; only the structural surface is hidden). */
+  edition?: WeekendInput;
   /** ADR-0011 Phase 2: the impression store + setter, threaded through to the
    * contender drill-down. Marks made here share the same spine as the live-card
    * FormPanel — a mark on either surface shows on the other. */
@@ -35,7 +46,7 @@ export interface RoundupViewProps {
 }
 
 export function RoundupView(props: RoundupViewProps) {
-  const { report, impressions, onSetImpressions, oddsSnapshotAt } = props;
+  const { report, edition, impressions, onSetImpressions, oddsSnapshotAt } = props;
   const { t, tFmt } = useI18n();
   // Tiny freshness stamp — "as of HH:MM JST" sourced from the odds snapshot
   // (the producer's capture time), falling back to the publish instant when
@@ -69,6 +80,7 @@ export function RoundupView(props: RoundupViewProps) {
         <RaceDeepDiveBlock
           key={d.race_id}
           dive={d}
+          edition={edition}
           impressions={impressions}
           onSetImpressions={onSetImpressions}
           oddsSnapshotAt={oddsSnapshotAt}
@@ -171,17 +183,69 @@ function GlanceTable({ report }: { report: WeeklyReport }) {
 
 function RaceDeepDiveBlock({
   dive,
+  edition,
   impressions,
   onSetImpressions,
   oddsSnapshotAt,
 }: {
   dive: RaceDeepDive;
+  edition?: WeekendInput;
   impressions: ImpressionMap;
   onSetImpressions: (next: ImpressionMap) => void;
   oddsSnapshotAt: string | null;
 }) {
-  const { t } = useI18n();
+  const { t, tFmt } = useI18n();
   const [open, setOpen] = useState(false);
+  // ADR-0011 Phase 3b: TicketStudio modal for the research→tickets bridge.
+  const [studioOpen, setStudioOpen] = useState(false);
+
+  // Find the matching RaceInput (runner field + odds) for this deep dive.
+  const raceInput: RaceInput | undefined = useMemo(
+    () => edition?.races.find((r) => r.race_id === dive.race_id),
+    [edition, dive.race_id],
+  );
+
+  // Build the Runner[] (uma + odds + gate) + de-vigged probs for the studio.
+  // Only builds when a raceInput exists; otherwise the bridge CTA is hidden.
+  const studioCtx = useMemo(() => {
+    if (!raceInput) return null;
+    const runners: Runner[] = raceInput.runners.map((r) => ({
+      uma: String(r.horse_number),
+      name: r.horse_name,
+      odds: effectiveOdds(r) ?? 0,
+      gate: r.gate,
+    }));
+    const { p } = winProbs(runners);
+    const allUmas = runners.map((r) => r.uma);
+    // Derive the marked set + anchor from the impression store for this race.
+    // Same logic as RaceScreen: normalizeName(horse_name) → horse_key → mark.
+    const byHorseKey = impressionsByRace(impressions, dive.race_id);
+    const markedSet: string[] = [];
+    let anchorUma: string | null = null;
+    for (const r of raceInput.runners) {
+      const hk = normalizeName(r.horse_name);
+      if (!hk) continue;
+      const imp = byHorseKey[hk];
+      if (!imp) continue;
+      if (
+        imp.mark === "anchor" ||
+        imp.mark === "like" ||
+        imp.mark === "priceHorse"
+      ) {
+        markedSet.push(String(r.horse_number));
+        if (imp.mark === "anchor") anchorUma = String(r.horse_number);
+      }
+    }
+    const hasMarket = runners.some((r) => r.odds > 0);
+    return { runners, p, allUmas, markedSet, anchorUma, hasMarket };
+  }, [raceInput, impressions, dive.race_id]);
+
+  // Bridge CTA shows only when ≥2 include marks + a market exists.
+  const bridgeReady =
+    studioCtx !== null &&
+    studioCtx.markedSet.length >= 2 &&
+    studioCtx.hasMarket;
+
   return (
     <div className="deepdive">
       <button
@@ -214,6 +278,21 @@ function RaceDeepDiveBlock({
             oddsSnapshotAt={oddsSnapshotAt}
           />
 
+          {/* ADR-0011 Phase 3b: research→tickets bridge. Builds the structural
+              surface (SetFamilyView + FormationView + WheelView + FillGuide)
+              from the user's reads on this race. Shown only when ≥2 include
+              marks + a market exist; the CTA is the user's selection, not an
+              app-chosen axis (guardrail). */}
+          {bridgeReady && (
+            <button
+              className="btn gold"
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => setStudioOpen(true)}
+            >
+              {tFmt("roundup.buildTickets", { n: studioCtx!.markedSet.length })}
+            </button>
+          )}
+
           <div className="deep-line">
             <h5>{t("roundup.trend")}</h5>
             <ul>
@@ -225,6 +304,19 @@ function RaceDeepDiveBlock({
 
           <TicketNotesBlock notes={dive.ticket_notes} />
         </div>
+      )}
+
+      {studioOpen && bridgeReady && studioCtx && (
+        <TicketStudio
+          markedSet={studioCtx.markedSet}
+          anchorUma={studioCtx.anchorUma}
+          runners={studioCtx.runners}
+          p={studioCtx.p}
+          allUmas={studioCtx.allUmas}
+          unitStake={100}
+          title={tFmt("roundup.buildTickets", { n: studioCtx.markedSet.length })}
+          onClose={() => setStudioOpen(false)}
+        />
       )}
     </div>
   );
