@@ -37,8 +37,31 @@ test.describe("visual regression", () => {
       // `setNow(Date.now())` now produce identical values.
     }, lang);
     await page.goto("/");
+    // Race-first UX (ADR-0012): `/` lands on the Races (browse) view. MyTickets
+    // is now a top-level tab — click it before asserting the feed's header.
+    await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-brand-name")).toBeVisible({ timeout: 10_000 });
     // Let the auto-settle / drift effects fire once.
+    await page.waitForTimeout(600);
+  }
+
+  /**
+   * Race-first landing (ADR-0012): `/` now lands directly on the classic 4-step
+   * builder at the Race step. The legacy screen tests used to reach this surface
+   * via MyTickets → FAB → Builder, but the Builder button was removed at commit
+   * 3dd12fe (ADR-0007 Phase 5) when MyTickets was extracted — so this prologue
+   * is now a one-liner. Same lang + frozen-clock setup as landOnFeed so the
+   * countdown text and auto-regen are deterministic.
+   */
+  async function landOnLegacyRace(page: import("@playwright/test").Page, lang: "en" | "ja"): Promise<void> {
+    await page.addInitScript((l) => {
+      try { window.localStorage.setItem("keibamon.lang", l); } catch { /* ignore */ }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, lang);
+    await page.goto("/");
+    await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
+    // Let the initial loadLive + auto-regen fire so all stepper buttons are enabled.
     await page.waitForTimeout(600);
   }
 
@@ -68,13 +91,11 @@ test.describe("visual regression", () => {
     });
 
     // ---- Legacy race screen ----
+    // The 4-step builder IS the landing now. Stepper order is fixed in App.tsx
+    // as [race(0), style(1), tickets(2), explain(3)] — index comments below
+    // reference that order.
     test(`legacy race (${lang})`, async ({ page }) => {
-      await landOnFeed(page, lang);
-      await page.locator(".mt-fab").click();
-      await expect(page.locator(".mt-new")).toBeVisible();
-      // "Builder" / "詳細" button (in .mt-back-head, reuses .lang-toggle class)
-      // switches to the classic 4-step builder at the Race step.
-      await page.locator(".mt-back-head .lang-toggle").click();
+      await landOnLegacyRace(page, lang);
       await expect(page.locator(".race-selector, .race-card").first()).toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`legacy-race.${lang}.png`);
@@ -82,13 +103,9 @@ test.describe("visual regression", () => {
 
     // ---- Legacy style screen ----
     test(`legacy style (${lang})`, async ({ page }) => {
-      await landOnFeed(page, lang);
-      await page.locator(".mt-fab").click();
-      await page.locator(".mt-back-head .lang-toggle").click();
-      await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
-      // Click the "Style" / "スタイル" stepper button.
-      const styleBtn = page.locator(".stepper button").nth(2);
-      await styleBtn.click();
+      await landOnLegacyRace(page, lang);
+      // Style = stepper index 1.
+      await page.locator(".stepper button").nth(1).click();
       await expect(page.locator(".persona-grid")).toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`legacy-style.${lang}.png`);
@@ -96,12 +113,9 @@ test.describe("visual regression", () => {
 
     // ---- Legacy tickets screen ----
     test(`legacy tickets (${lang})`, async ({ page }) => {
-      await landOnFeed(page, lang);
-      await page.locator(".mt-fab").click();
-      await page.locator(".mt-back-head .lang-toggle").click();
-      await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
-      const ticketsBtn = page.locator(".stepper button").nth(3);
-      await ticketsBtn.click();
+      await landOnLegacyRace(page, lang);
+      // Tickets = stepper index 2.
+      await page.locator(".stepper button").nth(2).click();
       await expect(page.locator(".ticket").first()).toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`legacy-tickets.${lang}.png`);
@@ -109,12 +123,8 @@ test.describe("visual regression", () => {
 
     // ---- Legacy explain screen ----
     test(`legacy explain (${lang})`, async ({ page }) => {
-      await landOnFeed(page, lang);
-      await page.locator(".mt-fab").click();
-      await page.locator(".mt-back-head .lang-toggle").click();
-      await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
-      const ticketsBtn = page.locator(".stepper button").nth(3);
-      await ticketsBtn.click();
+      await landOnLegacyRace(page, lang);
+      await page.locator(".stepper button").nth(2).click();
       await expect(page.locator(".ticket").first()).toBeVisible({ timeout: 10_000 });
       // "Why ticket" / "推す理由" — the gold button on each ticket card.
       await page.locator(".ticket .btn.gold").first().click();

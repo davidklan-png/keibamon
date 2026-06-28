@@ -101,6 +101,15 @@ describe("lane + drift i18n keys exist in both languages", () => {
     "lane.researchHint",
     "lane.introTitle",
     "lane.switchedTo",
+    // Session 1 UX refactor: the lane choice moved from the header pills to an
+    // in-view segmented control on the Races view. pickLane is the group's
+    // aria-label; the single account slot and the bottom-bar destination tabs
+    // are pinned here too so the relocated top-of-funnel UI stays bilingual.
+    "lane.pickLane",
+    "account.signIn",
+    "tabs.races",
+    "tabs.tickets",
+    "tabs.reference",
     "drift.likedAt",
     "drift.nowAt",
     "drift.shorter",

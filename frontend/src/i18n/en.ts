@@ -13,6 +13,20 @@ export const en = {
     tickets: "Tickets",
     explain: "Why",
   },
+  // Persistent bottom navigation bar (Session 1 UX refactor). Short labels for
+  // the three top-level destinations, mapped onto the `view` enum
+  // (browse / mine / reference). Kept terse so they fit the thumb-zone bar at
+  // 390px width.
+  tabs: {
+    races: "Races",
+    tickets: "Tickets",
+    reference: "Reference",
+  },
+  // Single top-right account slot (Session 1 UX refactor). Signed-out
+  // affordance that opens Clerk's sign-in modal.
+  account: {
+    signIn: "Sign in",
+  },
   race: {
     title: "Pick a race",
     hint: "Start with the race date, then pick a featured race or choose from the full card.",
@@ -378,6 +392,9 @@ export const en = {
       "Open the weekend roundup and drill into any contender.",
     introTitle: "Two ways in",
     switchedTo: "Lane saved",
+    // aria-label for the in-view segmented control (Session 1 UX refactor —
+    // lane choice moved out of the header into the Races view).
+    pickLane: "Choose how to start",
   },
   drift: {
     likedAt: "marked at",

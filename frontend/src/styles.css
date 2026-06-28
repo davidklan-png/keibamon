@@ -171,16 +171,29 @@ a {
 .app {
   max-width: 720px;
   margin: 0 auto;
-  padding: 14px 14px 0;
+  /* Bottom padding clears the fixed .bottom-tabbar (its height + the
+     safe-area inset) so page content is never hidden behind the bar. */
+  padding: 14px 14px calc(72px + env(safe-area-inset-bottom));
 }
 
 /* ---------- Header ---------- */
+/* Session 1 UX refactor: the header is now a single simple row — brand on the
+   left, and a right-aligned actions cluster (language toggle + one account
+   slot). Destinations + lane funnel moved out (bottom bar + in-view segmented
+   control), so the old six-cell grid is gone. */
 .head {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  display: flex;
   align-items: center;
   gap: 12px;
   padding: 4px 0 16px;
+}
+
+/* Right-aligned cluster: language toggle + single account slot. */
+.head-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .head .avatar {
@@ -1053,6 +1066,48 @@ select:focus {
   letter-spacing: 0.1em;
 }
 
+/* ---------- Bottom tab bar (Session 1 UX refactor) ----------
+   Persistent thumb-zone navigation across the three top-level destinations.
+   Fixed to the viewport bottom, safe-area-inset aware (.app carries matching
+   bottom padding so content clears it). Three equal-width tabs. */
+.bottom-tabbar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0;
+  padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+  background: rgba(255, 255, 255, 0.96);
+  border-top: 1px solid var(--line);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.bottom-tabbar button {
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 800 11px/1.1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: color 0.12s, background 0.12s;
+}
+
+.bottom-tabbar button.on {
+  color: var(--turf-deep);
+  background: var(--soft);
+}
+
+.bottom-tabbar button:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: -2px;
+}
+
 /* ---------- Responsive ---------- */
 @media (min-width: 600px) {
   .head h1 {
@@ -1489,7 +1544,10 @@ select:focus {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  bottom: 22px;
+  /* Session 1 UX refactor: lift above the persistent .bottom-tabbar
+     (tab bar is fixed bottom with z-index 50; a FAB at bottom:22px was
+     covered by it and its pointer events were stolen — see ADR-0012). */
+  bottom: calc(72px + env(safe-area-inset-bottom));
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -2757,6 +2815,42 @@ select:focus {
 }
 
 .lane-pill:focus-visible {
+  outline: 2px solid var(--gold);
+  outline-offset: 2px;
+}
+
+/* ---------- Lane segmented control (Session 1 UX refactor) ----------
+   Two-button toggle near the top of the Races view; replaces the old header
+   lane pills. Quick / Research set the funnel lane. */
+.lane-segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  margin: 0 0 14px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--panel);
+}
+
+.lane-segmented button {
+  min-height: 38px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 800 13px/1 ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: background 0.12s, color 0.12s;
+}
+
+.lane-segmented button.on {
+  background: var(--turf);
+  color: #fff;
+}
+
+.lane-segmented button:focus-visible {
   outline: 2px solid var(--gold);
   outline-offset: 2px;
 }

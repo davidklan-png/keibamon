@@ -12,6 +12,18 @@ export const ja = {
     tickets: "馬券",
     explain: "理由",
   },
+  // 下部ナビゲーションバー（Session 1 UX リファクタ）。3つのトップレベル
+  // 目的地（browse / mine / reference）の短いラベル。390px 幅でも収まるよう簡潔に。
+  tabs: {
+    races: "レース",
+    tickets: "マイ",
+    reference: "用語",
+  },
+  // 右上のアカウント枠（Session 1 UX リファクタ）。サインアウト時に Clerk の
+  // サインインモーダルを開く導線。
+  account: {
+    signIn: "ログイン",
+  },
   race: {
     title: "レースを選ぶ",
     hint: "まず日付を選び、注目レースまたは全レースから選びます。",
@@ -365,6 +377,9 @@ export const ja = {
     researchHint: "週末まとめを開き、有力馬をドリルダウン。",
     introTitle: "2つの入り口",
     switchedTo: "経路を保存しました",
+    // ビュー内セグメントコントロールの aria-label（Session 1 UX リファクタ —
+    // 経路選択をヘッダーからレース画面内へ移動）。
+    pickLane: "始め方を選ぶ",
   },
   drift: {
     likedAt: "メモ時",

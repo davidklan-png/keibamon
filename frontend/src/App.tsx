@@ -36,6 +36,7 @@ import { ExplainScreen } from "./screens/ExplainScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
 import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { Footer } from "./components/Footer";
+import { BottomTabBar } from "./components/BottomTabBar";
 
 type Step = "race" | "style" | "tickets" | "explain";
 type View = "browse" | "mine" | "reference";
@@ -406,11 +407,14 @@ function App() {
   // MyTicketsHome as defense-in-depth (harmless when already authed).
   if (view === "mine") {
     return (
-      <MyTicketsHome
-        snap={snap}
-        onClassic={() => setView("browse")}
-        onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
-      />
+      <>
+        <MyTicketsHome
+          snap={snap}
+          onClassic={() => setView("browse")}
+          onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
+        />
+        <BottomTabBar view={view} onNavigate={setView} />
+      </>
     );
   }
 
@@ -420,14 +424,17 @@ function App() {
   // the Roundup contender drill-down can read/write marks on the same spine.
   if (view === "reference") {
     return (
-      <ReferenceScreen
-        onBack={() => setView("browse")}
-        impressions={impressions}
-        onSetImpressions={setImpressions}
-        oddsSnapshotAt={
-          snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
-        }
-      />
+      <>
+        <ReferenceScreen
+          onBack={() => setView("browse")}
+          impressions={impressions}
+          onSetImpressions={setImpressions}
+          oddsSnapshotAt={
+            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+          }
+        />
+        <BottomTabBar view={view} onNavigate={setView} />
+      </>
     );
   }
 
@@ -447,81 +454,44 @@ function App() {
             {t("app.title")} <span className="ja">競馬モン</span>
           </h1>
         </div>
-        <button
-          className="lang-toggle"
-          onClick={() => setLang(lang === "ja" ? "en" : "ja")}
-          aria-label="toggle language"
-        >
-          {t("app.langToggle")}
-        </button>
-        {/* ADR-0011 Phase 2: two-path entry. "Quick ticket" jumps to the live
-            card (browse); "Research" opens the Roundup. Both lanes share the
-            same drill-down + impression store, so a mark made on either surface
-            shows on the other. The active lane is visually marked. */}
-        <button
-          className={`lane-pill ${funnel === "quick" ? "on" : ""}`}
-          onClick={() => {
-            setFunnel("quick");
-            setView("browse");
-            setStep("race");
-          }}
-          aria-label={t("lane.quick")}
-          aria-pressed={funnel === "quick"}
-        >
-          {t("lane.quick")}
-        </button>
-        <button
-          className={`lane-pill ${funnel === "research" ? "on" : ""}`}
-          onClick={() => {
-            setFunnel("research");
-            setView("reference");
-          }}
-          aria-label={t("lane.research")}
-          aria-pressed={funnel === "research"}
-        >
-          {t("lane.research")}
-        </button>
-        {/* My Tickets tab — auth-gated. Triggers Clerk's sign-in modal when
-            signed out (or age not yet self-attested) instead of navigating
-            into the AuthGate full-screen. Non-dominant placement. */}
-        <button
-          className="lang-toggle mine-tab"
-          onClick={() => {
-            // Signed-in → drop into My Tickets (AgeGate inside MyTicketsHome
-            // catches the not-yet-age-verified case at the right screen).
-            // Signed-out → open Clerk's sign-in modal in place.
-            if (isSignedIn) setView("mine");
-            else openSignIn();
-          }}
-          aria-label={t("mine.home")}
-        >
-          {t("mine.home")}
-        </button>
-        {/* Reference section: bilingual glossary + weekend graded-stakes
-            roundup. Non-auth-gated reference material. */}
-        <button
-          className="lang-toggle reference-tab"
-          onClick={() => setView("reference")}
-          aria-label={t("reference.home")}
-        >
-          {t("reference.tab")}
-        </button>
-        {/* Profile indicator — Clerk's hosted <UserButton />. Avatar + chip;
-            click opens Clerk's menu (Manage account, Sign out). Gated on
-            BOTH isSignedIn and clerkMounted because the Playwright bypass
-            branch fakes a session WITHOUT mounting <ClerkProvider>, and
-            <UserButton /> throws without that ancestor. */}
-        {isSignedIn && clerkMounted && (
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "kbm-userbtn-avatar",
-                userButtonTrigger: "kbm-userbtn",
-              },
-            }}
-            afterSignOutUrl="/"
-          />
-        )}
+        {/* Session 1 UX refactor: the top row holds only brand, language
+            toggle, and ONE account slot. Destinations (Races / My Tickets /
+            Reference) moved to the persistent <BottomTabBar />; the two-lane
+            funnel moved to an in-view segmented control on the Races view. */}
+        <div className="head-actions">
+          <button
+            className="lang-toggle"
+            onClick={() => setLang(lang === "ja" ? "en" : "ja")}
+            aria-label="toggle language"
+          >
+            {t("app.langToggle")}
+          </button>
+          {/* Single account slot. Signed-out → one "Sign in" affordance that
+              opens Clerk's sign-in modal. Signed-in → Clerk's hosted
+              <UserButton /> (avatar + menu). The UserButton is gated on BOTH
+              isSignedIn and clerkMounted because the Playwright bypass branch
+              fakes a session WITHOUT mounting <ClerkProvider>, and
+              <UserButton /> throws without that ancestor. */}
+          {isSignedIn && clerkMounted ? (
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: "kbm-userbtn-avatar",
+                  userButtonTrigger: "kbm-userbtn",
+                },
+              }}
+              afterSignOutUrl="/"
+            />
+          ) : (
+            <button
+              className="lang-toggle account-signin"
+              onClick={() => openSignIn()}
+              aria-label={t("account.signIn")}
+            >
+              {t("account.signIn")}
+            </button>
+          )}
+        </div>
       </header>
 
       <nav className="stepper" aria-label="steps">
@@ -538,10 +508,48 @@ function App() {
         ))}
       </nav>
 
+      {/* Session 1 UX refactor: two-lane funnel relocated from the header into
+          an in-view segmented control near the top of the Races view. Quick
+          keeps you on the live card; Research opens the existing weekend
+          roundup surface (folding the roundup INTO the Races tab is a later
+          session). The lane choice still persists via saveFunnel (the [funnel]
+          effect). Shown on the race picker step. */}
+      {step === "race" && (
+        <div
+          className="lane-segmented"
+          role="group"
+          aria-label={t("lane.pickLane")}
+        >
+          <button
+            type="button"
+            className={funnel === "quick" ? "on" : ""}
+            aria-pressed={funnel === "quick"}
+            onClick={() => {
+              setFunnel("quick");
+              setView("browse");
+              setStep("race");
+            }}
+          >
+            {t("lane.quick")}
+          </button>
+          <button
+            type="button"
+            className={funnel === "research" ? "on" : ""}
+            aria-pressed={funnel === "research"}
+            onClick={() => {
+              setFunnel("research");
+              setView("reference");
+            }}
+          >
+            {t("lane.research")}
+          </button>
+        </div>
+      )}
+
       {/* ADR-0011 Phase 2: first-launch intro card. Shown only when the user
           hasn't picked a lane yet AND is still on the race picker (no race in
           flight). One short paragraph per lane, single-disclaimer posture.
-          Dismissed on first selection (the lane pills set `funnel`). */}
+          Dismissed on first selection (the segmented control sets `funnel`). */}
       {funnel === null && step === "race" && (
         <section className="section lane-intro">
           <h2>{t("lane.introTitle")}</h2>
@@ -628,6 +636,7 @@ function App() {
       )}
 
       <Footer />
+      <BottomTabBar view={view} onNavigate={setView} />
     </main>
   );
 }
