@@ -72,6 +72,12 @@ export const en = {
     flavorChalk: "I trust the favorites",
     flavorValue: "Find price horses",
   },
+  // Session 3a: inline "Refine ▾" panel on the Tickets screen (the old Style
+  // step, folded in). The panel body reuses the `style.*` / `personality.*`
+  // strings; only the disclosure summary is new.
+  refine: {
+    summary: "Refine",
+  },
   personality: {
     title: "Betting personality",
     safe: { name: "Safe-ish", desc: "Higher hit rate, smaller payouts." },

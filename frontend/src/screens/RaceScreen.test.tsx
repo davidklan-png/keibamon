@@ -102,7 +102,6 @@ function renderHtml() {
       onSeedManual={() => {}}
       onApplyRace={() => {}}
       onStandard={() => {}}
-      onRefine={() => {}}
       raceStatus="manual"
       raceId="test-race"
       impressions={{}}

@@ -1,9 +1,11 @@
 // ============================================================================
 // Visual regression — every screen × {en, ja}, under the light theme.
 //
-// Gate for Decision 1 (app-wide light re-theme, Phase 1–3): proves the legacy
-// 4 screens (race/style/tickets/explain) and the auth-gated MyTickets surface
-// (feed/new/detail) didn't regress when the theme rolled out.
+// Gate for Decision 1 (app-wide light re-theme, Phase 1–3) + ADR-0012/0014 UX
+// refactors: proves the collapsed race→tickets builder (with the inline Refine
+// panel + per-ticket Why disclosures replacing the old standalone Style and
+// Explain steps) and the auth-gated MyTickets surface (feed/new/detail) didn't
+// regress across the rebuild.
 //
 // Run:              npm run test:visual
 // Update baselines: npm run test:visual -- --update-snapshots
@@ -90,10 +92,11 @@ test.describe("visual regression", () => {
       await expect(page).toHaveScreenshot(`mytickets-detail-open.${lang}.png`);
     });
 
-    // ---- Legacy race screen ----
-    // The 4-step builder IS the landing now. Stepper order is fixed in App.tsx
-    // as [race(0), style(1), tickets(2), explain(3)] — index comments below
-    // reference that order.
+    // ---- Race step (collapsed-builder landing) ----
+    // Stepper is now [race(0), tickets(1)] (ADR-0014 collapsed the 4-step spine
+    // to race → tickets; the standalone Style + Explain steps are gone). The race
+    // step is the landing — only ADR-0014 delta here is the removed "Refine by
+    // style" link, so this baseline should drift by exactly that.
     test(`legacy race (${lang})`, async ({ page }) => {
       await landOnLegacyRace(page, lang);
       await expect(page.locator(".race-selector, .race-card").first()).toBeVisible({ timeout: 10_000 });
@@ -101,36 +104,49 @@ test.describe("visual regression", () => {
       await expect(page).toHaveScreenshot(`legacy-race.${lang}.png`);
     });
 
-    // ---- Legacy style screen ----
-    test(`legacy style (${lang})`, async ({ page }) => {
-      await landOnLegacyRace(page, lang);
-      // Style = stepper index 1.
-      await page.locator(".stepper button").nth(1).click();
-      await expect(page.locator(".persona-grid")).toBeVisible({ timeout: 10_000 });
-      await page.waitForTimeout(300);
-      await expect(page).toHaveScreenshot(`legacy-style.${lang}.png`);
-    });
-
-    // ---- Legacy tickets screen ----
+    // ---- Tickets step (collapsed builder, nth(1) now) ----
+    // Captures the Refine panel + per-ticket Why disclosures in their COLLAPSED
+    // state, so the expanded variants below show a deterministic delta.
     test(`legacy tickets (${lang})`, async ({ page }) => {
       await landOnLegacyRace(page, lang);
-      // Tickets = stepper index 2.
-      await page.locator(".stepper button").nth(2).click();
+      // Tickets = stepper index 1 (was 2 pre-collapse).
+      await page.locator(".stepper button").nth(1).click();
       await expect(page.locator(".ticket").first()).toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`legacy-tickets.${lang}.png`);
     });
 
-    // ---- Legacy explain screen ----
-    test(`legacy explain (${lang})`, async ({ page }) => {
+    // ---- Refine panel (was "legacy style") ----
+    // The standalone Style step is gone (ADR-0014). Its controls — persona grid,
+    // budget/unit, advanced complexity/flavor — now live inside a collapsible
+    // <details className="refine"> at the top of Tickets. Expand it and snapshot
+    // to cover the same controls the old legacy-style baseline did.
+    test(`refine-panel (${lang})`, async ({ page }) => {
       await landOnLegacyRace(page, lang);
-      await page.locator(".stepper button").nth(2).click();
+      await page.locator(".stepper button").nth(1).click();
       await expect(page.locator(".ticket").first()).toBeVisible({ timeout: 10_000 });
-      // "Why ticket" / "推す理由" — the gold button on each ticket card.
-      await page.locator(".ticket .btn.gold").first().click();
-      await expect(page.locator(".explain-lead")).toBeVisible({ timeout: 10_000 });
+      await page.locator("details.refine > summary").click();
+      await expect(page.locator(".persona-grid")).toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(300);
-      await expect(page).toHaveScreenshot(`legacy-explain.${lang}.png`);
+      await expect(page).toHaveScreenshot(`refine-panel.${lang}.png`);
+    });
+
+    // ---- Inline Why (was "legacy explain") ----
+    // The standalone Why step is gone (ADR-0014). Reasoning now lives inline per
+    // ticket in a <details className="ticket-why-disclosure">. Expand the first
+    // ticket's disclosure and snapshot to cover the same reasoning (lead,
+    // coverage/upside/fragility/cost, combos, math) the old legacy-explain did.
+    test(`inline-why (${lang})`, async ({ page }) => {
+      await landOnLegacyRace(page, lang);
+      await page.locator(".stepper button").nth(1).click();
+      await expect(page.locator(".ticket").first()).toBeVisible({ timeout: 10_000 });
+      await page.locator("details.ticket-why-disclosure > summary").first().click();
+      // Every ticket renders its own TicketWhy (each with .explain-lead) inside
+      // its own <details>; only the first is opened, but the locator still
+      // matches all of them in the DOM → scope to .first() to satisfy strict mode.
+      await expect(page.locator(".explain-lead").first()).toBeVisible({ timeout: 10_000 });
+      await page.waitForTimeout(300);
+      await expect(page).toHaveScreenshot(`inline-why.${lang}.png`);
     });
   }
 });

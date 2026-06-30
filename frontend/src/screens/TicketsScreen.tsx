@@ -1,19 +1,29 @@
 // ============================================================================
 // Tickets Screen — extracted from App.tsx (ADR-0007 Phase 5).
-// Behavior-preserving move. Shows the recommended ticket set with mood badges,
-// cost / if-hits metrics, and a remix + why button per ticket.
+// Session 3a: the 4-step builder collapsed to race → tickets. The old Style
+// step is now the inline "Refine ▾" panel at the top; the old Why step is now
+// an inline "Why ▾" <details> per ticket (TicketWhy). Shows the recommended
+// ticket set with mood badges, cost / if-hits metrics, refine + why + place
+// per ticket.
 // ============================================================================
 import { useI18n } from "../i18n";
-import type { Ticket } from "../lib/types";
+import type { Ticket, StyleState } from "../lib/types";
 import { moodKey } from "../lib/types";
 import { yen } from "../lib/format";
+import { RefinePanel } from "./RefinePanel";
+import { TicketWhy } from "./TicketWhy";
 
 export interface TicketsScreenProps {
   tickets: Ticket[];
   onRemix: () => void;
   onReset: () => void;
-  onBackStyle: () => void;
-  onExplain: (id: string) => void;
+  /**
+   * Current play style + setter. The inline Refine panel edits this; App still
+   * owns the state and its auto-regenerate effect reshapes `tickets` in place
+   * on every change.
+   */
+  style: StyleState;
+  onStyleChange: (s: StyleState) => void;
   /**
    * Place (commit) a single ticket. Mirrors MyTickets.commit() — the label is
    * chosen by the caller (App) based on auth state so this component stays
@@ -32,8 +42,8 @@ export function TicketsScreen(props: TicketsScreenProps) {
     tickets,
     onRemix,
     onReset,
-    onBackStyle,
-    onExplain,
+    style,
+    onStyleChange,
     onPlace,
     placeLabel,
     toast,
@@ -41,9 +51,11 @@ export function TicketsScreen(props: TicketsScreenProps) {
   if (tickets.length === 0) {
     // Only reachable when a real regenerate() returned 0 tickets — i.e. the
     // current constraints (typically too many "avoid" tags) are unsolvable.
-    // Pair the message with a one-tap reset instead of a dead end.
+    // Pair the message with a one-tap reset instead of a dead end. The Refine
+    // panel stays available so the user can loosen the style that wedged it.
     return (
       <>
+        <RefinePanel style={style} onChange={onStyleChange} />
         <section className="section">
           <p className="empty">{t("tickets.noCandidates")}</p>
           <button
@@ -54,16 +66,14 @@ export function TicketsScreen(props: TicketsScreenProps) {
             {t("tickets.resetStandard")}
           </button>
         </section>
-        <div className="btn-row">
-          <button className="btn ghost" onClick={onBackStyle}>
-            ← {t("tickets.backToStyle")}
-          </button>
-        </div>
       </>
     );
   }
   return (
     <>
+      {/* Session 3a: the old standalone Style step is now an inline collapsible
+          panel at the top of Tickets. Editing it auto-regenerates the set. */}
+      <RefinePanel style={style} onChange={onStyleChange} />
       {toast && (
         <p className="hint marks-toast" role="status">
           {toast}
@@ -81,7 +91,7 @@ export function TicketsScreen(props: TicketsScreenProps) {
             >
               {/* ADR-0005 Phase 3: default card carries two numbers + one mood
                   label. Hit %, variance, value tag and the house-edge line all
-                  move to "Why" (one tap away). */}
+                  move to the inline "Why" (one tap away). */}
               <div className="ticket-head">
                 <div>
                   <h3>{t(`betType.${tk.type}`)}</h3>
@@ -110,6 +120,12 @@ export function TicketsScreen(props: TicketsScreenProps) {
                   </span>
                 )}
               </div>
+              {/* Session 3a: per-ticket reasoning, inline. Replaces the old
+                  onExplain(id) navigation to a separate Why step. */}
+              <details className="ticket-why-disclosure">
+                <summary>{t("tickets.whyTicket")}</summary>
+                <TicketWhy ticket={tk} style={style} />
+              </details>
               <div className="btn-row" style={{ marginTop: 12 }}>
                 {onPlace && (
                   <button
@@ -119,12 +135,6 @@ export function TicketsScreen(props: TicketsScreenProps) {
                     {placeLabel ?? t("tickets.placeCta")}
                   </button>
                 )}
-                <button
-                  className="btn gold"
-                  onClick={() => onExplain(tk.id)}
-                >
-                  {t("tickets.whyTicket")}
-                </button>
                 <button className="btn ghost" onClick={onRemix}>
                   ⟳ {t("tickets.remix")}
                 </button>
@@ -132,11 +142,6 @@ export function TicketsScreen(props: TicketsScreenProps) {
             </article>
           );
         })}
-      </div>
-      <div className="btn-row" style={{ marginTop: 12 }}>
-        <button className="btn ghost" onClick={onBackStyle}>
-          ← {t("tickets.backToStyle")}
-        </button>
       </div>
     </>
   );

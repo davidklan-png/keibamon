@@ -50,7 +50,6 @@ export interface RaceScreenProps {
   onSeedManual: () => void;
   onApplyRace: (r: LiveRace, fallbackDate?: string) => void;
   onStandard: () => void;
-  onRefine: () => void;
   raceStatus: string;
   /**
    * ADR-0011 Phase 2: the parent (App) owns the full impression store;
@@ -85,7 +84,6 @@ export function RaceScreen(props: RaceScreenProps) {
     onSeedManual,
     onApplyRace,
     onStandard,
-    onRefine,
     raceStatus,
     raceId,
     impressions,
@@ -461,14 +459,6 @@ export function RaceScreen(props: RaceScreenProps) {
           {tFmt("setFamily.boxThese", { n: markedSet.length })}
         </button>
       )}
-      <button
-        className="btn ghost"
-        style={{ width: "100%", marginTop: 8 }}
-        onClick={onRefine}
-        disabled={runners.length < 2}
-      >
-        {t("race.refine")}
-      </button>
 
       {/* TicketStudio modal — shared surface (SetFamilyView + FormationView +
           WheelView + FillGuide). A second layer (FillGuide) mounts inside the

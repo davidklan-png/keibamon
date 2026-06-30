@@ -1,7 +1,9 @@
 // ============================================================================
-// Style Screen — extracted from App.tsx (ADR-0007 Phase 5).
-// Behavior-preserving move. Personality picker (ADR-0005) + budget/unit +
-// advanced complexity/flavor knobs.
+// Refine panel — formerly the standalone "Style" step (ADR-0007 Phase 5).
+// Session 3a: Style is no longer a step. Its controls (personality grid +
+// budget/unit + advanced complexity/flavor) now live inline on the Tickets
+// screen inside a collapsible "Refine ▾" panel. Same `style` state, same
+// onChange (App still owns `style`; auto-regenerate fires on change as before).
 // ============================================================================
 import { useI18n } from "../i18n";
 import type {
@@ -27,18 +29,27 @@ function cap(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-export interface StyleScreenProps {
+export interface RefinePanelProps {
   style: StyleState;
   onChange: (s: StyleState) => void;
-  onBack: () => void;
-  onSeeTickets: () => void;
+  /** Optional: start the panel expanded (defaults to collapsed). */
+  defaultOpen?: boolean;
 }
 
-export function StyleScreen(props: StyleScreenProps) {
+/**
+ * Inline "Refine ▾" panel for the Tickets screen. Renders as a
+ * `<details className="refine">` (matching the codebase's existing details
+ * idiom) holding the personality picker, budget/unit, and the advanced
+ * complexity/flavor knobs. Editing any control calls onChange; the parent's
+ * auto-regenerate effect reshapes the ticket set in place.
+ */
+export function RefinePanel(props: RefinePanelProps) {
   const { t } = useI18n();
-  const { style, onChange, onBack, onSeeTickets } = props;
+  const { style, onChange, defaultOpen } = props;
   return (
-    <>
+    <details className="refine" open={defaultOpen}>
+      <summary>{t("refine.summary")}</summary>
+
       <section className="section">
         <div className="section-title">
           <h2>{t("style.title")}</h2>
@@ -124,19 +135,6 @@ export function StyleScreen(props: StyleScreenProps) {
           </div>
         </details>
       </section>
-
-      <button
-        className="btn primary"
-        style={{ width: "100%" }}
-        onClick={onSeeTickets}
-      >
-        {t("tickets.title")} →
-      </button>
-      <div className="btn-row" style={{ marginTop: 8 }}>
-        <button className="btn ghost" onClick={onBack}>
-          ← {t("nav.race")}
-        </button>
-      </div>
-    </>
+    </details>
   );
 }

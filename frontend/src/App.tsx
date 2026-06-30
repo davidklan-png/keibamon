@@ -30,15 +30,13 @@ import { useAuth } from "./auth/AuthProvider";
 import { postTicket } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
 import { RaceScreen } from "./screens/RaceScreen";
-import { StyleScreen } from "./screens/StyleScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
-import { ExplainScreen } from "./screens/ExplainScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
 import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { Footer } from "./components/Footer";
 import { BottomTabBar } from "./components/BottomTabBar";
 
-type Step = "race" | "style" | "tickets" | "explain";
+type Step = "race" | "tickets";
 type View = "browse" | "mine" | "reference";
 
 function App() {
@@ -50,8 +48,10 @@ function App() {
   const { isSignedIn, userId, getToken, openSignIn, clerkMounted } = useAuth();
 
   // Race-first UX: the race browser is the landing. "My Tickets" is a separate
-  // top-level view toggled from the header (auth-gated). The classic 4-step
-  // builder (race → style → tickets → explain) lives under view === "browse".
+  // top-level view toggled from the header (auth-gated). Session 3a collapsed
+  // the builder to two steps (race → tickets) under view === "browse": Style is
+  // now an inline "Refine ▾" panel on Tickets and Why is an inline per-ticket
+  // <details>, so neither is a routed step anymore.
   const [view, setView] = useState<View>("browse");
   const [step, setStep] = useState<Step>("race");
   const [runners, setRunners] = useState<Runner[]>([]);
@@ -87,7 +87,6 @@ function App() {
   // card is shown until the user picks a lane.
   const [funnel, setFunnel] = useState<FunnelLane | null>(() => loadFunnel());
   const [tickets, setTickets] = useState<Ticket[]>([]);
-  const [activeTicketId, setActiveTicketId] = useState<string | null>(null);
   // Transient status line on the Tickets screen (marks-applied / place result).
   const [toast, setToast] = useState<string>("");
 
@@ -271,7 +270,6 @@ function App() {
       ? recommendDiverse({ allUmas, p, style: s, intuition: i })
       : recommend({ allUmas, p, style: s, intuition: i });
     setTickets(out);
-    setActiveTicketId(out[0]?.id ?? null);
   }
 
   // Auto-regen on any change to runners/style/impressions/raceId. Skip the
@@ -281,7 +279,6 @@ function App() {
   useEffect(() => {
     if (runners.length < 2) {
       setTickets([]);
-      setActiveTicketId(null);
       return;
     }
     if (firstRender.current) {
@@ -317,7 +314,7 @@ function App() {
     setStep("tickets");
   }
 
-  /** Explicit "I want to see tickets now" — used by Style + Remix. */
+  /** Explicit "regenerate + show tickets now" — used by the Tickets Remix CTA. */
   function goToTickets() {
     regenerate();
     setStep("tickets");
@@ -390,16 +387,16 @@ function App() {
     }
   }
 
-  // ---------- Step nav (classic builder, under view === "browse") ----------
+  // ---------- Step nav (two-step builder, under view === "browse") ----------
+  // Session 3a: Race → Tickets only. Style folded into the inline Refine panel
+  // on Tickets; Why folded into an inline per-ticket disclosure.
   const steps: { id: Step; label: string; enabled: boolean }[] = [
     { id: "race", label: t("nav.race"), enabled: true },
-    { id: "style", label: t("nav.style"), enabled: runners.length >= 2 },
     {
       id: "tickets",
       label: t("nav.tickets"),
       enabled: runners.length >= 2,
     },
-    { id: "explain", label: t("nav.explain"), enabled: !!activeTicketId },
   ];
 
   // ADR-0007: My Tickets is its own full-screen home (own header). "Browse
@@ -580,7 +577,6 @@ function App() {
           onSeedManual={() => seedManual()}
           onApplyRace={applyRace}
           onStandard={standardTickets}
-          onRefine={() => setStep("style")}
           raceStatus={raceStatus}
           raceId={raceId}
           impressions={impressions}
@@ -596,43 +592,16 @@ function App() {
         />
       )}
 
-      {step === "style" && (
-        <StyleScreen
-          style={style}
-          onChange={setStyle}
-          onBack={() => setStep("race")}
-          onSeeTickets={goToTickets}
-        />
-      )}
-
       {step === "tickets" && (
         <TicketsScreen
           tickets={tickets}
           onRemix={goToTickets}
           onReset={resetToStandard}
-          onBackStyle={() => setStep("style")}
-          onExplain={(id) => {
-            setActiveTicketId(id);
-            setStep("explain");
-          }}
+          style={style}
+          onStyleChange={setStyle}
           onPlace={placeTicket}
           placeLabel={isSignedIn ? t("tickets.placeCta") : t("tickets.placeSignIn")}
           toast={toast}
-        />
-      )}
-
-      {step === "explain" && (
-        <ExplainScreen
-          ticket={tickets.find((x) => x.id === activeTicketId) ?? null}
-          style={style}
-          onBack={() => setStep("tickets")}
-          runners={runners}
-          raceId={raceId}
-          impressions={impressions}
-          oddsSnapshotAt={
-            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
-          }
-          onSetImpressions={setImpressions}
         />
       )}
 

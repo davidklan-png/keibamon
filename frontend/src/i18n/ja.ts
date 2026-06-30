@@ -69,6 +69,11 @@ export const ja = {
     flavorChalk: "人気馬を信頼",
     flavorValue: "穴馬を探す",
   },
+  // Session 3a: 馬券画面のインライン「絞り込み ▾」パネル（旧スタイルステップ）。
+  // 本体は style.* / personality.* の文言を再利用。新規はサマリーのみ。
+  refine: {
+    summary: "絞り込み",
+  },
   personality: {
     title: "プレイスタイル",
     safe: { name: "堅実", desc: "当たりやすさ優先。配当は小さめ。" },
