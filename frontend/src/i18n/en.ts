@@ -264,7 +264,7 @@ export const en = {
     tab: "Reference",
     home: "Reference",
     title: "Reference",
-    subtitle: "Glossary + weekend graded-stakes research.",
+    subtitle: "Bilingual racing glossary.",
     glossary: "Glossary",
     roundup: "Weekend roundup",
     back: "Back to race builder",

@@ -135,6 +135,21 @@ export async function installApiMocks(page: import("@playwright/test").Page): Pr
       body: JSON.stringify(FIXTURE_SNAPSHOT),
     }),
   );
+  // /api/weekly-report → empty. ADR-0015: RoundupPanel now renders inline on
+  // the Races Research lane, and the visual baseline for that surface must be
+  // the deterministic EmptyRoundup state. Without this mock, the panel would
+  // hit whatever the dev server's D1 happens to carry (published edition or
+  // not), making the research-mode baseline flake. Pinned to empty so the
+  // capture shows the cadence message + the fixture's G1 as an upcoming
+  // graded stake — the same honest empty state users see on a non-race-week
+  // browser.
+  await page.route("**/api/weekly-report", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "empty" }),
+    }),
+  );
   // Social Worker calls — return deterministic shapes for visual regression.
   await page.route("**/api/social/**", (route) => {
     const url = route.request().url();

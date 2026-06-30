@@ -33,6 +33,7 @@ import { RaceScreen } from "./screens/RaceScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
 import { ReferenceScreen } from "./screens/ReferenceScreen";
+import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
 import { BottomTabBar } from "./components/BottomTabBar";
 
@@ -416,21 +417,14 @@ function App() {
     );
   }
 
-  // Reference section: bilingual glossary + weekend graded-stakes roundup.
-  // Full-screen, non-auth-gated (reference material). "Back to race builder"
-  // (onBack) returns here. ADR-0011 Phase 2: threads the impression store so
-  // the Roundup contender drill-down can read/write marks on the same spine.
+  // Reference destination (ADR-0015): glossary-only. The weekend roundup
+  // moved into the Races "Research" segment (RoundupPanel below) so the
+  // two-lane funnel converges on a single destination. Full-screen, non-
+  // auth-gated reference material. "Back to race builder" returns here.
   if (view === "reference") {
     return (
       <>
-        <ReferenceScreen
-          onBack={() => setView("browse")}
-          impressions={impressions}
-          onSetImpressions={setImpressions}
-          oddsSnapshotAt={
-            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
-          }
-        />
+        <ReferenceScreen onBack={() => setView("browse")} />
         <BottomTabBar view={view} onNavigate={setView} />
       </>
     );
@@ -492,26 +486,32 @@ function App() {
         </div>
       </header>
 
-      <nav className="stepper" aria-label="steps">
-        {steps.map((s) => (
-          <button
-            key={s.id}
-            className={step === s.id ? "on" : ""}
-            disabled={!s.enabled}
-            aria-current={step === s.id ? "step" : undefined}
-            onClick={() => setStep(s.id)}
-          >
-            {s.label}
-          </button>
-        ))}
-      </nav>
+      {/* Session 3b (ADR-0015): the race→tickets stepper hides in research mode —
+          Research renders RoundupPanel below, not the ticket-builder spine. The
+          lane segmented control still shows so the user can flip back to Quick. */}
+      {funnel !== "research" && (
+        <nav className="stepper" aria-label="steps">
+          {steps.map((s) => (
+            <button
+              key={s.id}
+              className={step === s.id ? "on" : ""}
+              disabled={!s.enabled}
+              aria-current={step === s.id ? "step" : undefined}
+              onClick={() => setStep(s.id)}
+            >
+              {s.label}
+            </button>
+          ))}
+        </nav>
+      )}
 
-      {/* Session 1 UX refactor: two-lane funnel relocated from the header into
-          an in-view segmented control near the top of the Races view. Quick
-          keeps you on the live card; Research opens the existing weekend
-          roundup surface (folding the roundup INTO the Races tab is a later
-          session). The lane choice still persists via saveFunnel (the [funnel]
-          effect). Shown on the race picker step. */}
+      {/* Session 3b (ADR-0015): two-lane funnel rendered as an in-view
+          segmented control near the top of the Races view. Quick keeps you on
+          the live card ticket-builder; Research swaps in RoundupPanel inline —
+          the two lanes now converge on a single destination (Races), sharing
+          the App header + bottom tab bar + impression spine. The lane choice
+          persists via saveFunnel (the [funnel] effect). Shown on the race
+          picker step (and in research mode, so the user can flip back). */}
       {step === "race" && (
         <div
           className="lane-segmented"
@@ -536,7 +536,8 @@ function App() {
             aria-pressed={funnel === "research"}
             onClick={() => {
               setFunnel("research");
-              setView("reference");
+              setView("browse");
+              setStep("race");
             }}
           >
             {t("lane.research")}
@@ -564,7 +565,21 @@ function App() {
         </section>
       )}
 
-      {step === "race" && (
+      {/* Session 3b (ADR-0015): Research lane renders RoundupPanel inline —
+          shares the App header + bottom tab bar + impression spine with the
+          live-card builder. Marks made in the roundup drill-down land on the
+          same store as marks made on the Quick ticket-builder. */}
+      {funnel === "research" && step === "race" && (
+        <RoundupPanel
+          impressions={impressions}
+          onSetImpressions={setImpressions}
+          oddsSnapshotAt={
+            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+          }
+        />
+      )}
+
+      {funnel !== "research" && step === "race" && (
         <RaceScreen
           runners={runners}
           raceLabel={raceLabel}
@@ -592,7 +607,7 @@ function App() {
         />
       )}
 
-      {step === "tickets" && (
+      {funnel !== "research" && step === "tickets" && (
         <TicketsScreen
           tickets={tickets}
           onRemix={goToTickets}

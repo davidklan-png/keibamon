@@ -148,5 +148,27 @@ test.describe("visual regression", () => {
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`inline-why.${lang}.png`);
     });
+
+    // ---- Research lane (inline RoundupPanel, ADR-0015) ----
+    // Tap the Research segment of the lane control on the Races view. The
+    // weekend roundup now renders inline (sharing the App header + bottom tab
+    // bar + impression spine with the live-card builder). The fixture pins
+    // /api/weekly-report to {status:"empty"}, so this capture is the
+    // deterministic EmptyRoundup state — cadence message + the fixture's G1
+    // (Tokyo Takarazuka, 2026-06-21) listed as an upcoming graded stake under
+    // the frozen clock. Without that pin the baseline would flake on whatever
+    // the dev server's D1 happens to carry.
+    test(`research-mode (${lang})`, async ({ page }) => {
+      await landOnLegacyRace(page, lang);
+      // Second button in the lane segmented control = Research.
+      await page.locator(".lane-segmented button").nth(1).click();
+      // RoundupPanel's empty state renders .roundup-empty (cadence + upcoming).
+      await expect(page.locator(".roundup-empty")).toBeVisible({ timeout: 10_000 });
+      // Stepper hides in research mode (ADR-0015) — assert it's gone so a
+      // regression that re-renders the race→tickets spine here fails the test.
+      await expect(page.locator(".stepper")).toHaveCount(0);
+      await page.waitForTimeout(300);
+      await expect(page).toHaveScreenshot(`research-mode.${lang}.png`);
+    });
   }
 });
