@@ -72,6 +72,8 @@ The loop is **spec → build → verify → iterate → commit-package → sign-
 
 **Boundaries.** The agent works in the real tree (not an isolated worktree) so David's commit captures it. No session bundles two commits' worth of change; if scope grows mid-session (e.g. 5 splitting), I stop and re-spec. Sessions are ordered by dependency — 1 is foundational; 2–4 are largely independent and could reorder; 5 depends on the backend field for full value.
 
+**Standing rule from Session 1 (the FAB bug).** The persistent bottom tab bar sits at `z-index: 50`. Any fixed or sticky bottom-anchored element (FABs, sticky CTAs, toasts) must clear it — bottom offset `calc(72px + env(safe-area-inset-bottom))`, the same clearance `.app` already uses — or the bar steals its pointer events. Session 1's `.mt-fab` overlap proved this is invisible to `tsc`/unit tests and only the Mac visual gate catches it; every later session that adds bottom-anchored UI must honor the clearance and the Mac visual pass is mandatory.
+
 ## Sandbox / device constraints (per `CLAUDE.md`)
 
 - This runs in **cowork-sandbox**: edits + `vitest` only. **No git commit/push** here (the sandbox's `.git/index.lock` is unreliable) and no USB import. Every commit and the final push happen on **mac-dev**, run by David.
