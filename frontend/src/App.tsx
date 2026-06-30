@@ -412,6 +412,7 @@ function App() {
           snap={snap}
           onClassic={() => setView("browse")}
           onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
+          impressions={impressions}
         />
         <BottomTabBar view={view} onNavigate={setView} />
       </>

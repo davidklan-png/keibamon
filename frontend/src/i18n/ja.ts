@@ -193,6 +193,17 @@ export const ja = {
     friendsOnRace: "このレースに友だち{n}人",
     browseRaces: "レースを見る",
   },
+  // Session 2 UX refactor: ログアウト時の正直な空状態（My Tickets タブ）。
+  // フルの SignInScreen を置き換え、下部タブバーを表示したまま、ローカルに
+  // 付けた印（impression ストア）を見せてログインを促す。サーバの馬券フィードは
+  // 捏造しない。n = 印を付けた頭数、m = 印が1つ以上あるレース数。
+  mineEmpty: {
+    title: "ログインして馬券を保存",
+    body: "馬券はアカウントに保存されます。ログインすれば端末をまたいで残せます。",
+    teaser: "{m}レースで{n}頭に印を付けています — ログインして保存しましょう。",
+    teaserEmpty: "気になる馬に印を付けて、ログインで馬券を保存しましょう。",
+    signIn: "ログイン",
+  },
   // ADR-0007 Phase 3 — 公開プロフィール + フォローグラフ。
   profile: {
     title: "プレイヤー",

@@ -1,7 +1,8 @@
 // ============================================================================
 // My Tickets surface (ADR-0007) — extracted from App.tsx (Phase 5).
 // Behavior-preserving move. The full social/feed/new-bet/detail/profile UI:
-//   • MyTicketsHome — AuthGate + AgeGate wrapper, best-effort profile upsert.
+//   • MyTicketsHome — signed-out empty state (MyTicketsEmpty) / AgeGate /
+//                     feed branch + best-effort profile upsert.
 //   • MyTickets    — feed/new/detail/profile view-state machine with server-
 //                    first ticket persistence, live odds/drift, auto-settle,
 //                    cheer/follow/block/report, handle prompt, share export.
@@ -22,9 +23,10 @@ import type {
 } from "../lib/types";
 import { DEFAULT_STYLE, applyPersonality, moodKey } from "../lib/types";
 import type { LiveSnapshot, LiveRace } from "../api";
-import { AuthGate } from "../auth/AuthGate";
 import { AgeGate } from "../auth/AgeGate";
 import { useAuth } from "../auth/AuthProvider";
+import { MyTicketsEmpty } from "./MyTicketsEmpty";
+import type { ImpressionMap } from "../lib/impressions";
 import {
   postMe,
   postMeTyped,
@@ -87,16 +89,24 @@ interface MyTicketsProps {
   getToken: () => Promise<string | null>;
 }
 
-// ADR-0007 Phase 1 — wraps MyTickets in AuthGate + AgeGate. The auth context
-// is read here so MyTickets itself stays Clerk-free and testable. Best-effort
-// profile upsert runs on sign-in (offline-first; postMe swallows its errors).
+// ADR-0007 Phase 1 / Session 2 — branches on auth: signed-out renders the
+// honest empty state (MyTicketsEmpty, with a local-marks teaser); signed-in
+// gates on age then renders the feed. The auth context is read here so
+// MyTickets itself stays Clerk-free and testable. Best-effort profile upsert
+// runs on sign-in (offline-first; postMe swallows its errors).
 interface MyTicketsHomeProps {
   snap: LiveSnapshot | null;
   onClassic: () => void;
   onToggleLang: () => void;
+  /**
+   * Local impression store (localStorage mirror), threaded from App so the
+   * signed-out empty state can tease the user's locally-made marks without
+   * re-reading localStorage itself.
+   */
+  impressions: ImpressionMap;
 }
 
-export function MyTicketsHome({ snap, onClassic, onToggleLang }: MyTicketsHomeProps) {
+export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions }: MyTicketsHomeProps) {
   const { isSignedIn, userId, ageVerified, getToken } = useAuth();
 
   useEffect(() => {
@@ -113,23 +123,27 @@ export function MyTicketsHome({ snap, onClassic, onToggleLang }: MyTicketsHomePr
     };
   }, [isSignedIn, userId, getToken]);
 
-  return (
-    <AuthGate isSignedIn={isSignedIn}>
-      {ageVerified ? (
-        <main className="app">
-          <MyTickets
-            snap={snap}
-            onClassic={onClassic}
-            onToggleLang={onToggleLang}
-            userId={userId}
-            getToken={getToken}
-          />
-          <Footer />
-        </main>
-      ) : (
-        <AgeGate />
-      )}
-    </AuthGate>
+  // Session 2 UX refactor: signed-out visitors get an honest empty state with a
+  // local-marks teaser instead of the full SignInScreen (which AuthGate used to
+  // render). MyTicketsEmpty stays inside the `.app` shell so the Session 1
+  // bottom tab bar remains visible. The signed-in branch below is unchanged.
+  if (!isSignedIn) {
+    return <MyTicketsEmpty impressions={impressions} />;
+  }
+
+  return ageVerified ? (
+    <main className="app">
+      <MyTickets
+        snap={snap}
+        onClassic={onClassic}
+        onToggleLang={onToggleLang}
+        userId={userId}
+        getToken={getToken}
+      />
+      <Footer />
+    </main>
+  ) : (
+    <AgeGate />
   );
 }
 

@@ -197,6 +197,18 @@ export const en = {
     friendsOnRace: "{n} friends on this race",
     browseRaces: "Browse races",
   },
+  // Session 2 UX refactor: honest signed-out empty state for the My Tickets
+  // tab. Replaces the full SignInScreen so the bottom tab bar stays visible.
+  // The marks-teaser surfaces locally-made impression marks (read from the
+  // localStorage impression store) to motivate sign-in without fabricating a
+  // server feed. N = distinct marked horses, M = distinct races with ≥1 mark.
+  mineEmpty: {
+    title: "Sign in to save your tickets",
+    body: "Your tickets live on your account — sign in to keep them across devices.",
+    teaser: "You’ve marked {n} horses across {m} races — sign in to save them.",
+    teaserEmpty: "Mark horses as you research, then sign in to save your tickets.",
+    signIn: "Sign in",
+  },
   // ADR-0007 Phase 3 — public profiles + follow graph.
   profile: {
     title: "Player",

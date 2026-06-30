@@ -2160,6 +2160,59 @@ select:focus {
   line-height: 1.5;
 }
 
+/* Session 2 UX refactor: signed-out My Tickets empty state. Lives INSIDE the
+   normal `.app` shell (not a full-bleed auth screen) so the persistent bottom
+   tab bar stays visible and its clearance padding applies. Centered card,
+   modeled on .auth-card but lighter. */
+.mt-empty {
+  max-width: 420px;
+  margin: 32px auto 0;
+  padding: 28px 22px 24px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  box-shadow: var(--shadow-card);
+  text-align: center;
+  animation: kbmRise 0.28s ease-out;
+}
+.mt-empty-mark {
+  margin: 0 auto 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  background: linear-gradient(135deg, var(--turf), var(--turf-deep));
+  color: #fffbef;
+  font-weight: 900;
+  font-size: 26px;
+  box-shadow: 0 5px 13px rgba(21, 168, 98, 0.32);
+}
+.mt-empty-title {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+.mt-empty-body {
+  margin: 0 0 14px;
+  color: var(--ink-2);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.mt-empty-teaser {
+  margin: 0 0 20px;
+  color: var(--turf-deep);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.5;
+}
+.mt-empty-cta {
+  margin-bottom: 0;
+}
+
 /* AgeGate-specific spacing — checkbox row above the CTA. */
 .age-gate .age-check {
   display: flex;
