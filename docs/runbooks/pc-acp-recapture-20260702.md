@@ -45,7 +45,18 @@ and/or this re-capture restores the 06-27/28 weekend. Full forensics:
 
 ## After import on the Mac
 
-Rebuild silver/gold/marts wholesale; if the R-derived recovery snapshots from
-`data/_quarantine/` were built in the meantime, quarantine them in favor of this
-clean re-capture. Verify latest `race_date` reaches 2026-06-28 and
-jockey/trainer masters regenerate from KS/CH bronze (~1,560 / ~1,475 rows).
+Rebuild silver/gold/marts wholesale. Verify latest `race_date` reaches
+2026-06-28 and jockey/trainer masters regenerate from KS/CH bronze
+(~1,560 / ~1,475 rows).
+
+## Outcome (2026-07-02) — R-snapshots are permanent, NOT superseded
+
+The clean 07-02 re-capture (`20260702T105617`) re-served only a fraction of
+what the corrupt pull had fetched: 29 of 1,611 distinct source files (~2%) —
+JV-Link's delta window did not re-offer the bulk of the historical
+mining/odds files the 06-30 pull carried. **`20260630T214859R` and
+`20260626T115545_mastersR` therefore stay in bronze permanently**; the earlier
+instruction to quarantine them in favor of the re-capture is void. The silver
+rebuild dedupes the 29-file overlap at record level. Recovery provenance lives
+in each R-dir's `_snapshot.json`; originals remain in `data/_quarantine/` as
+forensic evidence.
