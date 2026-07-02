@@ -447,6 +447,18 @@ DATA_TRAPS = {
     "training.times_null": "0000/000 = not measured, 9999/999 = over cap -> NULL (not 0.0). "
         "Woodchip horses run partial distances so most upper-distance fields are legitimately "
         "0000 -- that's expected, not a parse error.",
+    "RACE_spec.cp1252_roundtrip": "the ACP!=932 mojibake that masters.cp1252_roundtrip "
+        "documents for KS/CH/UM/BN/BR ALSO strikes RACE-spec records (JG declarations, SE "
+        "entries, RA races) -- any record carrying Japanese text. parse_fixed() does NOT "
+        "route through recover_raw_bytes() the way parse_master() does, so a JG/SE/RA "
+        "record from an English-ACP capture raises UnicodeEncodeError on silver build. "
+        "Incident log: 20260630T214859 + 20260626T115545_masters on a PC that drifted to "
+        "ACP=1252; both quarantined under data/_quarantine/. Prevention = the assert_japanese_acp() "
+        "guard in ingest_jvlink.py / realtime_jvlink.py open_jvlink(), plus the write_snapshot "
+        "mojibake canary. Recovery when masters.cp1252_roundtrip's lossless invariant holds "
+        "(C1 orphans survived -- 100% of the time in the observed incidents) is to extend "
+        "recover_raw_bytes() to RACE-spec parsing, but the preferred path is re-capture from "
+        "a Japanese-ACP PC since JG/SE/RA/HR/O1-O6 are all re-pullable historical data.",
     "scrape.natural_key_includes_source": "scrape_upsert's natural key for jravan_race_entries"
         "/results/payouts is (business_id..., source_name) so a JV-Link row and a scrape row "
         "for the SAME (race, horse)/(race, pool, combo) coexist rather than overwrite. The "

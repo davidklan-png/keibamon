@@ -42,6 +42,19 @@ work — don't guess.
   (JV-Link COM). Don't cross them.
 - **git in the sandbox is unreliable** (`.git/index.lock` unlink "Operation not
   permitted"). Commit/push on the Mac.
+- **The lake is repo-`./data`.** `KEIBAMON_LAKE` overrides it per-shell — do NOT
+  set it on the Mac. Stale docs and memory pointing at `~/keibamon-data` caused
+  a bronze/silver split (2026-07-02 merge fixed it; `~/keibamon-data` is now a
+  symlink to `./data`). Every ingestion tool defaults to `./data` and the silver
+  builder reads `LakePaths()` with no env override — keep it that way.
+- **Capture-PC must run Japanese ANSI codepage (ACP=932).** JV-Link converts
+  Shift-JIS BSTRs via the Windows ANSI codepage; if ACP != 932 (e.g. English
+  Windows defaults to 1252), every Japanese byte silently round-trips through
+  cp1252 and arrives in bronze as `U+0192` + C1 orphan mojibake. The
+  `assert_japanese_acp()` guard in `tools/jravan/ingest_jvlink.py` +
+  `realtime_jvlink.py` refuses the run; the `write_snapshot` canary is the
+  defense-in-depth backstop. Both only exist on `main` -- a capture-PC on a
+  divergent branch will bypass them, so verify branch before any capture.
 
 ## Working rules
 

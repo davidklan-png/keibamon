@@ -457,7 +457,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
         "--lake", default="data",
-        help="Lake root (default: data). Production lives at ~/keibamon-data.",
+        help="Lake root (default: data, canonical). Do not set KEIBAMON_LAKE on Mac.",
     )
     ap.add_argument("--top-n", type=int, default=20)
     args = ap.parse_args()

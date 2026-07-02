@@ -19,7 +19,7 @@ isn't defined yet, the manual equivalent is:
 
 ```bash
 rsync -av --checksum /Volumes/<SSD_NAME>/keibamon-xfer/incoming/ \
-      ~/keibamon-data/raw/jravan/
+      ./data/raw/jravan/   (canonical lake = repo ./data; do not set KEIBAMON_LAKE on Mac)
 ```
 
 What landed on the SSD — snapshot `20260613T083235`, 12 chunk files:
@@ -52,7 +52,7 @@ Test the lake is readable:
 ```bash
 python - <<'EOF'
 import pyarrow.parquet as pq, pathlib
-lake = pathlib.Path(os.environ.get("KEIBAMON_LAKE", "~/keibamon-data")).expanduser()
+lake = pathlib.Path(os.environ.get("KEIBAMON_LAKE", "data")).expanduser()
 for f in sorted(lake.glob("raw/jravan/**/*.ndjson.gz"))[:3]:
     print(f)
 EOF

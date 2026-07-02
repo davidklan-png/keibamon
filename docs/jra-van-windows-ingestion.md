@@ -99,3 +99,28 @@ both machines.
 jravan adapter + Pandera traps. 6. Add `_z` normalization + acceptance metrics.
 7. Schedule daily pull→export (PC) and on-dock import (Mac). 8. Keep Netkeiba
 running; join in silver.
+
+## 8. Known data gaps (historical)
+
+Specific dates where a capture path failed or wasn't run. Lake queries against
+these dates will see whatever the sekisan snapshot carried (often final results
+without the intraday odds curve) and **must not** be treated as a regression or
+a parser bug. Add new entries here as they occur.
+
+### 2026-06-28 — realtime capture missing (Saturday card)
+- **What's missing:** `rt-20260628` under `data/raw/jravan_rt/`. No intraday
+  O1–O6 odds curves for any 06-28 race.
+- **What IS present:** 06-28 `HR`/`RA` records (final results, payouts) were
+  carried by the next sekisan snapshot (`20260630T214859`, RACE watermark
+  `20260629133745`, MING `20260629133744`). Final odds exist as a single
+  snapshot, not a curve.
+- **Cause:** the PC realtime capture (`realtime_jvlink.py`) did not run for
+  06-28 (operator gap, not a code regression — 06-26, 06-27, and 06-30+
+  captured normally).
+- **Effect on analytics:** `jravan_odds_timeseries` will show 06-27 and 06-29+
+  curves but a one-day hole on 06-28. Curve features for 06-28 races fall back
+  to the sekasan single-snapshot odds. Don't treat 06-28 as low-confidence
+  unless the sekasan snapshot itself is suspect.
+- **Logged:** 2026-07-02, when the `20260630T214859` sekisan + `realtime/20260627`
+  USB drop landed on the Mac (commit history around that date carries the
+  bronze-merge).

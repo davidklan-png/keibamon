@@ -160,6 +160,23 @@ def save_state(state: dict) -> None:
     STATE.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+# Mojibake canary: see ingest_jvlink._check_mojibake for the full why. Same
+# defense-in-depth backstop for the realtime capture path. Cheap set-intersection
+# check on every record's raw text before it touches bronze.
+_MOJIBAKE_CANARY = frozenset("\u0192\u0081\u008d\u008f\u0090\u009d")
+
+
+def _check_mojibake(raw_text: str, src_file: str) -> None:
+    if _MOJIBAKE_CANARY & set(raw_text):
+        bad = sorted(hex(ord(c)) for c in _MOJIBAKE_CANARY if c in raw_text)
+        sys.exit(
+            f"FATAL: mojibake canary tripped on {src_file} (chars: {bad}). "
+            "Raw bytes were decoded with the wrong Windows ANSI codepage (ACP != 932); "
+            "continuing would poison bronze with unrecoverable-as-cp932 text. "
+            "Run assert_japanese_acp() before JVRTOpen; do NOT bypass."
+        )
+
+
 def write_snapshot(race_key: str, records, ingested_at: str) -> int:
     """Write one immutable gz-NDJSON of raw realtime records + 7 bronze metadata
     fields, under raw/jravan_rt/<race_key>/<UTC stamp>.ndjson.gz."""
@@ -170,6 +187,7 @@ def write_snapshot(race_key: str, records, ingested_at: str) -> int:
     n = 0
     with gzip.open(out, "wt", encoding="utf-8") as fh:
         for record_id, raw_text, src_file in records:
+            _check_mojibake(raw_text, src_file)
             content_hash = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
             fh.write(json.dumps({
                 "source_name": SOURCE_NAME,

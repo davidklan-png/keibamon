@@ -8,7 +8,8 @@
 `python tools/whichdevice.py` → must be mac-dev (owns git + lake). Dock USB,
 import both shapes:
 - 蓄積 masters/odds/votes:
-  `KEIBAMON_LAKE=~/keibamon/data python tools/jravan/import_delta.py --from /Volumes/<usb>/keibamon-xfer`
+  `python tools/jravan/import_delta.py --from /Volumes/<usb>/keibamon-xfer`
+  (canonical lake = repo ./data; do NOT set KEIBAMON_LAKE on Mac -- caused a bronze/silver split 2026-07-02)
 - realtime curves:
   `... python tools/jravan/import_realtime.py --from /Volumes/<usb>/keibamon-xfer --dry-run`, then for real.
 Verify sha + print per-spec row counts. STOP if KS or CH is absent — don't
