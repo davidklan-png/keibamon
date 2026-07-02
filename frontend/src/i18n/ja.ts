@@ -50,6 +50,13 @@ export const ja = {
     statusOpen: "発売中",
     statusRegistered: "登録済み",
     statusResult: "結果",
+    // ADR-0017: レース文脈バーの馬場表記。publisher は LiveRace.surface に
+    // "turf"/"dirt" を素で入れるため、バーで芝/ダートに訳す。
+    surfaceTurf: "芝",
+    surfaceDirt: "ダート",
+    // ADR-0017: 常設レース文脈バーの aria-label。バー内は会場/R#/馬場/状態の
+    // 断片なので「レース文脈」として読み上げる。
+    contextBar: "レース文脈",
     entriesPending: "出走馬未定",
     // ADR-0016: ランナー行内のメモ操作。未マークbadgeのaria-label。
     // マーク済みbadgeは form.intuition.<kind> を流用。

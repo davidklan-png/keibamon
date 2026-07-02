@@ -36,6 +36,7 @@ import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
 import { BottomTabBar } from "./components/BottomTabBar";
+import { RaceContextBar } from "./components/RaceContextBar";
 
 type Step = "race" | "tickets";
 type View = "browse" | "mine" | "reference";
@@ -485,6 +486,24 @@ function App() {
           )}
         </div>
       </header>
+
+      {/* Session 5a (ADR-0017): persistent race-context bar — "what race am I
+          on and what's its status?" Visible on the Races destination whenever
+          the funnel is Quick (not research — the roundup carries its own
+          context) AND a race is applied (selectedRace or the manual sample
+          card). Fed from the FROZEN selectedRace + raceStatus, not the live
+          snap — the 45s snap rotation (refreshSnap replaces the snapshot,
+          race may rotate off / name may drift) would silently blank a snap-
+          re-lookup. Persists across BOTH steps (race → tickets). */}
+      {view === "browse" &&
+        funnel !== "research" &&
+        (selectedRace || raceLabel) && (
+          <RaceContextBar
+            race={selectedRace}
+            raceLabel={raceLabel}
+            raceStatus={raceStatus}
+          />
+        )}
 
       {/* Session 3b (ADR-0015): the race→tickets stepper hides in research mode —
           Research renders RoundupPanel below, not the ticket-builder spine. The

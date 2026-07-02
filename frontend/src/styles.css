@@ -298,6 +298,94 @@ a {
   cursor: not-allowed;
 }
 
+/* ---------- Race context bar (ADR-0017) ----------
+   Persistent "what race am I on?" strip. Sits between the App header and the
+   stepper, present on both Race and Tickets steps of the Quick funnel. Slim by
+   design: identity segments (venue/R#/surface/distance/chip/going) never wrap
+   or truncate; the trailing race name is the only variable-width element and
+   ellipses when the 390px viewport can't hold it. */
+.race-context-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 0;
+  margin: 0 0 12px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--tint-2);
+  /* Subtle left accent signals status at a glance without reading the chip. */
+  border-left: 3px solid var(--muted);
+}
+
+.race-context-bar.status-open {
+  border-left-color: var(--turf);
+}
+.race-context-bar.status-result {
+  border-left-color: var(--gold);
+}
+.race-context-bar.status-registered {
+  border-left-color: var(--sky);
+}
+.race-context-bar.status-manual {
+  border-left-color: var(--muted);
+}
+
+.race-context-bar .rcb-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 1 auto;
+  min-width: 0;
+  color: var(--soft);
+  font: 700 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.race-context-bar .rcb-id > * + *::before {
+  content: "·";
+  margin-right: 6px;
+  color: var(--faint);
+  font-weight: 400;
+}
+
+.race-context-bar .rcb-chip {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 8px;
+  background: var(--soft);
+  color: #fff;
+  font: 700 9px/1.2 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.race-context-bar .rcb-chip.status-open {
+  background: var(--turf);
+}
+.race-context-bar .rcb-chip.status-result {
+  background: var(--gold-deep);
+}
+.race-context-bar .rcb-chip.status-registered {
+  background: var(--sky);
+}
+.race-context-bar .rcb-chip.status-manual {
+  background: var(--muted);
+}
+
+.race-context-bar .rcb-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: right;
+}
+
 /* ---------- Section primitives ---------- */
 .section {
   background: var(--surface);

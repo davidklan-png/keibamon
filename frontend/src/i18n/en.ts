@@ -53,6 +53,15 @@ export const en = {
     statusOpen: "odds open",
     statusRegistered: "registered",
     statusResult: "result",
+    // ADR-0017: surface labels for the persistent race-context bar. The
+    // publisher ships raw "turf"/"dirt" on LiveRace.surface; the bar localizes
+    // it so JA reads 芝2000m and EN reads "turf 2000m".
+    surfaceTurf: "turf",
+    surfaceDirt: "dirt",
+    // ADR-0017: aria-label for the persistent race-context bar (the bar's
+    // contents are venue/R#/surface/status, so the label announces the whole
+    // strip as "Race context" rather than reading the fragments flat).
+    contextBar: "Race context",
     entriesPending: "Entries pending",
     // ADR-0016: inline runner-row mark control. aria-label for the unmarked
     // badge (visible to screen readers); the marked badge reuses
