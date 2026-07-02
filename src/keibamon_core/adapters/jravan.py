@@ -682,12 +682,23 @@ def recover_raw_bytes(raw_text: str) -> bytes:
 def parse_master(raw: str, layout: list[Field], *, expected_len: int | None = None) -> dict:
     """Slice a master record (KS/CH/UM/BN/BR) by BYTE offsets.
 
-    Counterpart to :func:`parse_fixed` for records that arrived at the bronze
-    decoded as cp1252 (see :func:`recover_raw_bytes`). Length-check semantics
-    mirror :func:`parse_fixed`: a mismatch is a tripped round-trip / truncated
-    record and fails loudly.
+    Dual-mode: tries clean cp932 first (post-recovery or Japanese-ACP capture),
+    falls back to :func:`recover_raw_bytes` on UnicodeEncodeError (legacy
+    captures under English Windows ACP that delivered these records as
+    cp1252-decoded strings). Length-check semantics mirror :func:`parse_fixed`:
+    a mismatch is a tripped round-trip / truncated record and fails loudly.
+
+    The dual path matters because the cp1252 recovery path (``recover_raw_bytes``)
+    rejects any codepoint outside latin-1 + cp1252's 27-char high map -- so a
+    CLEAN Japanese record (e.g. the post-recovery output of
+    ``tools/jravan/recover_cp1252_snapshot.py``) cannot route through it.
+    Trying cp932 first keeps both inputs parseable from a single entry point.
     """
-    data = recover_raw_bytes(raw.rstrip("\r\n"))
+    stripped = raw.rstrip("\r\n")
+    try:
+        data = stripped.encode(ENCODING)
+    except UnicodeEncodeError:
+        data = recover_raw_bytes(stripped)
     if expected_len is not None and len(data) != expected_len:
         raise ValueError(
             f"record byte-length {len(data)} != expected {expected_len} "

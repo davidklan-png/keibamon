@@ -15,6 +15,7 @@ data/features/**
 data/marts/**
 data/mlruns/**
 data/pattern_of_life_runner_z.parquet
+data/_quarantine/**
 !data/raw/.gitkeep
 !data/normalized/.gitkeep
 !data/features/.gitkeep

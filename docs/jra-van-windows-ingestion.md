@@ -124,3 +124,80 @@ a parser bug. Add new entries here as they occur.
 - **Logged:** 2026-07-02, when the `20260630T214859` sekisan + `realtime/20260627`
   USB drop landed on the Mac (commit history around that date carries the
   bronze-merge).
+
+## 9. cp1252 mojibake — recovery path for bad-ACP captures
+
+**Root cause.** JV-Link hands its records to Python as BSTRs. Windows converts
+the underlying Shift-JIS bytes to UTF-16 *through the system ANSI codepage*
+(ACP). If the capture PC's ACP is **not 932** (e.g. `en-US` → ACP 1252), every
+Japanese byte is destroyed in transit: cp1252 high chars (`U+0152 Œ`,
+`U+0192 ƒ`, `U+2014 —`, …) replace the cp932 lead bytes, and the five
+undefined cp1252 slots in `0x80–0x9F` arrive as C1 orphan controls
+(`U+0081 / U+008D / U+008F / U+0090 / U+009D`). The bronze records land as
+UTF-8 of those codepoints, not as the original Japanese.
+
+**Detection.** `tools/jravan/ingest_jvlink.py` and `tools/jravan/realtime_jvlink.py`
+each call `assert_japanese_acp()` at JV-Link open time (refuses to ingest on a
+non-932 ACP). A second line of defense is the **mojibake canary** —
+`_check_mojibake()` in `write_snapshot()`, which rejects any record whose
+`raw` contains one of the canary chars above before it lands on disk. The
+canary is also encoded in `adapters/jravan.DATA_TRAPS` so silver parsing can
+guard against it.
+
+**Recoverability test.** Because the five C1 orphans are themselves bytes
+(0x81, 0x8D, …), every Japanese line that was destroyed carries at least one
+C1 orphan. We proved the **`c1 == hits` invariant** on the 2026-07-02
+incident: 100% of mojibake'd lines carry ≥1 C1 orphan, so the cp932
+lead-byte structure survived the round-trip and recovery is **mechanical and
+lossless**. (`c1 ≈ hits` ⇒ lossless; `c1 == 0` ⇒ bytes were destroyed and the
+record is unrecoverable.)
+
+**Recovery script.** `tools/jravan/recover_cp1252_snapshot.py`:
+
+- inverts the cp1252 high chars via `adapters/jravan.recover_raw_bytes`
+  (mirror, never duplicate, the cp1252 reverse map), treats each C1 orphan as
+  its codepoint byte, then decodes the concatenation as **cp932 strict**;
+- writes a **NEW derived snapshot dir** under `data/raw/jravan/` with the
+  `R` suffix convention (e.g. `20260630T214859R`);
+- adds a `provenance` block to the new `_snapshot.json` naming the source
+  snapshot, the method, the script path, and the rationale;
+- **never touches the source**. The quarantined original stays in
+  `data/_quarantine/<name>.bad-encoding/` for forensic reference.
+
+**Hard gates** (any failure rolls back the dest dir entirely):
+
+1. Records without canary chars pass through byte-identical to the source.
+   ASCII-only fields (HR payouts, O1–O6 odds, all-numeric fields) are
+   invariant under cp1252 vs cp932, so they survive unchanged.
+2. Zero canary chars anywhere in the recovered output.
+3. Every record with canary chars must recover via `recover_raw_bytes` +
+   cp932 strict decode (raises `ValueError` on unmapped codepoints,
+   `UnicodeDecodeError` on invalid sequences).
+
+**When to recover vs re-capture.** Recovery is lossless but DERIVED data.
+Prefer re-capture from a Japanese-ACP PC when JG/SE/RA/HR/O1–O6 are
+re-pullable historical data (they are, via `JVOpen` from the appropriate
+`fromtime`) and the next PC visit isn't far off. Use recovery when
+rt-* realtime odds are involved (unrepeatable) **or** the weekend's data is
+needed before the next PC visit.
+
+**When a clean PC re-capture lands.** Quarantine the R-derived snapshots in
+its favor — **never delete bronze**:
+
+```
+mv data/raw/jravan/<snap>R data/_quarantine/<snap>R.superseded
+```
+
+**Usage.**
+
+```
+PYTHONPATH=src python tools/jravan/recover_cp1252_snapshot.py \
+    --source data/_quarantine/20260630T214859.bad-encoding \
+    --dest   data/raw/jravan/20260630T214859R
+```
+
+**PC-side fix (the actual remediation).** Recovery is a stop-gap. The real
+fix is on the PC: `GetACP()` will report `1252` until the system locale is
+set to Japanese (Control Panel → Region → Administrative → "Copy settings"
+→ tick "Welcome screen and new user accounts"; reboot). After the reboot,
+`GetACP()` returns `932` and `assert_japanese_acp()` lets ingestion through.
