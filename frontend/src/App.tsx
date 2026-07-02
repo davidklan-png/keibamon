@@ -29,6 +29,7 @@ import { raceHasLiveOdds, snapshotRace } from "./lib/mytickets-view";
 import { useAuth } from "./auth/AuthProvider";
 import { postTicket } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
+import { useImpressionsSync } from "./auth/impressionsSync";
 import { RaceScreen } from "./screens/RaceScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
@@ -213,6 +214,18 @@ function App() {
   useEffect(() => {
     saveImpressions(impressions);
   }, [impressions]);
+
+  // ADR-0018 (Session 5b): account-backed impression marks. Observer-only —
+  // syncs the impressions state to /api/social/me/impressions when signed in.
+  // On sign-in transition: GET → LWW merge → setImpressions → PUT (one-time
+  // per session). While signed in: debounced best-effort PUT on changes. No
+  // UI surface for sync failures (mirrors the ticketQueue offline tolerance).
+  // The hook does NOT fork the store; RunnerMark/HorseDrillView write paths
+  // are untouched.
+  useImpressionsSync(impressions, setImpressions, {
+    isSignedIn,
+    getToken,
+  });
 
   // ADR-0011 Phase 2: persist the funnel lane choice. Same best-effort shell
   // as the impression store.
