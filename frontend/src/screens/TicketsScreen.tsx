@@ -7,9 +7,13 @@
 // per ticket.
 // ============================================================================
 import { useI18n } from "../i18n";
-import type { Ticket, StyleState } from "../lib/types";
+import type { Ticket, StyleState, IntuitionKind } from "../lib/types";
 import { moodKey } from "../lib/types";
 import { yen } from "../lib/format";
+import { normalizeName } from "../lib/normalizeName";
+import { impressionsByRace, type ImpressionMap } from "../lib/impressions";
+import type { Runner } from "../lib/fairvalue";
+import { MARK_GLYPH, markClass } from "./RunnerMark";
 import { RefinePanel } from "./RefinePanel";
 import { TicketWhy } from "./TicketWhy";
 
@@ -34,6 +38,15 @@ export interface TicketsScreenProps {
   placeLabel?: string;
   /** Transient status line (e.g. "Updated with your marks", offline-queued). */
   toast?: string;
+  /**
+   * ADR-0016: read-only "your marks" echo. When the race has ≥1 mark, the
+   * strip renders above the ticket list (glyph + horse chip per mark). Absent
+   * on the empty state and when no marks exist. Editing stays on Race /
+   * inside the drill — this surface is display-only.
+   */
+  runners?: Runner[];
+  raceId?: string;
+  impressions?: ImpressionMap;
 }
 
 export function TicketsScreen(props: TicketsScreenProps) {
@@ -47,7 +60,27 @@ export function TicketsScreen(props: TicketsScreenProps) {
     onPlace,
     placeLabel,
     toast,
+    runners,
+    raceId,
+    impressions,
   } = props;
+
+  // ADR-0016: build the per-runner mark list for the read-only echo. Same
+  // join path RaceScreen uses (normalizeName → horse_key → impression). Only
+  // rendered when ≥1 mark exists; otherwise the strip is absent.
+  const markedRunners: { runner: Runner; mark: IntuitionKind }[] = (() => {
+    if (!runners || !raceId || !impressions) return [];
+    const byHorseKey = impressionsByRace(impressions, raceId);
+    const out: { runner: Runner; mark: IntuitionKind }[] = [];
+    for (const r of runners) {
+      const hk = normalizeName(r.name);
+      if (!hk) continue;
+      const m = byHorseKey[hk]?.mark;
+      if (m) out.push({ runner: r, mark: m });
+    }
+    return out;
+  })();
+
   if (tickets.length === 0) {
     // Only reachable when a real regenerate() returned 0 tickets — i.e. the
     // current constraints (typically too many "avoid" tags) are unsolvable.
@@ -78,6 +111,36 @@ export function TicketsScreen(props: TicketsScreenProps) {
         <p className="hint marks-toast" role="status">
           {toast}
         </p>
+      )}
+      {/* ADR-0016: read-only echo of the marks set on Race. Renders only when
+          the race has ≥1 mark. Editing stays on Race / in the drill — this
+          surface is display-only. */}
+      {markedRunners.length > 0 && (
+        <section className="section tickets-marks" aria-label={t("tickets.yourMarks")}>
+          <div className="section-title">
+            <h3>{t("tickets.yourMarks")}</h3>
+          </div>
+          <ul className="tickets-marks-list">
+            {markedRunners.map(({ runner, mark }) => (
+              <li
+                key={runner.uma}
+                className={`tickets-mark-chip ${markClass(mark)}`}
+              >
+                <span aria-hidden="true" className="tickets-mark-glyph">
+                  {MARK_GLYPH[mark]}
+                </span>
+                <span className="tickets-mark-uma">{runner.uma}</span>
+                <span className="tickets-mark-name">
+                  {runner.name || `#${runner.uma}`}
+                </span>
+                <span className="sr-only">
+                  {" "}
+                  — {t(`form.intuition.${mark}`)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       <div className="tickets">
         {tickets.map((tk, i) => {

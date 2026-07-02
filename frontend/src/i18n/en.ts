@@ -54,6 +54,13 @@ export const en = {
     statusRegistered: "registered",
     statusResult: "result",
     entriesPending: "Entries pending",
+    // ADR-0016: inline runner-row mark control. aria-label for the unmarked
+    // badge (visible to screen readers); the marked badge reuses
+    // form.intuition.<kind> as its aria-label.
+    markAdd: "Add a mark",
+    // Clear chip in the expanded mark strip (also aria-label for the active
+    // badge's "tap to clear" path).
+    markClear: "Clear",
     rosterPending: "Roster pending — entries finalize closer to race day. Tap another race with a declared roster to start building tickets.",
   },
   style: {
@@ -92,6 +99,9 @@ export const en = {
     backToStyle: "Change style",
     noCandidates: "No usable tickets for these constraints. Loosen them.",
     noRunners: "Add at least three runners first.",
+    // ADR-0016: read-only echo of the marks set on Race. Header above the
+    // chip strip; only renders when the race has ≥1 mark.
+    yourMarks: "Your marks",
     resetStandard: "Reset to standard",
     topMix: "Top mix",
     variance: "High variance",

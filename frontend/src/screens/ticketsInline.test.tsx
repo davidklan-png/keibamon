@@ -21,6 +21,9 @@ import { RefinePanel } from "./RefinePanel";
 import { TicketWhy } from "./TicketWhy";
 import { TicketsScreen } from "./TicketsScreen";
 import { DEFAULT_STYLE, type StyleState, type Ticket } from "../lib/types";
+import type { Runner } from "../lib/fairvalue";
+import { setImpression, type ImpressionMap } from "../lib/impressions";
+import { MARK_GLYPH } from "./RunnerMark";
 
 const STYLE: StyleState = { ...DEFAULT_STYLE };
 
@@ -158,5 +161,134 @@ describe("refine.summary i18n key exists in both languages", () => {
     expect(en.refine.summary.length).toBeGreaterThan(0);
     expect(typeof ja.refine.summary).toBe("string");
     expect(ja.refine.summary.length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0016: Tickets read-only marks echo. When the race has ≥1 mark, the
+// strip renders ABOVE the ticket list (glyph + horse chip per mark). Absent
+// without marks, absent in the empty state, absent on the legacy prop shape
+// (no runners/raceId/impressions). Read-only — no editing affordance.
+// ---------------------------------------------------------------------------
+const RUNNERS: Runner[] = [
+  { uma: "1", name: "Horse A", odds: 3.2 },
+  { uma: "2", name: "Horse B", odds: 5.1 },
+  { uma: "3", name: "Horse C", odds: 9.0 },
+] as Runner[];
+
+describe("TicketsScreen — ADR-0016 marks echo strip", () => {
+  beforeEach(() => setLang("en"));
+
+  it("renders the strip above the ticket list when ≥1 mark exists", () => {
+    const impressions: ImpressionMap = {
+      ...setImpression({}, "race-1", "Horse A", { mark: "anchor", umaban: 1 }),
+      ...setImpression({}, "race-1", "Horse B", { mark: "like", umaban: 2 }),
+    };
+    const html = renderToStaticMarkup(
+      <TicketsScreen
+        tickets={[TICKET]}
+        onRemix={() => {}}
+        onReset={() => {}}
+        style={STYLE}
+        onStyleChange={() => {}}
+        runners={RUNNERS}
+        raceId="race-1"
+        impressions={impressions}
+      />,
+    );
+    // Header section renders.
+    expect(html).toContain(en.tickets.yourMarks);
+    expect(html).toContain("tickets-marks-list");
+    // One chip per marked runner (2 marks → 2 chips).
+    const chips = html.match(/<li[^>]*tickets-mark-chip/g) || [];
+    expect(chips.length).toBe(2);
+    // Each chip carries the glyph for its mark.
+    expect(html).toContain(MARK_GLYPH.anchor);
+    expect(html).toContain(MARK_GLYPH.like);
+    // Each chip surfaces the uma + name.
+    expect(html).toContain(">1<");
+    expect(html).toContain("Horse A");
+    expect(html).toContain("Horse B");
+  });
+
+  it("omits the strip when no marks exist", () => {
+    const html = renderToStaticMarkup(
+      <TicketsScreen
+        tickets={[TICKET]}
+        onRemix={() => {}}
+        onReset={() => {}}
+        style={STYLE}
+        onStyleChange={() => {}}
+        runners={RUNNERS}
+        raceId="race-1"
+        impressions={{}}
+      />,
+    );
+    expect(html).not.toContain("tickets-marks-list");
+    expect(html).not.toContain(en.tickets.yourMarks);
+  });
+
+  it("omits the strip when the legacy prop shape is used (no runners/raceId/impressions)", () => {
+    // Backward compat: existing callers that don't pass the ADR-0016 props
+    // must render unchanged (no strip section).
+    const html = renderToStaticMarkup(
+      <TicketsScreen
+        tickets={[TICKET]}
+        onRemix={() => {}}
+        onReset={() => {}}
+        style={STYLE}
+        onStyleChange={() => {}}
+      />,
+    );
+    expect(html).not.toContain("tickets-marks-list");
+  });
+
+  it("omits the strip in the empty-candidates state (no ticket list yet)", () => {
+    // The marks echo lives ABOVE the ticket list. With 0 tickets the empty
+    // state renders instead — the strip should NOT show there either, even
+    // if the caller passed impressions. (It would feel like a stale remnant
+    // on the dead-end screen.)
+    const impressions: ImpressionMap = setImpression({}, "race-1", "Horse A", {
+      mark: "anchor",
+      umaban: 1,
+    });
+    const html = renderToStaticMarkup(
+      <TicketsScreen
+        tickets={[]}
+        onRemix={() => {}}
+        onReset={() => {}}
+        style={STYLE}
+        onStyleChange={() => {}}
+        runners={RUNNERS}
+        raceId="race-1"
+        impressions={impressions}
+      />,
+    );
+    expect(html).not.toContain("tickets-marks-list");
+  });
+
+  it("renders no editing affordance (read-only — editing stays on Race)", () => {
+    const impressions: ImpressionMap = setImpression({}, "race-1", "Horse A", {
+      mark: "anchor",
+      umaban: 1,
+    });
+    const html = renderToStaticMarkup(
+      <TicketsScreen
+        tickets={[TICKET]}
+        onRemix={() => {}}
+        onReset={() => {}}
+        style={STYLE}
+        onStyleChange={() => {}}
+        runners={RUNNERS}
+        raceId="race-1"
+        impressions={impressions}
+      />,
+    );
+    // The strip is a list of <li>, not buttons. No click target anywhere in
+    // the marks section.
+    expect(html).not.toMatch(/<button[^>]*tickets-mark/);
+    // No toast prop was passed → the "Updated with your marks" line is absent
+    // (it lives in a separate <p class="marks-toast"> outside this strip).
+    expect(html).not.toContain("marks-toast");
   });
 });

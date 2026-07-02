@@ -51,6 +51,12 @@ export const ja = {
     statusRegistered: "登録済み",
     statusResult: "結果",
     entriesPending: "出走馬未定",
+    // ADR-0016: ランナー行内のメモ操作。未マークbadgeのaria-label。
+    // マーク済みbadgeは form.intuition.<kind> を流用。
+    markAdd: "メモを追加",
+    // 展開されたメモ選択の「クリア」チップ（アクティブbadgeをタップして消す
+    // 操作のaria-labelにも使う）。
+    markClear: "クリア",
     rosterPending: "出走馬確定前です。レースが近づくと発表されます。確定しているレースを選ぶと馬券を作れます。",
   },
   style: {
@@ -88,6 +94,9 @@ export const ja = {
     backToStyle: "スタイルを変える",
     noCandidates: "現在の条件では馬券を作れません。条件を緩めてください。",
     noRunners: "馬を3頭以上入力してください。",
+    // ADR-0016: Race画面でつけたメモの読み取り専用エコー。馬券リストの上、
+    // レースに≥1件メモがあるときだけ表示。
+    yourMarks: "あなたのメモ",
     resetStandard: "スタンダードに戻す",
     topMix: "本命案",
     variance: "高分散",

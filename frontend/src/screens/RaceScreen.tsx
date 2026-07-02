@@ -14,6 +14,7 @@ import { raceHasLiveOdds } from "../lib/mytickets-view";
 import { fmt } from "../lib/format";
 import { FormPanel } from "./FormPanel";
 import { TicketStudio } from "./TicketStudio";
+import { RunnerMark } from "./RunnerMark";
 
 // ---------------------------------------------------------------------------
 // Grade ladder — one source for both the badge render and the popularScore
@@ -95,6 +96,12 @@ export function RaceScreen(props: RaceScreenProps) {
   // Milestone 4: which runner's form panel is open. null = closed.
   const [openUma, setOpenUma] = useState<string | null>(null);
   const openRunner = openUma ? runners.find((r) => r.uma === openUma) ?? null : null;
+
+  // ADR-0016: which runner's inline mark strip is open. null = all closed.
+  // Lifted to RaceScreen (not inside RunnerMark) so at most ONE row expands
+  // at a time — the NetKeiba muscle-memory rhythm of tap-badge → pick mark →
+  // strip collapses → next row.
+  const [openMarkUma, setOpenMarkUma] = useState<string | null>(null);
 
   // ADR-0011 Phase 3a/3b: structural ticket-studio modal. `boxOpen` mounts the
   // shared TicketStudio (SetFamilyView + FormationView + WheelView + FillGuide).
@@ -411,23 +418,44 @@ export function RaceScreen(props: RaceScreenProps) {
             <div className="runners">
               {runners.map((r) => {
                 const isOpen = openUma === r.uma;
+                // ADR-0016: derive this row's mark for the at-a-glance
+                // highlight (anchor wears a subtle row tint). Same lookup
+                // path RunnerMark uses internally.
+                const byHorseKey = impressionsByRace(impressions, raceId);
+                const hk = normalizeName(r.name);
+                const rowMark = hk ? byHorseKey[hk]?.mark ?? null : null;
+                const rowCls = `runner-row${rowMark === "anchor" ? " is-anchor" : ""}${
+                  rowMark ? ` has-mark` : ""
+                }`;
                 return (
-                  <button
-                    key={r.uma}
-                    type="button"
-                    className={`runner runner-tappable ${isOpen ? "on" : ""}`}
-                    onClick={() => setOpenUma(isOpen ? null : r.uma)}
-                    aria-pressed={isOpen}
-                  >
-                    <span className="uma">{r.uma}</span>
-                    <span>
-                      <span className="nm">{r.name || `#${r.uma}`}</span>
-                      <span className="odds-line">
-                        <span className="odds-value">{fmt(r.odds, 1)}</span>
-                        {pending && <span className="pc">{t("race.estOdds")}</span>}
+                  <div key={r.uma} className={rowCls}>
+                    <button
+                      type="button"
+                      className={`runner runner-tappable ${isOpen ? "on" : ""}`}
+                      onClick={() => setOpenUma(isOpen ? null : r.uma)}
+                      aria-pressed={isOpen}
+                    >
+                      <span className="uma">{r.uma}</span>
+                      <span>
+                        <span className="nm">{r.name || `#${r.uma}`}</span>
+                        <span className="odds-line">
+                          <span className="odds-value">{fmt(r.odds, 1)}</span>
+                          {pending && <span className="pc">{t("race.estOdds")}</span>}
+                        </span>
                       </span>
-                    </span>
-                  </button>
+                    </button>
+                    <RunnerMark
+                      raceId={raceId}
+                      horseName={r.name ?? ""}
+                      umaban={Number(r.uma)}
+                      odds={r.odds > 0 ? r.odds : null}
+                      oddsSnapshotAt={oddsSnapshotAt}
+                      impressions={impressions}
+                      onSetImpressions={onSetImpressions}
+                      isOpen={openMarkUma === r.uma}
+                      onOpenChange={setOpenMarkUma}
+                    />
+                  </div>
                 );
               })}
             </div>

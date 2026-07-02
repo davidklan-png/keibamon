@@ -25,6 +25,8 @@ vi.mock("./FormPanel", () => ({
 
 import { RaceScreen, gradeClass } from "./RaceScreen";
 import type { LiveSnapshot } from "../api";
+import type { Runner } from "../lib/fairvalue";
+import { setImpression, type ImpressionMap } from "../lib/impressions";
 
 const OPEN_RACE = {
   date: "20260628",
@@ -234,5 +236,100 @@ describe("gradeClass", () => {
     expect(gradeClass("JpnI")).toBeNull();
     expect(gradeClass("JpnII")).toBeNull();
     expect(gradeClass("JpnIII")).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ADR-0016: inline runner-row marks. The runner cell restructured from a
+// single <button class="runner runner-tappable"> into a .runner-row wrapper
+// holding (a) the SAME tappable button (opens drill, unchanged) + (b) a
+// compact RunnerMark badge. The HTML constraint is real — interactive
+// elements can't nest inside a <button>, so the mark control is a SIBLING.
+//
+// These tests pin:
+//   - The .runner-row wrapper exists, and the tappable button is its child.
+//   - The .runner-mark-badge is a sibling (not nested in the button).
+//   - Marked runners carry a row-level highlight (has-mark / is-anchor).
+//   - The drill-opening button click target stays the SAME className combo
+//     (.runner.runner-tappable) — no behavior regression for users who
+//     muscle-memorized tapping the row to open the form panel.
+// ---------------------------------------------------------------------------
+const RUNNERS: Runner[] = [
+  { uma: "1", name: "Horse A", odds: 3.2 },
+  { uma: "2", name: "Horse B", odds: 5.1 },
+  { uma: "3", name: "Horse C", odds: 9.0 },
+] as Runner[];
+
+function renderRunnersHtml(impressions: ImpressionMap = {}) {
+  return renderToStaticMarkup(
+    <RaceScreen
+      runners={RUNNERS}
+      raceLabel=""
+      snap={null}
+      snapLoading={false}
+      snapError=""
+      selectedRaceDate=""
+      selectedRaceKey=""
+      onReload={() => {}}
+      onSeedManual={() => {}}
+      onApplyRace={() => {}}
+      onStandard={() => {}}
+      raceStatus="manual"
+      raceId="test-race"
+      impressions={impressions}
+      oddsSnapshotAt="2026-07-02T00:00:00Z"
+      onSetImpressions={() => {}}
+    />,
+  );
+}
+
+describe("RaceScreen — ADR-0016 runner-row restructure", () => {
+  beforeEach(() => setLang("en"));
+
+  it("wraps each runner button in a .runner-row with a sibling .runner-mark-badge", () => {
+    const html = renderRunnersHtml();
+    // The wrapper exists once per runner (3 runners → 3 .runner-row).
+    // Trailing whitespace inside the className string is tolerated.
+    const rowCount = (html.match(/class="runner-row[^"]*"/g) || []).length;
+    expect(rowCount).toBe(RUNNERS.length);
+    // The tappable button keeps its className combo (drill-opener path intact).
+    expect(html).toMatch(/class="runner runner-tappable[^"]*"/);
+    // The mark badge sits OUTSIDE the button — assert no nested button.
+    const buttonMatches = html.match(/<button[^>]*runner runner-tappable[^>]*>[\s\S]*?<\/button>/g) || [];
+    for (const tag of buttonMatches) {
+      // The runner button's content is the uma + name + odds — never a mark badge.
+      expect(tag).not.toContain("runner-mark-badge");
+    }
+    // The mark badge is present in the document.
+    expect(html).toContain("runner-mark-badge");
+  });
+
+  it("renders one RunnerMark badge per runner (collapsed by default)", () => {
+    const html = renderRunnersHtml();
+    // Trailing space inside the className is tolerated (template literal).
+    const badgeCount = (html.match(/class="runner-mark-badge[^"]*"/g) || []).length;
+    expect(badgeCount).toBe(RUNNERS.length);
+    // Closed by default — no chip strip anywhere.
+    expect(html).not.toContain("runner-mark-strip");
+  });
+
+  it("flags a marked runner's row with .has-mark, and an anchor row with .is-anchor", () => {
+    const impressions: ImpressionMap = {
+      ...setImpression({}, "test-race", "Horse A", { mark: "anchor", umaban: 1 }),
+      ...setImpression({}, "test-race", "Horse B", { mark: "like", umaban: 2 }),
+    };
+    const html = renderRunnersHtml(impressions);
+    // The anchor row carries both flags; the like row only has-mark.
+    expect(html).toMatch(/class="runner-row is-anchor has-mark"/);
+    expect(html).toMatch(/class="runner-row has-mark"/);
+    // Unmarked Horse C row has neither flag.
+    expect(html).toMatch(/class="runner-row"/);
+  });
+
+  it("keeps the tappable button's drill-opener behavior intact (className + aria-pressed)", () => {
+    const html = renderRunnersHtml();
+    // aria-pressed is the existing behavior; pin it so a future refactor
+    // can't quietly drop the affordance. Trailing className space tolerated.
+    expect(html).toMatch(/class="runner runner-tappable[^"]*"[^>]*aria-pressed=/);
   });
 });

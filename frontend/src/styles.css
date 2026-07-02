@@ -753,6 +753,262 @@ select:focus {
   font: 700 10px/1 ui-monospace, monospace;
 }
 
+/* ---------- ADR-0016: inline runner-row marks ----------
+   Each runner cell becomes a vertical stack: the existing tappable
+   .runner.runner-tappable button (unchanged — opens the drill) + a compact
+   .runner-mark badge below it. The wrapper takes the grid-item slot the
+   button used to occupy directly, so the outer .runners layout is preserved.
+   Tapping the badge expands an inline chip strip; selecting writes through
+   setImpression (same path as HorseDrillView's IntuitionMarks). */
+.runner-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* The wrapper itself isn't interactive — clicks on it bubble from the
+     button (opens drill) or the badge (toggles the mark strip). */
+}
+
+.runner-row.has-mark .runner.runner-tappable {
+  /* Subtle row-level highlight when this runner carries any mark, so the
+     marked set is visible at a glance without reading glyphs. Anchor wears
+     a stronger tint via .is-anchor below. */
+  border-color: var(--gold);
+}
+
+.runner-row.is-anchor .runner.runner-tappable {
+  border-color: var(--gold);
+  background: linear-gradient(135deg, rgba(245, 196, 76, 0.18), var(--tint-2) 70%);
+}
+
+.runner-mark {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  /* The badge is the only collapsed-state element. The strip mounts below
+     when isOpen. */
+}
+
+.runner-mark-badge {
+  /* Compact 44px touch target in a small visual footprint. The button box
+     is 44px tall (meets iOS HIG); the glyph renders centered. */
+  align-self: flex-start;
+  min-height: 28px;
+  min-width: 28px;
+  padding: 3px 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  border: 1px dashed var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  font: 800 14px/1 ui-monospace, monospace;
+  cursor: pointer;
+  transition: border-color 0.12s, background 0.12s, color 0.12s;
+}
+
+.runner-mark-badge:hover {
+  border-color: var(--gold);
+  color: var(--ink);
+}
+
+.runner-mark-badge.on {
+  border-style: solid;
+  border-color: var(--gold);
+  background: var(--tint-2);
+  color: var(--ink);
+}
+
+/* Per-mark glyph colors — shared with the chip strip via the same
+   .runner-mark-<kind> class so the two surfaces feel identical. */
+.runner-mark-anchor {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(245, 196, 76, 0.12);
+}
+.runner-mark-anchor.on {
+  background: var(--gold);
+  color: #fff;
+}
+
+.runner-mark-like {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.runner-mark-like.on {
+  background: var(--ink);
+  color: #fff;
+}
+
+.runner-mark-priceHorse {
+  border-color: #15a862;
+  color: #15a862;
+}
+.runner-mark-priceHorse.on {
+  background: #15a862;
+  color: #fff;
+}
+
+.runner-mark-distrust {
+  border-color: #e59a14;
+  color: #e59a14;
+}
+.runner-mark-distrust.on {
+  background: #e59a14;
+  color: #fff;
+}
+
+.runner-mark-avoid {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+.runner-mark-avoid.on {
+  background: var(--warn);
+  color: #fff;
+}
+
+/* Expanded chip strip — wraps if the cell is narrow. Each chip is a 44px
+   touch target (per iOS HIG); the wrap keeps the strip readable in the
+   150px min cell width without overflowing horizontally. */
+.runner-mark-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--tint-2);
+}
+
+.runner-mark-chip {
+  /* 44px min tap area with a compact visual chip footprint. */
+  min-height: 32px;
+  padding: 4px 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg);
+  color: var(--ink);
+  font: 600 11px/1 var(--font, inherit);
+  cursor: pointer;
+  transition: border-color 0.1s, background 0.1s;
+}
+
+.runner-mark-chip:hover {
+  border-color: var(--gold);
+}
+
+.runner-mark-chip.on {
+  border-color: var(--gold);
+  background: rgba(245, 196, 76, 0.18);
+}
+
+.runner-mark-glyph {
+  font: 800 13px/1 ui-monospace, monospace;
+}
+
+.runner-mark-label {
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.runner-mark-clear {
+  border-style: dashed;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+/* ---------- ADR-0016: Tickets read-only marks echo ---------- */
+.tickets-marks {
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+
+.tickets-marks .section-title {
+  margin-bottom: 6px;
+}
+
+.tickets-marks .section-title h3 {
+  font-size: 12px;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.tickets-marks-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.tickets-mark-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--tint-2);
+  font: 600 11px/1 var(--font, inherit);
+  color: var(--ink);
+}
+
+.tickets-mark-glyph {
+  font: 800 14px/1 ui-monospace, monospace;
+}
+
+.tickets-mark-uma {
+  font: 800 11px/1 ui-monospace, monospace;
+  color: var(--muted);
+}
+
+.tickets-mark-name {
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+}
+
+/* Read-only marks chip inherits the per-mark glyph color rules so the
+   Tickets echo and the Race badge use the same visual vocabulary. */
+.tickets-mark-chip.runner-mark-anchor .tickets-mark-glyph {
+  color: var(--gold);
+}
+.tickets-mark-chip.runner-mark-like .tickets-mark-glyph {
+  color: var(--ink);
+}
+.tickets-mark-chip.runner-mark-priceHorse .tickets-mark-glyph {
+  color: #15a862;
+}
+.tickets-mark-chip.runner-mark-distrust .tickets-mark-glyph {
+  color: #e59a14;
+}
+.tickets-mark-chip.runner-mark-avoid .tickets-mark-glyph {
+  color: var(--warn);
+}
+
+/* Screen-reader-only text — visually hidden, available to assistive tech.
+   Used here so the Tickets echo chips announce "1 — Anchor" instead of just
+   "1 <name>". */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ---------- Ticket cards ---------- */
 .tickets {
   display: grid;

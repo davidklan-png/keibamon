@@ -617,6 +617,9 @@ function App() {
           onPlace={placeTicket}
           placeLabel={isSignedIn ? t("tickets.placeCta") : t("tickets.placeSignIn")}
           toast={toast}
+          runners={runners}
+          raceId={raceId}
+          impressions={impressions}
         />
       )}
 
