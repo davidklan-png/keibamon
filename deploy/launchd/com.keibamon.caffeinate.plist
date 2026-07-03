@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keibamon race-day anti-sleep agent (ADR-0006 operational hardening).
+
+  Race-day capture lives on a Mac laptop (the capture-PC is Windows-only for
+  JV-Link, but the live-odds D1 publisher runs here under launchd). A closed
+  MacBook lid killed a race-day afternoon once (2026-06-14): `caffeinate -i`
+  holds off idle sleep but NOT lid-close sleep on AC. The `-s` flag is what
+  holds through a closed lid. This agent runs `caffeinate -dimsu` so the
+  "-s" defense survives reboots, logouts, and process crashes via launchd's
+  KeepAlive. Without this, the defense is a disowned shell orphan that dies
+  silently on the next reboot.
+
+  Flags:
+    -d  prevent display sleep
+    -i  prevent idle system sleep
+    -m  prevent disk idle sleep
+    -s  prevent system sleep (incl. lid-close sleep on AC)  <-- the key one
+    -u  declare user active
+
+  Stronger alt (race-day only, needs sudo): `sudo pmset -a disablesleep 1`.
+  This agent is the always-on baseline; pmset is belt-and-suspenders.
+
+  Install (adjust paths if your home differs):
+    cp deploy/launchd/com.keibamon.caffeinate.plist ~/Library/LaunchAgents/
+    launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.keibamon.caffeinate.plist
+  Verify:
+    launchctl print gui/$(id -u)/com.keibamon.caffeinate | grep -E "state|runs|pid"
+    ps aux | grep -i caffeinate | grep -v grep
+  Remove:
+    launchctl bootout gui/$(id -u)/com.keibamon.caffeinate
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.keibamon.caffeinate</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>caffeinate</string>
+    <string>-dimsu</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+</dict>
+</plist>
