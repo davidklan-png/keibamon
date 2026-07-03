@@ -164,7 +164,12 @@ export function HorseContent(props: HorseContentProps) {
           </>
         )}
 
-        <h4>{t("form.splitsTitle")}</h4>
+        <h4 className="form-section-head">
+          {t("form.splitsTitle")}
+          <span className="hint form-section-sub">
+            · {t("form.splitsSubtitle")}
+          </span>
+        </h4>
         <div className="form-chips">{renderSplitChips(horse)}</div>
 
         {horse.style_profile && Object.keys(horse.style_profile).length > 0 && (
@@ -268,11 +273,20 @@ export function HorseContent(props: HorseContentProps) {
 
         {jockey.combos && jockey.combos.by_horse.length > 0 && (
           <>
-            <h4>{t("form.jockeyCombos")}</h4>
+            <h4 className="form-section-head">
+              {t("form.jockeyCombos")}
+              <span className="hint form-section-sub">
+                · {t("form.combosSubtitle")}
+              </span>
+            </h4>
             <div className="form-chips">
               {jockey.combos.by_horse.slice(0, 5).map((h, i) => (
                 <span key={i} className="combo-chip">
-                  {h.horse_name ?? h.horse_name_key ?? "?"} · {h.starts}-{h.wins}
+                  {h.horse_name ?? h.horse_name_key ?? "?"} ·{" "}
+                  {tFmt("form.recordChip", {
+                    wins: h.wins,
+                    starts: h.starts,
+                  })}
                 </span>
               ))}
             </div>
@@ -492,10 +506,12 @@ function fmtDate(s: string | null | undefined, lang: "ja" | "en"): string {
 }
 
 function SplitChip({ label, split }: { label: string; split: FormSplit }) {
+  const { tFmt } = useI18n();
   if (!split || !split.starts) return null;
   return (
     <span className="combo-chip">
-      {label}: {split.starts}-{split.wins}
+      {label}:{" "}
+      {tFmt("form.recordChip", { wins: split.wins, starts: split.starts })}
     </span>
   );
 }

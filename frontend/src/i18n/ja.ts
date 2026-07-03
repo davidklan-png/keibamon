@@ -374,6 +374,10 @@ export const ja = {
     noStarts: "出走履歴はまだありません。",
     recentTitle: "最近の成績",
     splitsTitle: "内訳",
+    // セクション見出し直後のサブタイトル（戦/勝の内訳であることを明示）。
+    splitsSubtitle: "条件別の戦績",
+    // チップ表記: 7戦3勝。JRA の標記であり、日本の競馬ファンには自明。
+    recordChip: "{starts}戦{wins}勝",
     surface: "馬場",
     distance: "距離",
     going: "馬場状態",
@@ -390,6 +394,7 @@ export const ja = {
     jockeyTitle: "騎手",
     jockeyCareer: "騎手通算",
     jockeyCombos: "相性",
+    combosSubtitle: "騎乗ごとの戦績",
     jockeyNoId: "騎手データは順次追加予定です。",
     noHistory: "この出走馬の過去成績はありません。",
     horseNoHistory: "この馬の過去成績はありません。",

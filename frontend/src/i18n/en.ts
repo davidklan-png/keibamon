@@ -391,6 +391,13 @@ export const en = {
     noStarts: "No recorded starts yet.",
     recentTitle: "Recent finishes",
     splitsTitle: "Splits",
+    // Inline subtitle after "Splits" — explains what the dash notation means.
+    // Chip itself uses `recordChip` (e.g. "3W / 7") so this is the section
+    // framing: wins from starts, sliced by surface / distance / going.
+    splitsSubtitle: "wins from starts by condition",
+    // Chip notation: 3 wins from 7 starts. Replaces the opaque "7-3" that
+    // first-timers couldn't parse (looked like a score/tie).
+    recordChip: "{wins}W / {starts}",
     surface: "Surface",
     distance: "Distance",
     going: "Going",
@@ -407,6 +414,8 @@ export const en = {
     jockeyTitle: "Jockey",
     jockeyCareer: "Jockey career",
     jockeyCombos: "Top combos",
+    // Inline subtitle after "Top combos" — same notation fix as splits.
+    combosSubtitle: "wins from mounts",
     jockeyNoId: "Jockey context coming soon.",
     noHistory: "No past form on record for this runner.",
     horseNoHistory: "No past form on record for this horse.",

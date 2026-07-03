@@ -2729,6 +2729,17 @@ select:focus {
   letter-spacing: 0.04em;
 }
 
+/* Inline subtitle inside a form section header (e.g. "Splits · wins from starts
+   by condition"). Resets the h4's uppercase + letter-spacing so the sentence
+   reads naturally, and the .hint top-margin so it stays on the same line. */
+.form-section-sub {
+  margin: 0 0 0 4px;
+  font-size: 11px;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
 .form-line {
   margin: 0;
   font-size: 13px;
