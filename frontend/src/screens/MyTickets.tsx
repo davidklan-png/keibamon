@@ -54,6 +54,7 @@ import { resolveTicket, type RaceResult } from "../lib/settle";
 import { storageKeyFor } from "../auth/storageKey";
 import { exportTicketCard, type ShareOutcome } from "../lib/share";
 import { yen } from "../lib/format";
+import { computePunterStats } from "../lib/punterStats";
 import {
   MT_MOOD_COLOR,
   MT_VIBES,
@@ -182,6 +183,9 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
   const [settleId, setSettleId] = useState<string | null>(null);
   const [toast, setToast] = useState<string>("");
   const [now, setNow] = useState(() => Date.now());
+  // Open/Resolved split: history is opt-in, collapsed by default on entry so
+  // the user's currently-live tickets take priority.
+  const [historyExpanded, setHistoryExpanded] = useState(false);
   const [driftMap, setDriftMap] = useState<Record<string, DriftDir>>({});
   // True once the first server GET has completed (success OR fail). Until
   // then, optimistic commits skip the PATCH-on-conflict path.
@@ -838,6 +842,159 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         { initial: "K", color: "#15A862" },
       ];
 
+  // ====================== CARD (shared by Open + History) ======================
+  // Extracted from the old inline tickets.map so the same card renders in both
+  // the Open section and the expanded History section. Closes over the same
+  // helpers (driftView, liveOdds, runnerRaceName, openDetail, cheer, …) as the
+  // old callback. `key` lives on the returned root div so React reconciles by
+  // ticket id across the two lists.
+  function renderCard(tk: CommittedTicket) {
+    const open = tk.state === "open";
+    const sep = mtSep(tk.ticket.type);
+    const topNum = Number(tk.ticket.lines[0]?.combo[0] ?? 0);
+    const topR = tk.race.runners.find((r) => r.num === topNum);
+    const d = driftView(topNum, tk, open);
+    const ownerYou = tk.owner === "you";
+    const payLabel =
+      tk.state === "won" ? t("mine.returned") : t("mine.ifHits");
+    const payValue =
+      tk.state === "won" ? tk.returned ?? 0 : tk.payoutBase;
+    const payColor =
+      tk.state === "won"
+        ? "var(--gold-amber)"
+        : tk.state === "miss"
+          ? "var(--miss)"
+          : "var(--ink)";
+    return (
+      <div
+        key={tk.id}
+        className="mt-card"
+        onClick={() => openDetail(tk.id)}
+        role="button"
+        tabIndex={0}
+      >
+        <div
+          className="mt-stripe"
+          style={{ background: mtStateColor(tk.state) }}
+        />
+        <div className="mt-card-body">
+          <div className="mt-card-top">
+            <div className="mt-card-top-main">
+              <div className="mt-badges">
+                <span
+                  className="mt-state-badge"
+                  style={{ background: mtStateColor(tk.state) }}
+                >
+                  {open ? t("mine.live") : t("mine.result")}
+                </span>
+                {tk.race.grade && (
+                  <span className="mt-grade-badge">{tk.race.grade}</span>
+                )}
+              </div>
+              <div className="mt-card-race">{runnerRaceName(tk)}</div>
+            </div>
+            <span
+              className="mt-mood-pill"
+              style={{ background: MT_MOOD_COLOR[tk.mood] }}
+            >
+              {t(`mood.${tk.mood}`)}
+            </span>
+          </div>
+
+          <div className="mt-betline">
+            <span className="mt-bet-label">
+              {t(`betType.${tk.ticket.type}`)}
+            </span>
+            <div className="mt-chips">
+              {tk.ticket.lines.slice(0, 4).map((ln, j) => (
+                <span key={j} className="mt-chip">
+                  {ln.combo.join(sep)}
+                </span>
+              ))}
+            </div>
+          </div>
+
+          <div className="mt-metrics">
+            <div>
+              <div className="mt-metric-label">{t("mine.cost")}</div>
+              <div className="mt-metric-cost">{yen(tk.ticket.cost)}</div>
+            </div>
+            <div>
+              <div className="mt-metric-label">{payLabel}</div>
+              <div className="mt-metric-pay" style={{ color: payColor }}>
+                {yen(payValue)}
+              </div>
+            </div>
+          </div>
+
+          {open && (
+            <div className="mt-live-strip">
+              <div className="mt-live-row">
+                <span className="mt-dot-sm" />
+                <span className="mt-live-contender">
+                  #{topNum} {topR ? runnerName(topR) : ""}
+                </span>
+                <span className="mt-live-odds">
+                  {liveOdds(tk, topNum).toFixed(1)}
+                </span>
+                <span className="mt-drift" style={{ color: d.color }}>
+                  {d.arrow} {d.label}
+                </span>
+                <span className="mt-countdown">
+                  {countdownText(tk.race.post)}
+                </span>
+              </div>
+              <div className="mt-refresh">
+                <i />
+              </div>
+            </div>
+          )}
+
+          {!open && (
+            <div className="mt-owner-row">
+              <div
+                className="mt-owner-avatar"
+                style={{
+                  background: ownerYou
+                    ? "var(--turf)"
+                    : (tk.owner as { color: string }).color,
+                }}
+              >
+                {ownerYou
+                  ? ja
+                    ? "私"
+                    : "Y"
+                  : ja
+                    ? (tk.owner as { initialJa: string }).initialJa
+                    : (tk.owner as { initial: string }).initial}
+              </div>
+              <span className="mt-owner-line">
+                {ownerYou
+                  ? tk.state === "won"
+                    ? t("mine.won")
+                    : t("mine.settled")
+                  : `${ja ? (tk.owner as { ja: string }).ja : (tk.owner as { en: string }).en} · ${t("mine.hit")}`}
+              </span>
+              {tk.state === "won" && (
+                <button
+                  className="mt-cheer"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    cheer(tk.id);
+                  }}
+                >
+                  <span style={{ fontSize: 13 }}>👏</span>
+                  {tk.cheers ?? tk.claps}
+                  {burstId === tk.id && burstSpans}
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // ====================== FEED ======================
   function renderFeed() {
     return (
@@ -930,152 +1087,49 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             <p className="empty">{t("mine.empty")}</p>
           )}
 
-          {tickets.map((tk) => {
-            const open = tk.state === "open";
-            const sep = mtSep(tk.ticket.type);
-            const topNum = Number(tk.ticket.lines[0]?.combo[0] ?? 0);
-            const topR = tk.race.runners.find((r) => r.num === topNum);
-            const d = driftView(topNum, tk, open);
-            const ownerYou = tk.owner === "you";
-            const payLabel =
-              tk.state === "won" ? t("mine.returned") : t("mine.ifHits");
-            const payValue =
-              tk.state === "won" ? tk.returned ?? 0 : tk.payoutBase;
-            const payColor =
-              tk.state === "won"
-                ? "var(--gold-amber)"
-                : tk.state === "miss"
-                  ? "var(--miss)"
-                  : "var(--ink)";
+          {(() => {
+            const openTk = tickets.filter((tk) => tk.state === "open");
+            const resolvedTk = tickets.filter((tk) => tk.state !== "open");
             return (
-              <div
-                key={tk.id}
-                className="mt-card"
-                onClick={() => openDetail(tk.id)}
-                role="button"
-                tabIndex={0}
-              >
-                <div
-                  className="mt-stripe"
-                  style={{ background: mtStateColor(tk.state) }}
-                />
-                <div className="mt-card-body">
-                  <div className="mt-card-top">
-                    <div className="mt-card-top-main">
-                      <div className="mt-badges">
-                        <span
-                          className="mt-state-badge"
-                          style={{ background: mtStateColor(tk.state) }}
-                        >
-                          {open ? t("mine.live") : t("mine.result")}
-                        </span>
-                        {tk.race.grade && (
-                          <span className="mt-grade-badge">{tk.race.grade}</span>
-                        )}
-                      </div>
-                      <div className="mt-card-race">{runnerRaceName(tk)}</div>
-                    </div>
-                    <span
-                      className="mt-mood-pill"
-                      style={{ background: MT_MOOD_COLOR[tk.mood] }}
+              <>
+                {/* "Open" sub-label renders only when there's a real split —
+                    avoids a redundant header when the user has only live OR
+                    only resolved tickets. The "My tickets · N total" header
+                    above already covers the single-section case. */}
+                {openTk.length > 0 && resolvedTk.length > 0 && (
+                  <div className="mt-section-head">
+                    <h2>{t("mine.open")}</h2>
+                    <span className="mt-count">{openTk.length}</span>
+                  </div>
+                )}
+                {openTk.map((tk) => renderCard(tk))}
+
+                {resolvedTk.length > 0 && (
+                  <>
+                    <button
+                      type="button"
+                      className="mt-section-toggle"
+                      onClick={() => setHistoryExpanded((v) => !v)}
+                      aria-expanded={historyExpanded}
                     >
-                      {t(`mood.${tk.mood}`)}
-                    </span>
-                  </div>
-
-                  <div className="mt-betline">
-                    <span className="mt-bet-label">
-                      {t(`betType.${tk.ticket.type}`)}
-                    </span>
-                    <div className="mt-chips">
-                      {tk.ticket.lines.slice(0, 4).map((ln, j) => (
-                        <span key={j} className="mt-chip">
-                          {ln.combo.join(sep)}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="mt-metrics">
-                    <div>
-                      <div className="mt-metric-label">{t("mine.cost")}</div>
-                      <div className="mt-metric-cost">{yen(tk.ticket.cost)}</div>
-                    </div>
-                    <div>
-                      <div className="mt-metric-label">{payLabel}</div>
-                      <div className="mt-metric-pay" style={{ color: payColor }}>
-                        {yen(payValue)}
-                      </div>
-                    </div>
-                  </div>
-
-                  {open && (
-                    <div className="mt-live-strip">
-                      <div className="mt-live-row">
-                        <span className="mt-dot-sm" />
-                        <span className="mt-live-contender">
-                          #{topNum} {topR ? runnerName(topR) : ""}
-                        </span>
-                        <span className="mt-live-odds">
-                          {liveOdds(tk, topNum).toFixed(1)}
-                        </span>
-                        <span className="mt-drift" style={{ color: d.color }}>
-                          {d.arrow} {d.label}
-                        </span>
-                        <span className="mt-countdown">
-                          {countdownText(tk.race.post)}
-                        </span>
-                      </div>
-                      <div className="mt-refresh">
-                        <i />
-                      </div>
-                    </div>
-                  )}
-
-                  {!open && (
-                    <div className="mt-owner-row">
-                      <div
-                        className="mt-owner-avatar"
-                        style={{
-                          background: ownerYou
-                            ? "var(--turf)"
-                            : (tk.owner as { color: string }).color,
-                        }}
-                      >
-                        {ownerYou
-                          ? ja
-                            ? "私"
-                            : "Y"
-                          : ja
-                            ? (tk.owner as { initialJa: string }).initialJa
-                            : (tk.owner as { initial: string }).initial}
-                      </div>
-                      <span className="mt-owner-line">
-                        {ownerYou
-                          ? tk.state === "won"
-                            ? t("mine.won")
-                            : t("mine.settled")
-                          : `${ja ? (tk.owner as { ja: string }).ja : (tk.owner as { en: string }).en} · ${t("mine.hit")}`}
+                      <span aria-hidden>{historyExpanded ? "▼" : "▶"}</span>
+                      <span>
+                        {historyExpanded
+                          ? t("mine.hideHistory")
+                          : tFmt("mine.showHistory", { n: resolvedTk.length })}
                       </span>
-                      {tk.state === "won" && (
-                        <button
-                          className="mt-cheer"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            cheer(tk.id);
-                          }}
-                        >
-                          <span style={{ fontSize: 13 }}>👏</span>
-                          {tk.cheers ?? tk.claps}
-                          {burstId === tk.id && burstSpans}
-                        </button>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
+                    </button>
+                    {historyExpanded && (
+                      <div className="mt-history">
+                        <HistoryAggregates tickets={resolvedTk} />
+                        {resolvedTk.map((tk) => renderCard(tk))}
+                      </div>
+                    )}
+                  </>
+                )}
+              </>
             );
-          })}
+          })()}
         </div>
 
         <button className="mt-fab" onClick={() => setView("new")}>
@@ -1700,6 +1754,79 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       {renderHandlePrompt()}
       {renderReportModal()}
       {toast && <div className="mt-toast">{toast}</div>}
+    </div>
+  );
+}
+
+// ============================================================================
+// HistoryAggregates — punter stat grid shown at the top of the expanded
+// History section. Stateless; calls useI18n() for locale + strings. Renders a
+// 3-col × 2-row grid: Hit/miss · Wagered · Returned · Net P/L · ROI · Biggest
+// win. Defined at MODULE scope (not inside MyTickets) so it isn't re-created
+// (and re-mounted) on every parent render.
+//
+// `tickets` is the RESOLVED subset (open already filtered out upstream). The
+// stats module is total — an empty input yields zero counts — but this
+// component is only rendered inside the history section which is itself
+// gated on `resolvedTk.length > 0`, so the empty path is defensive.
+// ============================================================================
+function HistoryAggregates({ tickets }: { tickets: CommittedTicket[] }) {
+  const { t, tFmt, lang } = useI18n();
+  const stats = computePunterStats(tickets, lang);
+
+  // Sign classes: positive → gold-amber, negative → red (danger). Zero/empty
+  // → neutral ink (no modifier). Applied to Net P/L and ROI only.
+  const netClass =
+    stats.net > 0 ? "mt-stat-value--pos" : stats.net < 0 ? "mt-stat-value--neg" : "";
+  const roiClass =
+    stats.roi !== null && stats.roi > 0
+      ? "mt-stat-value--pos"
+      : stats.roi !== null && stats.roi < 0
+        ? "mt-stat-value--neg"
+        : "";
+  const roiText =
+    stats.roi === null ? t("mine.stats.none") : `${(stats.roi * 100).toFixed(1)}%`;
+
+  return (
+    <div className="mt-stats-grid" role="table" aria-label="Punter stats">
+      <div className="mt-stat">
+        <div className="mt-stat-label">{t("mine.stats.hitMiss")}</div>
+        <div className="mt-stat-value">
+          {stats.wonCount} / {stats.missCount}
+        </div>
+      </div>
+      <div className="mt-stat">
+        <div className="mt-stat-label">{t("mine.stats.wagered")}</div>
+        <div className="mt-stat-value">{yen(stats.wagered)}</div>
+      </div>
+      <div className="mt-stat">
+        <div className="mt-stat-label">{t("mine.stats.returned")}</div>
+        <div className="mt-stat-value">{yen(stats.returned)}</div>
+      </div>
+      <div className="mt-stat">
+        <div className="mt-stat-label">{t("mine.stats.net")}</div>
+        <div className={`mt-stat-value ${netClass}`.trim()}>{yen(stats.net)}</div>
+      </div>
+      <div className="mt-stat">
+        <div className="mt-stat-label">{t("mine.stats.roi")}</div>
+        <div className={`mt-stat-value ${roiClass}`.trim()}>{roiText}</div>
+      </div>
+      <div className="mt-stat">
+        <div className="mt-stat-label">{t("mine.stats.biggestWin")}</div>
+        <div className="mt-stat-value">
+          {stats.biggestWin
+            ? yen(stats.biggestWin.amount)
+            : t("mine.stats.none")}
+        </div>
+        {stats.biggestWin && (
+          <div className="mt-stat-sub">
+            {tFmt("mine.stats.biggestWinRace", {
+              name: stats.biggestWin.raceName,
+              date: stats.biggestWin.date,
+            })}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

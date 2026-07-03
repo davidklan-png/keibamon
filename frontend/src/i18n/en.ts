@@ -221,6 +221,22 @@ export const en = {
     communityCard: "{n} friends are on today’s card",
     friendsOnRace: "{n} friends on this race",
     browseRaces: "Browse races",
+    // Open/Resolved split (history behind a toggle, collapsed by default).
+    open: "Open",
+    showHistory: "Show history ({n})",
+    hideHistory: "Hide history",
+    historyEmpty: "No resolved tickets yet",
+    // Punter aggregates grid inside the history panel.
+    stats: {
+      hitMiss: "Hit/miss",
+      wagered: "Wagered",
+      returned: "Returned",
+      net: "Net P/L",
+      roi: "ROI",
+      biggestWin: "Biggest win",
+      biggestWinRace: "{name} · {date}",
+      none: "—",
+    },
   },
   // Session 2 UX refactor: honest signed-out empty state for the My Tickets
   // tab. Replaces the full SignInScreen so the bottom tab bar stays visible.

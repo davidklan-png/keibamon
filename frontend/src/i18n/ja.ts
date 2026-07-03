@@ -213,6 +213,22 @@ export const ja = {
     communityCard: "今日のカードに友だち{n}人が参戦中",
     friendsOnRace: "このレースに友だち{n}人",
     browseRaces: "レースを見る",
+    // オープン/確定の分割（履歴はトグルで、初期は折りたたみ）。
+    open: "オープン",
+    showHistory: "履歴を表示 ({n})",
+    hideHistory: "履歴を閉じる",
+    historyEmpty: "確定したチケットはまだありません",
+    // 履歴パネル内のプンター集計グリッド。
+    stats: {
+      hitMiss: "的中/外れ",
+      wagered: "購入額",
+      returned: "払戻額",
+      net: "損益",
+      roi: "ROI",
+      biggestWin: "最大払戻",
+      biggestWinRace: "{name} · {date}",
+      none: "—",
+    },
   },
   // Session 2 UX refactor: ログアウト時の正直な空状態（My Tickets タブ）。
   // フルの SignInScreen を置き換え、下部タブバーを表示したまま、ローカルに

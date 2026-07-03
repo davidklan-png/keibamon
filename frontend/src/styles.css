@@ -1698,6 +1698,65 @@ select:focus {
 }
 .mt-count { font-weight: 700; font-size: 12px; color: var(--muted); }
 
+/* ---- Open/Resolved section toggle + punter-stats grid ---- */
+.mt-section-toggle {
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  color: var(--ink);
+  padding: 12px 14px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 16px 0 8px;
+  cursor: pointer;
+}
+.mt-section-toggle:hover { background: var(--tint-2); }
+.mt-history { animation: kbmRise 0.18s ease-out; }
+.mt-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 1px;
+  background: var(--line);
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  overflow: hidden;
+  margin: 8px 0 16px;
+}
+.mt-stat {
+  background: var(--panel);
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.mt-stat-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--soft);
+}
+.mt-stat-value {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+  line-height: 1.2;
+  overflow-wrap: anywhere;
+}
+.mt-stat-value--pos { color: var(--gold-amber); }
+.mt-stat-value--neg { color: var(--danger); }
+.mt-stat-sub {
+  font-size: 11px;
+  color: var(--soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* ---- Feed ticket card ---- */
 .mt-feed { padding-bottom: 110px; }
 .mt-card {
