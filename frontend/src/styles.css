@@ -3153,6 +3153,12 @@ select:focus {
   color: var(--ink);
 }
 .contender-group.fragile h6 { color: var(--warn); }
+.contender-group-desc {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
 .contender-group ul { list-style: none; margin: 0; padding: 0; }
 .contender-group li {
   display: flex;

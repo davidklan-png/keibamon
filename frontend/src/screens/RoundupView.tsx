@@ -372,9 +372,10 @@ function ContenderGroupsBlock({
   // mount IS the lazy-fetch gate (collapsed rows never fetch form data).
   const [openUma, setOpenUma] = useState<number | null>(null);
 
-  const block = (label: string, refs: ContenderRef[]) => (
+  const block = (label: string, desc: string, refs: ContenderRef[]) => (
     <div className="contender-group" key={label}>
       <h6>{label}</h6>
+      <p className="contender-group-desc">{desc}</p>
       {refs.length === 0 ? (
         <p className="hint">—</p>
       ) : (
@@ -432,10 +433,10 @@ function ContenderGroupsBlock({
     <div className="contender-groups">
       <h5>{t("roundup.contenders")}</h5>
       <div className="contender-grid">
-        {block(t("roundup.core"), groups.core_contenders)}
-        {block(t("roundup.price"), groups.price_horses)}
-        {block(t("roundup.fragile"), groups.fragile_favorites)}
-        {block(t("roundup.chaos"), groups.chaos_slots)}
+        {block(t("roundup.core"), t("roundup.coreDesc"), groups.core_contenders)}
+        {block(t("roundup.price"), t("roundup.priceDesc"), groups.price_horses)}
+        {block(t("roundup.fragile"), t("roundup.fragileDesc"), groups.fragile_favorites)}
+        {block(t("roundup.chaos"), t("roundup.chaosDesc"), groups.chaos_slots)}
       </div>
     </div>
   );

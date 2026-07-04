@@ -352,9 +352,17 @@ export const en = {
     pace: "Pace map",
     contenders: "Contender groups",
     core: "Core contenders",
+    coreDesc:
+      "The market's shortest-priced runners (~6.0 or lower) — the horses most likely to be involved at the finish.",
     price: "Price horses",
+    priceDesc:
+      "Mid-market runners (~6–20) with a realistic shot at the frame — the tier most exotic tickets lean on for value.",
     fragile: "Fragile favorites",
+    fragileDesc:
+      "Short-priced favorites (~5.0 or lower) carrying a flagged weakness — worth watching, not worth assuming.",
     chaos: "Chaos slots",
+    chaosDesc:
+      "The longest-priced runners on the card — included mainly to widen exotic combinations, not as a genuine forecast.",
     trend: "Trend analysis",
     tickets: "Ticket construction notes",
     buildTickets: "Build tickets from my {n} reads",

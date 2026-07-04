@@ -38,7 +38,7 @@ import { sanitizeNarrative } from "./guardrails";
  * reader comparing two editions can then tell whether a wording difference is a
  * real data change or a generator-version change. See docs/adr/0008.
  */
-export const GENERATOR_VERSION = "1.0.0";
+export const GENERATOR_VERSION = "1.1.0";
 
 export type Grade = "G1" | "G2" | "G3";
 export type Surface = "turf" | "dirt";
@@ -437,6 +437,7 @@ function listFavs(rs: RunnerInput[]): string {
 /** Group runners into contender buckets. Deterministic given the inputs. */
 export function contenderGroups(race: RaceInput): ContenderGroups {
   const ranked = topByOdds(race.runners);
+  const fieldSize = race.runners.length;
   const core: ContenderRef[] = [];
   const price: ContenderRef[] = [];
   const fragile: ContenderRef[] = [];
@@ -455,15 +456,21 @@ export function contenderGroups(race: RaceInput): ContenderGroups {
       continue;
     }
     if (o == null) {
-      chaos.push(ref("Unpriced — pool not open or no estimate yet."));
+      chaos.push(
+        ref(
+          joinClauses("Unpriced — pool not open or no estimate yet", [
+            tagsClause(r.trend_tags),
+          ]),
+        ),
+      );
       continue;
     }
     if (o <= 6.0) {
-      core.push(ref(coreReason(r, o)));
+      core.push(ref(coreReason(r, o, core.length, fieldSize)));
     } else if (o <= 20.0) {
-      price.push(ref(priceReason(r, o)));
+      price.push(ref(priceReason(r, o, fieldSize)));
     } else {
-      chaos.push(ref(chaosReason(r, o)));
+      chaos.push(ref(chaosReason(r, o, fieldSize)));
     }
   }
   // Fragile-favorite also stays visible in core so the reader still sees it.
@@ -482,21 +489,93 @@ export function contenderGroups(race: RaceInput): ContenderGroups {
   };
 }
 
-function coreReason(r: RunnerInput, o: number): string {
-  const styleBits: Record<StyleSignal, string> = {
-    front: "front-running profile",
-    presser: "rides close to the pace",
-    stalker: "stalks mid-pack",
-    closer: "needs a setup to close",
-    unknown: "style not declared",
-  };
-  return `~${o.toFixed(1)} win odds; ${styleBits[r.style_signal ?? "unknown"]}.`;
+// ---------------------------------------------------------------------------
+// Contender-group narrative helpers — shared vocabulary so each tier's
+// per-horse reason draws on style, draw, trend tags, and market movement
+// instead of one templated sentence repeated across every horse in the
+// group (only the odds figure used to vary). gateDrawImpact() covers the
+// race-level draw read; drawClause() is the per-horse echo of the same idea.
+// ---------------------------------------------------------------------------
+
+const STYLE_LABEL: Record<StyleSignal, string> = {
+  front: "front-running profile",
+  presser: "rides close to the pace",
+  stalker: "stalks mid-pack",
+  closer: "needs a setup to close",
+  unknown: "style not yet declared",
+};
+
+const TREND_LABEL: Record<Exclude<TrendSignal, "unknown">, string> = {
+  firming: "odds firming through the week — market support building",
+  drifting: "drifting out in the betting — support has been thin",
+  steady: "price has held steady since first quoted",
+};
+
+function drawClause(gate: number | null, fieldSize: number): string | null {
+  if (gate == null) return null;
+  if (gate <= 2) return `drawn ${gate}, on the rail`;
+  if (gate <= 4) return `drawn ${gate}, an inside post`;
+  if (fieldSize > 0 && gate >= fieldSize - 1) return `drawn ${gate}, the widest post in the field`;
+  if (fieldSize > 0 && gate >= fieldSize - 3) return `drawn ${gate}, out wide`;
+  return null; // mid-gate is unremarkable; don't manufacture a clause
 }
-function priceReason(r: RunnerInput, o: number): string {
-  return `~${o.toFixed(1)} — a double-digit price that can spice up the exotics if the shape cooperates.`;
+
+function trendClause(signal: TrendSignal | undefined): string | null {
+  if (!signal || signal === "unknown") return null;
+  return TREND_LABEL[signal];
 }
-function chaosReason(r: RunnerInput, o: number): string {
-  return `~${o.toFixed(1)} — deep outsider; mostly here to widen the trifecta combinations.`;
+
+function tagsClause(tags: string[] | undefined): string | null {
+  if (!tags || tags.length === 0) return null;
+  return tags.join(", ");
+}
+
+/** Compose a lead clause + optional detail clauses into one sentence, skipping any that are null. */
+function joinClauses(lead: string, clauses: Array<string | null>): string {
+  const present = clauses.filter((c): c is string => !!c);
+  return present.length ? `${lead}; ${present.join("; ")}.` : `${lead}.`;
+}
+
+function coreReason(r: RunnerInput, o: number, rank: number, fieldSize: number): string {
+  const lead =
+    rank === 0
+      ? `~${o.toFixed(1)} — the market's clear top choice here`
+      : rank === 1
+        ? `~${o.toFixed(1)} — sits right with the leader, not far off at the top of the market`
+        : `~${o.toFixed(1)} — still inside the market's top tier`;
+  return joinClauses(lead, [
+    STYLE_LABEL[r.style_signal ?? "unknown"],
+    drawClause(r.gate, fieldSize),
+    tagsClause(r.trend_tags),
+    trendClause(r.trend_signal),
+  ]);
+}
+function priceReason(r: RunnerInput, o: number, fieldSize: number): string {
+  const lead =
+    o <= 10
+      ? `~${o.toFixed(1)} — just off the core tier, the first price angle worth a look`
+      : o <= 15
+        ? `~${o.toFixed(1)} — a mid-price runner, squarely in exotic-spicing territory`
+        : `~${o.toFixed(1)} — near the top of the double-digit range, the last price step before chaos territory`;
+  return joinClauses(lead, [
+    STYLE_LABEL[r.style_signal ?? "unknown"],
+    drawClause(r.gate, fieldSize),
+    tagsClause(r.trend_tags),
+    trendClause(r.trend_signal),
+  ]);
+}
+function chaosReason(r: RunnerInput, o: number, fieldSize: number): string {
+  const lead =
+    o < 30
+      ? `~${o.toFixed(1)} — a longshot, live enough to matter in a wide exotic`
+      : o < 60
+        ? `~${o.toFixed(1)} — a deep outsider, mostly here to widen the combinations`
+        : `~${o.toFixed(1)} — about as long as they come, a rank outsider`;
+  return joinClauses(lead, [
+    drawClause(r.gate, fieldSize),
+    tagsClause(r.trend_tags),
+    trendClause(r.trend_signal),
+  ]);
 }
 function fragileReason(r: RunnerInput): string {
   const bits: string[] = [];
@@ -504,6 +583,7 @@ function fragileReason(r: RunnerInput): string {
   if (r.gate != null && r.gate >= 14) bits.push("drawn outside");
   if (r.trend_tags?.includes("class rise")) bits.push("rising in class");
   if (r.trend_tags?.includes("layoff")) bits.push("coming off a layoff");
+  if (r.trend_signal === "drifting") bits.push("drifting out in the betting despite the short price");
   return bits.length
     ? `Short-priced but ${bits.join(", ")} — a question mark on the bridge.`
     : "Short-priced with a flagged weakness — fragile at the head of the market.";
