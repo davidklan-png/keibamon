@@ -291,12 +291,20 @@ function makeFakeD1(opts: FakeD1Options = {}) {
     }
     // tickets: update by id + user_id (multi-line tolerant — the SQL spans
     // three lines in patchTicket, so a strict "^UPDATE tickets SET " fails).
-    m = /^UPDATE tickets\s+SET state = \?, returned = \?, payload = \?\s+WHERE id = \? AND user_id = \?/i.exec(s);
+    // The actual SQL writes 4 columns: state, returned, payload, placings.
+    // (An older version of this fake matched only 3 — `state, returned,
+    // payload` — silently dropping placings AND making the regex miss the
+    // real patchTicket UPDATE entirely, so PATCH changes were never
+    // persisted to the fake. That pre-existing fixture drift was exposed
+    // when the manual-ticket-builder edit guard test did a POST→PATCH→POST
+    // roundtrip and the second POST sailed past the guard.)
+    m = /^UPDATE tickets\s+SET state = \?, returned = \?, payload = \?, placings = \?\s+WHERE id = \? AND user_id = \?/i.exec(s);
     if (m) {
-      const [newState, newReturned, newPayload, id, userId] = b as [
+      const [newState, newReturned, newPayload, newPlacings, id, userId] = b as [
         string,
         number | null,
         string,
+        string | null,
         string,
         string,
       ];
@@ -308,6 +316,10 @@ function makeFakeD1(opts: FakeD1Options = {}) {
           returned: newReturned,
           payload: newPayload,
         };
+        // placings lives on TicketRow only optionally — keep it on the fake
+        // even though the typed test interface omits it, since patchTicket
+        // round-trips it.
+        (row as TicketRow & { placings?: string | null }).placings = newPlacings;
         tickets.set(id, row);
         return row;
       }
@@ -852,6 +864,121 @@ describe("social Worker — Phase 2 (ticket persistence)", () => {
       );
       expect(res.status).toBe(400);
     }
+  });
+
+  it("POST with the same id of an OPEN ticket edits it in place (payload overwritten)", async () => {
+    // The manual-ticket-builder edit flow relies on this: posting the SAME
+    // ticket id with a new payload must overwrite the row when state='open'.
+    jwtSub("user_abc");
+    const { db } = makeFakeD1();
+    // 1) Initial create.
+    const createBody = sampleTicketBody({
+      id: "kb-edit-1",
+      payoutBase: 5000,
+      ticket: { type: "quinella", lines: [{ combo: ["5", "16"] }] },
+    });
+    const r1 = await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(createBody),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r1.status).toBe(200);
+
+    // 2) Edit-in-place: same id, different payload (new combo + new payoutBase).
+    jwtSub("user_abc");
+    const editBody = sampleTicketBody({
+      id: "kb-edit-1",
+      payoutBase: 7000,
+      ticket: { type: "exacta", lines: [{ combo: ["5", "16"] }] },
+    });
+    const r2 = await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(editBody),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r2.status).toBe(200);
+    const edited = (await r2.json()) as Record<string, unknown>;
+    // Same id (edit-in-place, NOT a duplicate); new payload visible.
+    expect(edited).toMatchObject({ id: "kb-edit-1", state: "open", payoutBase: 7000 });
+    expect(edited.ticket).toMatchObject({ type: "exacta" });
+
+    // 3) Only one row survives — no duplicate id.
+    jwtSub("user_abc");
+    const getRes = await worker.fetch(
+      req("/api/social/tickets", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const list = (await getRes.json()) as { tickets: Record<string, unknown>[] };
+    expect(list.tickets.filter((t) => t.id === "kb-edit-1")).toHaveLength(1);
+  });
+
+  it("POST with the same id of a SETTLED ticket returns 409 and leaves the row untouched", async () => {
+    // A settled ticket must NOT be editable — settlement state + returned
+    // must survive a manual edit attempt. The 409 guard in insertTicket
+    // catches this BEFORE the upsert can overwrite state/returned.
+    jwtSub("user_abc");
+    const { db } = makeFakeD1();
+    // 1) Create + settle the ticket via the normal flow.
+    await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(sampleTicketBody({ id: "kb-settled-1" })),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("user_abc");
+    await worker.fetch(
+      req("/api/social/tickets/kb-settled-1", {
+        method: "PATCH",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "won", returned: 18400 }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+
+    // 2) Edit attempt via manual-ticket-builder — same id, new payload.
+    jwtSub("user_abc");
+    const r = await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(
+          sampleTicketBody({ id: "kb-settled-1", payoutBase: 9999 }),
+        ),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r.status).toBe(409);
+    expect(await r.json()).toEqual({ error: "cannot_edit_settled_ticket" });
+
+    // 3) Row MUST be untouched — settlement state + returned survive.
+    jwtSub("user_abc");
+    const getRes = await worker.fetch(
+      req("/api/social/tickets", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const list = (await getRes.json()) as { tickets: Record<string, unknown>[] };
+    const survivor = list.tickets.find((t) => t.id === "kb-settled-1");
+    expect(survivor).toMatchObject({
+      id: "kb-settled-1",
+      state: "won",
+      returned: 18400,
+      payoutBase: 5000, // NOT the 9999 the rejected POST tried to write
+    });
   });
 
   it("PATCH by the owner updates state + returned and returns the patched body", async () => {

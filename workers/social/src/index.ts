@@ -345,6 +345,24 @@ function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicketBody } 
   };
 }
 
+type InsertTicketResult =
+  | { ok: true; row: TicketRow | null }
+  | { ok: false; code: "cannot_edit_settled_ticket" };
+
+/**
+ * Insert-or-update by id. Used both for fresh ticket creation AND for
+ * manual-ticket-builder edit-in-place: a POST with the SAME id overwrites
+ * the row in place (the `ON CONFLICT(id) DO UPDATE` below).
+ *
+ * Guard: if an existing row for this id is in a settled state (anything
+ * other than 'open'), reject with `{ok:false, code:"cannot_edit_settled_ticket"}`
+ * BEFORE the upsert runs — otherwise a manual edit would silently reset
+ * `state` to 'open' and NULL out `returned`, erasing settlement history.
+ * The lookup is a separate statement rather than a CTE because D1's
+ * `ON CONFLICT DO UPDATE` cannot itself be conditional on the existing row's
+ * state (no `WHERE` clause on the DO UPDATE side that can reference the
+ * pre-conflict row in D1's SQLite version).
+ */
 async function insertTicket(
   db: D1Database,
   userId: string,
@@ -357,8 +375,15 @@ async function insertTicket(
     payoutBase: number;
     createdAt: number;
   },
-): Promise<TicketRow | null> {
-  return db
+): Promise<InsertTicketResult> {
+  const existing = await db
+    .prepare("SELECT state FROM tickets WHERE id = ?")
+    .bind(parsed.id)
+    .first<{ state: string }>();
+  if (existing && existing.state !== "open") {
+    return { ok: false, code: "cannot_edit_settled_ticket" };
+  }
+  const row = await db
     .prepare(
       `INSERT INTO tickets (id, user_id, serial, race_key, payload, state, payout_base, returned, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
@@ -380,6 +405,7 @@ async function insertTicket(
       Math.floor(parsed.createdAt / 1000),
     )
     .first<TicketRow>();
+  return { ok: true, row };
 }
 
 /**
@@ -1399,11 +1425,16 @@ async function handleTickets(
       if (!parsed.ok) {
         return json({ error: parsed.code }, 400, cors);
       }
-      const row = await insertTicket(env.DB, userId, parsed.ticket);
-      if (!row) {
+      const result = await insertTicket(env.DB, userId, parsed.ticket);
+      if (!result.ok) {
+        // Edit-in-place guard: refuse to overwrite an already-settled ticket
+        // (settlement state/returned must survive a manual edit attempt).
+        return json({ error: result.code }, 409, cors);
+      }
+      if (!result.row) {
         return json({ error: "server_error" }, 500, cors);
       }
-      const decoded = decodeTicket(row);
+      const decoded = decodeTicket(result.row);
       return json(decoded ?? { ok: true }, 200, cors);
     }
     return json({ error: "method_not_allowed" }, 405, cors);
