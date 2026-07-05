@@ -633,6 +633,99 @@ describe("settle.resolveTicket — scratch → refund (all 5 bet types)", () => 
   });
 });
 
+// ===========================================================================
+// bracket_quinella (枠連, "gate" in the app's UI) — bracket-space combo.
+//
+// Unlike the other five bet types, the ticket's `combo` names WAKU (1-8),
+// not umabans, so hitting requires a per-race umaban→waku lookup
+// (`RaceResult.gates`). Two different horses can legitimately share one
+// waku, so the comparison must be a duplicate-preserving multiset match,
+// not a Set (which would collapse ["3","3"] to a single element).
+// ===========================================================================
+
+// Same finish as ORDER_TOP3_5_16_1 (5 wins, 16 2nd, 1 3rd, 7 4th, 3 5th),
+// with a bracket lookup: horse 5→waku 3, horse 16→waku 8, horse 1→waku 1.
+const GATES_TOP3_5_16_1 = [
+  { umaban: 5, waku: 3 },
+  { umaban: 16, waku: 8 },
+  { umaban: 1, waku: 1 },
+  { umaban: 7, waku: 4 },
+  { umaban: 3, waku: 2 },
+];
+const RESULT_WITH_GATES: RaceResult = {
+  finishers: ORDER_TOP3_5_16_1,
+  gates: GATES_TOP3_5_16_1,
+  payouts: [{ pool: "bracket_quinella", combo: "3-8", yen: 1190 }],
+};
+
+describe("settle.lineHits — bracket_quinella", () => {
+  const gates = new Map(GATES_TOP3_5_16_1.map((g) => [g.umaban, g.waku]));
+
+  it("matches the top-2's brackets, unordered", () => {
+    expect(lineHits("bracket_quinella", ["3", "8"], ORDER_TOP3_5_16_1, gates)).toBe(true);
+    expect(lineHits("bracket_quinella", ["8", "3"], ORDER_TOP3_5_16_1, gates)).toBe(true);
+  });
+
+  it("misses a bracket combo not matching the top-2", () => {
+    expect(lineHits("bracket_quinella", ["3", "1"], ORDER_TOP3_5_16_1, gates)).toBe(false);
+  });
+
+  it("returns false without a gates map (can't resolve bracket space)", () => {
+    expect(lineHits("bracket_quinella", ["3", "8"], ORDER_TOP3_5_16_1)).toBe(false);
+  });
+
+  it("multiset match: two horses sharing a bracket, combo names it twice", () => {
+    // Horses 5 and 16 both in waku 3; top-2 are exactly those two horses.
+    const sharedGates = new Map([
+      [5, 3],
+      [16, 3],
+      [1, 1],
+    ]);
+    expect(lineHits("bracket_quinella", ["3", "3"], ORDER_TOP3_5_16_1, sharedGates)).toBe(true);
+    // A combo of ["3","8"] should NOT match when both top-2 are waku 3 —
+    // proves this isn't silently collapsing to a Set of brackets.
+    expect(lineHits("bracket_quinella", ["3", "8"], ORDER_TOP3_5_16_1, sharedGates)).toBe(false);
+  });
+});
+
+describe("settle.resolveTicket — bracket_quinella", () => {
+  it("WON — bracket combo matches top-2's brackets", () => {
+    const t = ticket("bracket_quinella", [["3", "8"]], 100);
+    const out = resolveTicket(t, 100, RESULT_WITH_GATES);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(1190);
+    expect((out as { source: string }).source).toBe("result");
+  });
+
+  it("MISS — bracket combo doesn't match", () => {
+    const t = ticket("bracket_quinella", [["1", "2"]], 100);
+    const out = resolveTicket(t, 100, RESULT_WITH_GATES);
+    expect(out.state).toBe("miss");
+  });
+
+  it("stays OPEN when the result has placings but no gates block", () => {
+    // Simulates a result built before bracket_quinella support shipped.
+    const t = ticket("bracket_quinella", [["3", "8"]], 100);
+    const out = resolveTicket(t, 100, RESULT_ORDER_ONLY); // no `gates` field
+    expect(out).toEqual({ state: "open", reason: "no_finishers_yet" });
+  });
+
+  it("is NOT affected by the generic scratch-refund check (different number space)", () => {
+    // scratched:[8] would, if wrongly compared against the umaban-space
+    // scratch check, look like it refunds a ticket naming bracket "8" — but
+    // bracket_quinella's combo is bracket space, not umaban space, so this
+    // must resolve on the actual bracket match instead of short-circuiting
+    // to refunded.
+    const resultWithUnrelatedScratch: RaceResult = {
+      ...RESULT_WITH_GATES,
+      scratched: [8], // umaban 8 scratched — irrelevant to a "waku 8" combo
+    };
+    const t = ticket("bracket_quinella", [["3", "8"]], 100);
+    const out = resolveTicket(t, 100, resultWithUnrelatedScratch);
+    expect(out.state).toBe("won");
+  });
+});
+
 describe("settle.resolveTicket — placings precedence over legacy forms", () => {
   it("placings take precedence when both placings and finishers are present", () => {
     // If both are supplied, placings wins. A tie at 2nd (16,7) is honored —

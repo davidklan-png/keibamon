@@ -32,8 +32,19 @@
 // compute the refund amount (stake return — out of scope for this resolver);
 // the sweep records the state and the UI shows a generic "refund" badge.
 
-/** The five exotic bet types the recommender emits. */
-export type BetType = "quinella" | "wide" | "exacta" | "trio" | "trifecta";
+/** The six exotic bet types the recommender/manual ticket builder emit.
+ * `bracket_quinella` (枠連, "gate" in the app's UI) is bracket-space, not
+ * horse-number space — its combo names two waku (1-8), possibly the SAME
+ * waku twice if two runners share a bracket. Resolving it needs a per-race
+ * umaban→waku lookup (`RaceResult.gates`, below), unlike the other five
+ * types which only ever look at umabans. */
+export type BetType =
+  | "quinella"
+  | "wide"
+  | "exacta"
+  | "trio"
+  | "trifecta"
+  | "bracket_quinella";
 
 /**
  * Minimal structural input — what the resolver actually reads. The frontend's
@@ -63,6 +74,18 @@ export interface RaceResult {
   /** Umabans scratched from this race; any line containing one is refunded. */
   scratched?: number[];
   payouts?: { pool: string; combo: string; yen: number }[];
+  /**
+   * Per-finisher umaban→waku (bracket) lookup, needed to resolve
+   * bracket_quinella tickets: unlike every other bet type, its combo names
+   * brackets (1-8), not umabans, and brackets aren't derivable from umabans
+   * alone once the field is large enough that two horses share one. Absent
+   * on results the producer built before bracket_quinella support shipped,
+   * or when the source page's bracket cell didn't parse — `resolveTicket`
+   * treats a bracket_quinella ticket as still-open (not a false "miss")
+   * when this is missing, matching the "not enough info yet" gate used for
+   * missing placings.
+   */
+  gates?: { umaban: number; waku: number }[];
 }
 
 export type SettleResult =
@@ -164,14 +187,50 @@ function sameOrder(as: string[], bs: number[]): boolean {
 }
 
 /**
+ * Multiset equality (order-independent, DUPLICATE-preserving). Unlike
+ * `sameSet` (which uses a JS Set and collapses duplicates), this is the
+ * correct comparison for bracket_quinella: two different horses can share
+ * one waku, so a combo of `["3","3"]` (bet on bracket 3 for both top-2
+ * spots) is a real, distinct case from `["3","8"]` — collapsing to a Set
+ * would treat `["3","3"]` as a single-element set and silently mismatch.
+ */
+function sameMultiset(as: string[], bs: number[]): boolean {
+  if (as.length !== bs.length) return false;
+  const aNums = as.map((x) => Number(x)).sort((a, b) => a - b);
+  const bNums = [...bs].sort((a, b) => a - b);
+  return aNums.every((v, i) => v === bNums[i]);
+}
+
+/**
+ * Build the umaban→waku lookup from a result's `gates` block. Returns null
+ * when absent (older results, or a source page whose bracket cell didn't
+ * parse) so callers can distinguish "no bracket data" from "horse not
+ * found" — the former means bracket_quinella can't be resolved at all yet
+ * (stay open), the latter is a genuine miss.
+ */
+function gateMap(result: RaceResult): Map<number, number> | null {
+  if (!result.gates || result.gates.length === 0) return null;
+  const m = new Map<number, number>();
+  for (const g of result.gates) m.set(g.umaban, g.waku);
+  return m;
+}
+
+/**
  * Did a single line (combo) hit, given the bet type and the ordered finish?
  *
  *   exacta / trifecta  → ordered match against the top of the finish
  *   quinella           → unordered match against the top 2
  *   trio               → unordered match against the top 3
  *   wide               → both combos finish in the top 3
+ *   bracket_quinella   → unordered, DUPLICATE-preserving match of the top 2's
+ *                        BRACKETS (not umabans) via `gates`
  */
-export function lineHits(type: BetType, combo: string[], order: number[]): boolean {
+export function lineHits(
+  type: BetType,
+  combo: string[],
+  order: number[],
+  gates?: Map<number, number> | null,
+): boolean {
   if (!combo || combo.length === 0 || !order || order.length === 0) return false;
   if (type === "exacta") {
     return sameOrder(combo, order.slice(0, 2));
@@ -188,6 +247,18 @@ export function lineHits(type: BetType, combo: string[], order: number[]): boole
   if (type === "wide") {
     const top3 = new Set(order.slice(0, 3));
     return combo.every((u) => top3.has(Number(u)));
+  }
+  if (type === "bracket_quinella") {
+    if (!gates) return false; // no bracket data — caller gates this earlier
+    const top2 = order.slice(0, 2);
+    if (top2.length < 2) return false;
+    const wakus: number[] = [];
+    for (const u of top2) {
+      const w = gates.get(u);
+      if (w === undefined) return false; // finisher missing from gates — can't match
+      wakus.push(w);
+    }
+    return sameMultiset(combo, wakus);
   }
   return false;
 }
@@ -350,9 +421,27 @@ export function resolveTicket(
     return { state: "open", reason: "no_finishers_yet" };
   }
 
+  // bracket_quinella needs a bracket lookup to resolve at all — a result
+  // built before this feature shipped (or a source page whose bracket cell
+  // didn't parse) has placings but no `gates`. Treat that as "not enough
+  // info yet" rather than falsely reporting a miss.
+  const gates = gateMap(result!);
+  if (ticket.type === "bracket_quinella" && !gates) {
+    return { state: "open", reason: "no_finishers_yet" };
+  }
+
   // Scratch check: any combo umaban in result.scratched refunds the ticket.
+  // NOT applied to bracket_quinella — its combo names BRACKETS (1-8), not
+  // umabans, so comparing it against a set of scratched umabans would be
+  // comparing the wrong space entirely. JRA's real bracket_quinella scratch
+  // rule is more involved than a flat refund anyway (a single scratched
+  // horse in a multi-horse bracket does NOT refund; only a fully-scratched
+  // bracket, or specific field-size edge cases, do) — out of scope for v1.
+  // In practice this means a bracket_quinella ticket touching a scratch
+  // relies on JRA's own payout data (a cancelled/adjusted pool simply won't
+  // carry a payout row for that combo) rather than our own refund logic.
   const scratched = result!.scratched ?? [];
-  if (scratched.length > 0) {
+  if (scratched.length > 0 && ticket.type !== "bracket_quinella") {
     const scratchSet = new Set(scratched);
     for (const line of ticket.lines) {
       if (line.combo.some((u) => scratchSet.has(Number(u)))) {
@@ -369,7 +458,7 @@ export function resolveTicket(
 
   for (const line of ticket.lines) {
     // A line hits if it matches ANY consistent ordering (dead-heat aware).
-    const hit = orders.some((order) => lineHits(ticket.type, line.combo, order));
+    const hit = orders.some((order) => lineHits(ticket.type, line.combo, order, gates));
     if (!hit) continue;
     anyHit = true;
     const yen = payoutYen(result!, ticket.type, line.combo);

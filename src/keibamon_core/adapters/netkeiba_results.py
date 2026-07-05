@@ -97,6 +97,12 @@ def parse_results_payload(
         finish = _to_int(finish_raw)
         rec: dict[str, Any] = {
             "horse_number": umaban,
+            # 枠 (bracket / wakuban) -- cell[1], previously unused. Feeds
+            # bracket_quinella (枠連) settlement: the resolver needs to map a
+            # finisher's horse_number to its bracket, which isn't derivable
+            # from horse_number alone once a field is large enough that
+            # multiple horses share a bracket. See live/result.py build_result.
+            "waku": _to_int(_cell_text(cells[1])),
             "horse_id": _extract_horse_id_from_cell(cells[3]) or "0000000000",
             "finish_position": finish if finish else None,
             # Raw 着順 cell text (ADR-0007 R1): lets downstream distinguish

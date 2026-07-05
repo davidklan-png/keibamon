@@ -8,6 +8,7 @@ shim):
         "placings":  [{"pos": 1, "umabans": [5]}, ...],   # dead-heat aware
         "scratched": [11, 4],                              # refunded umabans
         "payouts":   [{"pool": "quinella", "combo": "5-16", "yen": 1840}, ...],
+        "gates":     [{"umaban": 5, "waku": 3}, ...],       # bracket lookup
     }
 
 This module turns two FLAT lists -- the per-finisher records
@@ -34,7 +35,9 @@ Pool mapping (silver vocabulary → resolver BetType):
     =================== ============== ==============================
     win                 (omitted)     resolver ignores win/place
     place               (omitted)     resolver ignores win/place
-    bracket_quinella    (omitted)     resolver doesn't support 枠連
+    bracket_quinella    bracket_quinella  bracket-space combo, reformatted
+                                          from concatenated digits ("38") to
+                                          dash-joined ("3-8") -- see below
     quinella            quinella      dash-joined umabans, ascending
     wide                wide          one row per pair (3 on a G1)
     exacta              exacta        dash-joined umabans, FINISH order
@@ -42,10 +45,30 @@ Pool mapping (silver vocabulary → resolver BetType):
     trifecta            trifecta      dash-joined umabans, FINISH order
     =================== ============== ==============================
 
-The five exotic names pass through verbatim -- silver and the resolver share
-the vocabulary by construction. The resolver canonicalizes unordered pools
-to ascending on its own (``comboKey`` in settle.ts), so producers can emit
-the dash-joined form in either order without coordinating.
+The six exotic names pass through verbatim -- silver and the resolver share
+the vocabulary by construction, with one exception: bracket_quinella's
+``combo_raw`` arrives from :mod:`netkeiba_payouts` as concatenated digits
+(``"38"``) rather than dash-joined (that file also feeds an older,
+unrelated lake-settlement consumer -- ``ingestion/settlement.py`` --that
+expects the concatenated form, so we don't change it there). Bracket
+numbers are always single digits (1-8), so this module reformats
+bracket_quinella's combo into the same dash-joined shape every other pool
+already uses before handing it to the resolver. The resolver canonicalizes
+unordered pools to ascending on its own (``comboKey`` in settle.ts), so
+producers can emit the dash-joined form in either order without
+coordinating.
+
+Bracket lookups (``gates``). Unlike every other exotic pool, bracket_quinella
+combos are in BRACKET space (1-8), not horse-number space, and brackets are
+not derivable from horse numbers alone once the field is large enough that
+multiple horses share one (JRA packs 16-18 horses into 8 brackets). So the
+resolver needs a per-race horse-number -> bracket lookup to check a
+bracket_quinella ticket's umaban selections against the placings. This
+module builds that lookup as ``gates: [{"umaban": int, "waku": int}, ...]``
+from the ``waku`` field :func:`netkeiba_results.parse_results_payload` now
+carries per finisher (cell[1] of the results table), and omits the key
+entirely when no finisher carries a waku (older fixtures, or upstream parse
+gaps) -- same "omit when empty" pattern as ``scratched``.
 
 Scratched detection (finish_position_raw from netkeiba_results):
 
@@ -99,10 +122,15 @@ from __future__ import annotations
 
 from typing import Any, Iterable
 
-# Resolver-supported exotic bet types. Silver's pool vocabulary for these five
+# Resolver-supported exotic bet types. Silver's pool vocabulary for these
 # names is identical; anything else is dropped (resolver can't settle it).
+# bracket_quinella (枠連, "gate" in the app's UI) joined the other five once
+# the resolver gained per-horse bracket lookups (`gates`, below) -- before
+# that it was deliberately excluded (a bracket-space combo like "3-8" can't
+# be checked against horse-number placings without knowing each horse's
+# waku).
 _BET_TYPES: frozenset[str] = frozenset(
-    {"quinella", "wide", "exacta", "trio", "trifecta"}
+    {"quinella", "wide", "exacta", "trio", "trifecta", "bracket_quinella"}
 )
 
 # 着順 cell text that marks a scratch (返還 / refund-eligible at the gate).
@@ -154,15 +182,22 @@ def build_result(
       - ``scratched``: umabans marked 取消/除外 at the gate. Refund-eligible
         per JRA rules.
       - ``payouts``: one entry per (pool, combo, yen) from the source
-        page, filtered to the five resolver-supported pools.
+        page, filtered to the six resolver-supported pools.
+      - ``gates``: per-finisher umaban -> waku (bracket) lookup, needed to
+        resolve bracket_quinella tickets (see module docstring). Omitted
+        when no finisher carries a ``waku``.
     """
     placings_by_pos: dict[int, list[int]] = {}
     scratched: list[int] = []
+    gates_by_umaban: dict[int, int] = {}
 
     for f in finishers:
         umaban = f.get("horse_number")
         if umaban is None:
             continue  # parser invariant -- shouldn't happen, defensive
+        waku = f.get("waku")
+        if waku is not None:
+            gates_by_umaban[int(umaban)] = int(waku)
         raw = f.get("finish_position_raw") or ""
         if raw in _SCRATCH_MARKERS:
             scratched.append(int(umaban))
@@ -195,10 +230,20 @@ def build_result(
         yen = p.get("payout_yen")
         if combo_raw is None or yen is None:
             continue
+        combo = str(combo_raw)
+        if pool == "bracket_quinella" and "-" not in combo and len(combo) == 2:
+            # netkeiba_payouts emits bracket_quinella as concatenated
+            # single-digit brackets ("38") to match an older, unrelated
+            # lake-settlement consumer's expectations (see module
+            # docstring). Bracket numbers are always 1-8 (single digit),
+            # so splitting into two chars and dash-joining is safe and
+            # unambiguous -- reformat here rather than special-casing the
+            # resolver for this one pool.
+            combo = f"{combo[0]}-{combo[1]}"
         payouts_out.append(
             {
                 "pool": pool,
-                "combo": str(combo_raw),
+                "combo": combo,
                 "yen": int(yen),
             }
         )
@@ -218,4 +263,12 @@ def build_result(
         # Omit the key entirely when empty -- matches the resolver's
         # ``result.scratched ?? []`` and keeps the JSON tight.
         out["scratched"] = scratched
+    if gates_by_umaban:
+        # Omit when empty -- older fixtures / inline test dicts don't carry
+        # `waku`, and a race with no bracket data simply can't settle
+        # bracket_quinella tickets (the resolver treats a missing `gates`
+        # block the same as "not enough info yet").
+        out["gates"] = [
+            {"umaban": u, "waku": w} for u, w in sorted(gates_by_umaban.items())
+        ]
     return out

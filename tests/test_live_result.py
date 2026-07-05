@@ -17,12 +17,15 @@ The test scenarios cover every code path in build_result:
      settles on the corrected cell int, not gate order — R2 Task 3 fix).
      5b. Demotion fixture (降着 after 審議) — tests/fixtures/r1/
      demotion_shingi_result.json; corrected order survives into placings.
-  6. Pool mapping — all 8 silver pools → 5 resolver BetTypes.
+  6. Pool mapping — all 8 silver pools → 6 resolver BetTypes (win/place
+     dropped; bracket_quinella passes through, reformatted to dash-joined).
   7. Empty result — no placings → {} (race not official).
   8. Combo shape — dash-joined umabans, raw form preserved.
   9. Official-confirmation gate (R2 Task 1) — provisional page (placings
      but NO payouts) → {}; provisional→confirmed transition; win/place-
-     only page → {} (the five-pool filter leaves payouts_out empty).
+     only page → {} (the six-pool filter leaves payouts_out empty).
+  10. gates (bracket lookup) — omitted when no finisher carries `waku`;
+      two horses can share a bracket (multiset, not a set).
 """
 from __future__ import annotations
 
@@ -45,8 +48,9 @@ def _fixture_payload() -> str:
 
 def test_build_result_clean_race_from_real_fixture() -> None:
     """The 2026 宝塚記念 G1 had 18 runners, 17 with placings, 1 中止 (horse 15).
-    The result block should carry 17 placings, NO scratched, and the 5 exotic
-    pools the resolver supports (win/place/bracket_quinella filtered out)."""
+    The result block should carry 17 placings, NO scratched, and the 6 exotic
+    pools the resolver supports (win/place filtered out; bracket_quinella now
+    passes through, reformatted to dash-joined)."""
     payload = _fixture_payload()
     finishers = parse_results_payload(payload, "202609030411")
     payouts = parse_payouts_payload(payload, "202609030411")
@@ -66,16 +70,17 @@ def test_build_result_clean_race_from_real_fixture() -> None:
     # Scratched: empty (the DNF horse 15 was 中止, not 取消 — no refund).
     assert result.get("scratched", []) == []
 
-    # Payouts: the resolver-relevant 5 pools. The fixture has 1 quinella, 3
-    # wide (per pair), 1 each of exacta/trio/trifecta.
+    # Payouts: the resolver-relevant 6 pools. The fixture has 1 quinella, 3
+    # wide (per pair), 1 each of exacta/trio/trifecta/bracket_quinella.
     pools = [p["pool"] for p in result["payouts"]]
     assert pools.count("quinella") == 1
     assert pools.count("wide") == 3
     assert pools.count("exacta") == 1
     assert pools.count("trio") == 1
     assert pools.count("trifecta") == 1
-    # No win/place/bracket_quinella leaks into the resolver block.
-    assert not any(p in pools for p in ("win", "place", "bracket_quinella"))
+    assert pools.count("bracket_quinella") == 1
+    # win/place still don't leak into the resolver block.
+    assert not any(p in pools for p in ("win", "place"))
 
     # Combo shape: dash-joined umabans, FINISH ORDER for exacta/trifecta,
     # SOURCE ORDER for unordered pools (resolver canonicalizes ascending).
@@ -87,6 +92,16 @@ def test_build_result_clean_race_from_real_fixture() -> None:
 
     trifecta = next(p for p in result["payouts"] if p["pool"] == "trifecta")
     assert trifecta == {"pool": "trifecta", "combo": "16-5-1", "yen": 6040}
+
+    # bracket_quinella: winner (umaban 16) is waku 8, 2nd (umaban 5) is
+    # waku 3 -- reformatted from the source's concatenated "38" to "3-8".
+    bracket_q = next(p for p in result["payouts"] if p["pool"] == "bracket_quinella")
+    assert bracket_q == {"pool": "bracket_quinella", "combo": "3-8", "yen": 380}
+
+    # gates: per-finisher umaban -> waku lookup, built from the real fixture.
+    gates_by_umaban = {g["umaban"]: g["waku"] for g in result["gates"]}
+    assert gates_by_umaban[16] == 8
+    assert gates_by_umaban[5] == 3
 
 
 # --- 2. Dead heat expands the placings entry ----------------------------------
@@ -251,13 +266,14 @@ def test_build_result_demotion_fixture_produces_corrected_placings() -> None:
     assert pos2 == {"pos": 2, "umabans": [7]}
 
 
-# --- 6. Pool mapping drops win/place/bracket_quinella ------------------------
+# --- 6. Pool mapping drops win/place, passes bracket_quinella through --------
 
 
 def test_build_result_pool_mapping_drops_unsupported_pools() -> None:
-    """The resolver only handles the 5 exotic BetTypes. win/place/bracket_quinella
-    must be filtered out of the payouts block (the resolver ignores them anyway,
-    but keeping the block tight avoids downstream confusion)."""
+    """The resolver handles 6 exotic BetTypes (as of bracket_quinella support).
+    win/place must be filtered out of the payouts block (the resolver ignores
+    them anyway, but keeping the block tight avoids downstream confusion).
+    bracket_quinella now passes through too, reformatted to dash-joined."""
     finishers = [
         {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
         {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
@@ -276,10 +292,22 @@ def test_build_result_pool_mapping_drops_unsupported_pools() -> None:
     result = build_result(finishers, payouts)
 
     pools = [p["pool"] for p in result["payouts"]]
-    assert set(pools) == {"quinella", "wide", "exacta", "trio", "trifecta"}
+    assert set(pools) == {
+        "quinella",
+        "wide",
+        "exacta",
+        "trio",
+        "trifecta",
+        "bracket_quinella",
+    }
     assert "win" not in pools
     assert "place" not in pools
-    assert "bracket_quinella" not in pools
+
+    # bracket_quinella's combo is reformatted from concatenated "38" to
+    # dash-joined "3-8" -- see module docstring for why this reformat lives
+    # here rather than in netkeiba_payouts.
+    bracket_q = next(p for p in result["payouts"] if p["pool"] == "bracket_quinella")
+    assert bracket_q == {"pool": "bracket_quinella", "combo": "3-8", "yen": 1190}
 
 
 # --- 7. Empty result when no placings ----------------------------------------
@@ -424,3 +452,56 @@ def test_build_result_provisional_then_confirmed_transition() -> None:
     assert cycle2["payouts"] == [{"pool": "quinella", "combo": "5-16", "yen": 620}]
     # Scratched key still omitted when empty.
     assert "scratched" not in cycle2
+
+
+# --- 10. gates (bracket lookup for bracket_quinella) --------------------------
+
+
+def test_build_result_omits_gates_key_when_no_waku_present() -> None:
+    """Inline test fixtures across this file don't carry `waku` (it was added
+    to netkeiba_results after this suite existed). build_result must omit the
+    `gates` key entirely rather than emit an empty list, matching the
+    `scratched` "omit when empty" pattern -- older callers/fixtures without
+    bracket data must not break."""
+    finishers = [
+        {"horse_number": 5, "finish_position": 1, "finish_position_raw": ""},
+        {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},
+    ]
+    result = build_result(finishers, [{"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}])
+    assert "gates" not in result
+
+
+def test_build_result_gates_allows_two_horses_sharing_a_bracket() -> None:
+    """Brackets are a many-to-one grouping over horse numbers -- JRA packs
+    16-18 horses into 8 brackets, so two DIFFERENT horses can share the same
+    waku. `gates` must preserve this as a per-umaban lookup (a dict/multiset
+    shape), NOT collapse to a set of brackets, or the resolver couldn't tell
+    which specific horses are in waku 3."""
+    finishers = [
+        {"horse_number": 5, "finish_position": 1, "finish_position_raw": "", "waku": 3},
+        {"horse_number": 6, "finish_position": 2, "finish_position_raw": "", "waku": 3},
+        {"horse_number": 16, "finish_position": 3, "finish_position_raw": "", "waku": 8},
+    ]
+    payouts = [{"pool": "bracket_quinella", "combo_raw": "38", "payout_yen": 1190}]
+    result = build_result(finishers, payouts)
+
+    gates_by_umaban = {g["umaban"]: g["waku"] for g in result["gates"]}
+    assert gates_by_umaban == {5: 3, 6: 3, 16: 8}
+    # Both horse 5 and horse 6 map to waku 3 -- confirms the lookup is keyed
+    # by umaban, not deduplicated by waku.
+    assert len(result["gates"]) == 3
+
+    bracket_q = next(p for p in result["payouts"] if p["pool"] == "bracket_quinella")
+    assert bracket_q == {"pool": "bracket_quinella", "combo": "3-8", "yen": 1190}
+
+
+def test_build_result_gates_partial_waku_coverage() -> None:
+    """If only some finishers carry `waku` (e.g. a parser upgrade mid-season,
+    or a finisher dict built by older code), build_result includes gates only
+    for the ones that have it -- it does not require all-or-nothing."""
+    finishers = [
+        {"horse_number": 5, "finish_position": 1, "finish_position_raw": "", "waku": 3},
+        {"horse_number": 16, "finish_position": 2, "finish_position_raw": ""},  # no waku
+    ]
+    result = build_result(finishers, [{"pool": "quinella", "combo_raw": "5-16", "payout_yen": 620}])
+    assert result["gates"] == [{"umaban": 5, "waku": 3}]
