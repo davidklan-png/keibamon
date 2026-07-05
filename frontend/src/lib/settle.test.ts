@@ -10,9 +10,12 @@ import { winProbs, wideTicketStats, type Runner } from "./fairvalue";
 import type { Ticket } from "./types";
 import type { BetType } from "./fairvalue";
 
-// ADR-0007 Phase 2 — table-driven settle tests for all five bet types the
-// recommender emits. Each case has a fresh race result (the actual finishing
-// order on the day) and asserts the resolver's won/miss + returned value.
+// ADR-0007 Phase 2 — table-driven settle tests for the resolver's
+// bet types. Originally five (quinella/wide/exacta/trio/trifecta);
+// bracket_quinella joined when the resolver gained `gates` (per-line
+// umaban→waku lookup) support. Each case has a fresh race result (the
+// actual finishing order on the day) and asserts the resolver's
+// won/miss + returned value.
 
 function ticket(type: BetType, combos: string[][], unit = 100, avgPayout = 5000): Ticket {
   return {
@@ -603,6 +606,89 @@ describe("settle.resolveTicket — scratch → refund (all 5 bet types)", () => 
     const t = ticket("quinella", [["5", "16"], ["5", "7"]], 100);
     const out = resolveTicket(t, 100, scratchResult);
     expect(out).toEqual({ state: "refunded", reason: "scratched" });
+  });
+});
+
+// ===========================================================================
+// bracket_quinella (枠連, "gate" in the app's UI) — bracket-space combo.
+//
+// Mirror of the bracket_quinella describe blocks in
+// workers/social/test/settle.test.ts. Per the file header, fixtures MUST
+// stay in sync between the two test files — the resolver lives in
+// workers/social/src/settle.ts; this file exercises it via the frontend
+// shim. See the worker test for the why behind `gates` (multiset, not a
+// Set) and the no-gates-stays-open gate.
+// ===========================================================================
+
+const GATES_TOP3_5_16_1 = [
+  { umaban: 5, waku: 3 },
+  { umaban: 16, waku: 8 },
+  { umaban: 1, waku: 1 },
+  { umaban: 7, waku: 4 },
+  { umaban: 3, waku: 2 },
+];
+const RESULT_WITH_GATES: RaceResult = {
+  finishers: ORDER_TOP3_5_16_1,
+  gates: GATES_TOP3_5_16_1,
+  payouts: [{ pool: "bracket_quinella", combo: "3-8", yen: 1190 }],
+};
+
+describe("settle.lineHits — bracket_quinella", () => {
+  const gates = new Map(GATES_TOP3_5_16_1.map((g) => [g.umaban, g.waku]));
+
+  it("matches the top-2's brackets, unordered", () => {
+    expect(lineHits("bracket_quinella", ["3", "8"], ORDER_TOP3_5_16_1, gates)).toBe(true);
+    expect(lineHits("bracket_quinella", ["8", "3"], ORDER_TOP3_5_16_1, gates)).toBe(true);
+  });
+
+  it("misses a bracket combo not matching the top-2", () => {
+    expect(lineHits("bracket_quinella", ["3", "1"], ORDER_TOP3_5_16_1, gates)).toBe(false);
+  });
+
+  it("returns false without a gates map (can't resolve bracket space)", () => {
+    expect(lineHits("bracket_quinella", ["3", "8"], ORDER_TOP3_5_16_1)).toBe(false);
+  });
+
+  it("multiset match: two horses sharing a bracket, combo names it twice", () => {
+    const sharedGates = new Map([
+      [5, 3],
+      [16, 3],
+      [1, 1],
+    ]);
+    expect(lineHits("bracket_quinella", ["3", "3"], ORDER_TOP3_5_16_1, sharedGates)).toBe(true);
+    expect(lineHits("bracket_quinella", ["3", "8"], ORDER_TOP3_5_16_1, sharedGates)).toBe(false);
+  });
+});
+
+describe("settle.resolveTicket — bracket_quinella", () => {
+  it("WON — bracket combo matches top-2's brackets", () => {
+    const t = ticket("bracket_quinella", [["3", "8"]], 100);
+    const out = resolveTicket(t, 100, RESULT_WITH_GATES);
+    expect(out.state).toBe("won");
+    expect((out as { returned: number }).returned).toBe(1190);
+    expect((out as { source: string }).source).toBe("result");
+  });
+
+  it("MISS — bracket combo doesn't match", () => {
+    const t = ticket("bracket_quinella", [["1", "2"]], 100);
+    const out = resolveTicket(t, 100, RESULT_WITH_GATES);
+    expect(out.state).toBe("miss");
+  });
+
+  it("stays OPEN when the result has placings but no gates block", () => {
+    const t = ticket("bracket_quinella", [["3", "8"]], 100);
+    const out = resolveTicket(t, 100, RESULT_ORDER_ONLY);
+    expect(out).toEqual({ state: "open", reason: "no_finishers_yet" });
+  });
+
+  it("is NOT affected by the generic scratch-refund check (different number space)", () => {
+    const resultWithUnrelatedScratch: RaceResult = {
+      ...RESULT_WITH_GATES,
+      scratched: [8],
+    };
+    const t = ticket("bracket_quinella", [["3", "8"]], 100);
+    const out = resolveTicket(t, 100, resultWithUnrelatedScratch);
+    expect(out.state).toBe("won");
   });
 });
 

@@ -38,9 +38,20 @@ export const RET: Record<BetType, number> = {
   exacta: 0.75,
   trio: 0.75,
   trifecta: 0.725,
+  // 枠連 (bracket quinella) — JRA's takeout matches quinella's, and the
+  // existing display-only `bracketQuinellaAgg` in recommender.ts already
+  // uses `RET.quinella` for the same purpose. The two-horse-per-line
+  // structure is identical to quinella, just collapsed into bracket space.
+  bracket_quinella: 0.775,
 };
 
-export type BetType = "quinella" | "wide" | "exacta" | "trio" | "trifecta";
+export type BetType =
+  | "quinella"
+  | "wide"
+  | "exacta"
+  | "trio"
+  | "trifecta"
+  | "bracket_quinella";
 
 export interface Runner {
   /** Saddle number as a string key (kept stable across re-renders). */
