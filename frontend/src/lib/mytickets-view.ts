@@ -14,7 +14,7 @@ import type { BetType, Runner } from "./fairvalue";
 import type { LiveSnapshot, LiveRace } from "../api";
 import { storageKeyFor } from "../auth/storageKey";
 
-export type MtView = "feed" | "new" | "detail" | "profile";
+export type MtView = "feed" | "new" | "detail" | "profile" | "manual";
 export type DriftDir = "firm" | "drift" | "steady";
 
 export const MT_MOOD_COLOR: Record<MoodKey, string> = {

@@ -2105,6 +2105,198 @@ select:focus {
   box-shadow: 0 10px 22px rgba(14, 122, 71, 0.32);
 }
 
+/* ---- Manual-ticket-builder entry button + cards ----
+ * The 4th "Build manually" option sits below the 3 vibe picks on the New Bet
+ * screen. Same card-on-tappable-list visual language as .mt-option, but a
+ * single-button affordance rather than a selectable vibe.
+ */
+.mt-manual-entry {
+  display: block;
+  width: 100%;
+  margin-top: 14px;
+  padding: 13px 15px;
+  border-radius: 16px;
+  border: 2px dashed var(--line);
+  background: #fff;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  box-shadow: 0 2px 6px rgba(20, 40, 28, 0.04);
+}
+.mt-manual-entry-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.mt-manual-entry-title {
+  font-weight: 800;
+  font-size: 14px;
+  letter-spacing: -0.01em;
+}
+.mt-manual-entry-arrow {
+  font-size: 18px;
+  color: var(--muted);
+}
+.mt-manual-entry-desc {
+  display: block;
+  font-size: 12px;
+  color: var(--ink-2);
+  margin-top: 4px;
+  font-weight: 600;
+}
+
+/* Edit pencil on OPEN ticket cards (manual edit-in-place entry point).
+ * Defends against click-bubbling: the card itself is a button (openDetail),
+ * so this is positioned absolutely with a hit-target that stops propagation. */
+.mt-card-edit {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mt-card-edit:hover {
+  background: var(--turf);
+  color: #fff;
+  border-color: var(--turf);
+}
+
+/* ---- ManualTicketBuilder ----
+ * Layout mirrors the New Bet flow's section rhythm (label → control block).
+ * The bet-type chip row and the selection grid reuse existing tokens; the
+ * grid itself uses .mt-manual-cell which is button-styled (vs the read-only
+ * .fillguide-cell) so taps feel like buttons, not labels.
+ */
+.mt-manual { padding-bottom: 90px; }
+.mt-manual-section { margin-bottom: 18px; }
+.mt-manual-types {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+.mt-manual-type {
+  padding: 11px 8px;
+  border-radius: 12px;
+  border: 2px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+  letter-spacing: -0.01em;
+}
+.mt-manual-type.on {
+  border-color: var(--turf);
+  background: var(--turf);
+  color: #fff;
+}
+.mt-manual-type:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.mt-manual-pickcount {
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.mt-manual-note {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.mt-manual-grid {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 6px;
+}
+.mt-manual-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 2px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 14px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  padding: 0;
+}
+.mt-manual-cell.on {
+  border-color: var(--turf);
+  background: var(--turf);
+  color: #fff;
+}
+/* 枠 (bracket) coloring — reuse JRA's standard convention. The .on state
+ * keeps the per-bracket background so a same-bracket pair is visually
+ * coherent with FillGuide's bracket row. */
+.mt-manual-cell.bracket-1 { border-color: var(--ink); }
+.mt-manual-cell.bracket-1.on { background: #fff; color: var(--ink); border-color: var(--ink); }
+.mt-manual-cell.bracket-2.on { background: #000; color: #fff; border-color: #000; }
+.mt-manual-cell.bracket-3.on { background: var(--turf); color: #fff; border-color: var(--turf-deep); }
+.mt-manual-cell.bracket-4.on { background: var(--sky); color: #fff; border-color: var(--sky); }
+.mt-manual-cell.bracket-5.on { background: var(--gold); color: var(--gold-ink); border-color: var(--gold-deep); }
+.mt-manual-cell.bracket-6.on { background: var(--turf-deep); color: #fff; border-color: var(--turf-deep); }
+.mt-manual-cell.bracket-7.on { background: var(--gold-amber); color: var(--gold-ink); border-color: var(--gold-deep); }
+.mt-manual-cell.bracket-8.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+
+.mt-manual-preview {
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 14px;
+}
+.mt-manual-preview-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 9px;
+}
+.mt-manual-preview-type { font-weight: 800; font-size: 13px; }
+.mt-manual-preview-lines { font-size: 11px; color: var(--muted); font-weight: 700; }
+.mt-manual-preview-chips { margin-bottom: 11px; }
+.mt-chip-more { background: var(--line); color: var(--ink-2); }
+.mt-manual-figures {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+.mt-manual-figures .mt-metric-label { font-size: 10px; }
+.mt-manual-figures .mt-metric-cost,
+.mt-manual-figures .mt-metric-pay { font-size: 14px; font-weight: 800; }
+
+.mt-manual-actions {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+.mt-manual-secondary {
+  flex: 1;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 700;
+  font-size: 13px;
+  cursor: pointer;
+}
+
 /* ---- Detail / shareable card ---- */
 .mt-detail { padding-bottom: 120px; }
 .mt-ticket {

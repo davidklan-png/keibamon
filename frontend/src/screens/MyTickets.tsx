@@ -71,6 +71,7 @@ import {
   type DriftDir,
 } from "../lib/mytickets-view";
 import { Footer } from "../components/Footer";
+import { ManualTicketBuilder, type ManualTicketInitial } from "./ManualTicketBuilder";
 
 // ============================================================================
 // ADR-0007 — "My Tickets" surface (Phase 0)
@@ -179,6 +180,10 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
   );
   const [selIdx, setSelIdx] = useState(1);
   const [unit, setUnit] = useState(200);
+  // Manual-ticket-builder: when non-null, the builder opens in edit-in-place
+  // mode prefilled from this ticket (same id on Register → upsert). Null on
+  // the create-from-scratch path.
+  const [manualEditId, setManualEditId] = useState<string | null>(null);
   const [burstId, setBurstId] = useState<string | null>(null);
   const [settleId, setSettleId] = useState<string | null>(null);
   const [toast, setToast] = useState<string>("");
@@ -905,6 +910,22 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             >
               {t(`mood.${tk.mood}`)}
             </span>
+            {open && (
+              <button
+                type="button"
+                className="mt-card-edit"
+                aria-label={t("manual.editAria")}
+                onClick={(e) => {
+                  // Stop propagation so the card's openDetail(id) doesn't fire
+                  // and double-route (card→detail + edit→manual at once).
+                  e.stopPropagation();
+                  setManualEditId(tk.id);
+                  setView("manual");
+                }}
+              >
+                ✎
+              </button>
+            )}
           </div>
 
           <div className="mt-betline">
@@ -1260,6 +1281,24 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                   </button>
                 ))}
               </div>
+
+              {/* 4th "Build manually" option — sibling to the 3 vibe picks.
+                  Routes to the manual builder (create-from-scratch path)
+                  without disturbing the 3 personality moods above. */}
+              <button
+                type="button"
+                className="mt-manual-entry"
+                onClick={() => {
+                  setManualEditId(null);
+                  setView("manual");
+                }}
+              >
+                <span className="mt-manual-entry-head">
+                  <span className="mt-manual-entry-title">{t("manual.entryTitle")}</span>
+                  <span className="mt-manual-entry-arrow">›</span>
+                </span>
+                <span className="mt-manual-entry-desc">{t("manual.entryDesc")}</span>
+              </button>
             </>
           ) : (
             <p className="empty">{t("race.noLive")}</p>
@@ -1467,6 +1506,125 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         </div>
       </div>
     );
+  }
+
+  // ====================== MANUAL BUILDER ======================
+  function renderManual() {
+    // Edit-in-place: when manualEditId is set, prefill the builder from that
+    // existing OPEN ticket and reuse its id on Register (POST upserts on
+    // conflict when state='open' → Step 1's edit-in-place path). When null,
+    // the builder is the create-from-scratch flow with a fresh id.
+    const editTk = manualEditId
+      ? tickets.find((x) => x.id === manualEditId) ?? null
+      : null;
+    const initial: ManualTicketInitial | undefined = editTk
+      ? {
+          id: editTk.id,
+          type: editTk.ticket.type,
+          lines: editTk.ticket.lines.map((l) => l.combo),
+          unit: editTk.unit,
+        }
+      : undefined;
+    return (
+      <>
+        <div className="mt-back-head">
+          <button className="mt-back" onClick={() => setView("new")}>
+            ‹
+          </button>
+          <div className="mt-back-title">
+            {editTk ? t("manual.editTitle") : t("manual.title")}
+          </div>
+        </div>
+        {feature ? (
+          <ManualTicketBuilder
+            runners={featRunners}
+            unit={unit}
+            onUnitChange={setUnit}
+            initial={initial}
+            onRegister={(built) => commitManual(built.ticket, built.id)}
+            onCancel={() => setView("new")}
+          />
+        ) : (
+          <p className="empty">{t("race.noLive")}</p>
+        )}
+      </>
+    );
+  }
+
+  /**
+   * Commit a manually-built ticket. Same persistence shape as `commit()` for
+   * recommender tickets, but handles BOTH branches:
+   *   - create: fresh id/serial, prepend to log, optimistic update + POST.
+   *   - edit:   reuse the existing id (manualEditId), overwrite in place via
+   *             the upsert (Step 1's backend guard ensures a settled ticket
+   *             is NOT overwritten — UI defenses on top: edit icon only shows
+   *             on OPEN cards; if the ticket settles between open+register,
+   *             the 409 is caught below).
+   */
+  function commitManual(ticket: Ticket, existingId?: string) {
+    if (!feature) return;
+    const id = existingId ?? "kb-" + Date.now().toString(36);
+    const serial =
+      existingId && tickets.find((x) => x.id === existingId)
+        ? tickets.find((x) => x.id === existingId)!.serial
+        : "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
+    const existingRow = existingId
+      ? tickets.find((x) => x.id === existingId)
+      : null;
+    const tk: CommittedTicket = {
+      id,
+      serial,
+      ticket,
+      unit,
+      mood: moodKey(ticket),
+      state: "open",
+      payoutBase: ticket.avgPayout,
+      race: existingRow?.race ?? snapshotRace(feature, fallbackDate),
+      owner: "you",
+      claps: existingRow?.claps ?? 0,
+      createdAt: existingRow?.createdAt ?? Date.now(),
+    };
+    const next = existingRow
+      ? tickets.map((x) => (x.id === id ? tk : x))
+      : [tk, ...tickets];
+    setTickets(next);
+    mirrorToCache(next);
+    setManualEditId(null);
+    setDetailId(id);
+    setView("detail");
+    if (userId) {
+      void (async () => {
+        const token = await getToken();
+        if (!token) {
+          // Edit-in-place on the offline queue is rare; for create the queue
+          // is the standard fallback.
+          if (!existingRow) pushPending(userId, tk);
+          return;
+        }
+        const r = await postTicket(token, tk);
+        if (!r.ok) {
+          // 409 = settled between open+register. The backend's edit guard
+          // refused; restore the pre-edit row from `tickets` so the UI
+          // reflects the actual server state.
+          const settled409 =
+            r.err.kind === "http" && r.err.status === 409;
+          if (settled409 && existingRow) {
+            setTickets((prev) =>
+              prev.map((x) => (x.id === existingRow.id ? existingRow : x)),
+            );
+            mirrorToCache(tickets);
+            flash(t("manual.editConflict"));
+          } else if (!existingRow) {
+            pushPending(userId, tk);
+            flash(t("mine.offlineQueued"));
+          }
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[commitManual] POST failed:", r.err);
+          }
+        }
+      })();
+    }
   }
 
   // ====================== DETAIL ======================
@@ -1802,6 +1960,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     <div className="mt">
       {view === "feed" && renderFeed()}
       {view === "new" && renderNew()}
+      {view === "manual" && renderManual()}
       {view === "detail" && renderDetail()}
       {view === "profile" && renderProfile()}
       {renderHandlePrompt()}
