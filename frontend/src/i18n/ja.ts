@@ -188,6 +188,8 @@ export const ja = {
     spicierDesc: "波乱。当たれば大きい。",
     liveOdds: "ライブオッズ",
     oddsRefresh: "ライブ更新中",
+    finishOrder: "着順",
+    finishOrderUnavailable: "この馬券の結果詳細は表示できません。",
     watchResult: "結果を見る",
     settledToast: "的中しました！🎉",
     tapShare: "保存してシェア",

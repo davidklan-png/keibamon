@@ -196,6 +196,8 @@ export const en = {
     spicierDesc: "Chaos — huge if it lands.",
     liveOdds: "Live odds",
     oddsRefresh: "updating live",
+    finishOrder: "Finishing order",
+    finishOrderUnavailable: "Result breakdown not available for this ticket.",
     watchResult: "Watch the result",
     settledToast: "You hit it! 🎉",
     tapShare: "Save & share",

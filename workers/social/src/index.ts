@@ -71,6 +71,8 @@ interface TicketRow {
   payout_base: number;
   returned: number | null;
   created_at: number;
+  /** JSON `{pos, umabans}[]` (top-N finish, dead-heat aware); NULL until settled. */
+  placings: string | null;
 }
 
 /** A ticket row joined with its owner + cheer aggregate, for feed/profile. */
@@ -286,6 +288,21 @@ interface CommittedTicketBody {
 interface PatchBody {
   state?: unknown;
   returned?: unknown;
+  /** `{pos, umabans}[]`, top-N finish (see topPlacings in settle.ts). */
+  placings?: unknown;
+}
+
+/** Loose runtime check — good enough to reject garbage without importing a schema lib. */
+function isValidPlacings(v: unknown): v is { pos: number; umabans: number[] }[] {
+  if (!Array.isArray(v)) return false;
+  return v.every(
+    (p) =>
+      p &&
+      typeof p === "object" &&
+      typeof (p as { pos?: unknown }).pos === "number" &&
+      Array.isArray((p as { umabans?: unknown }).umabans) &&
+      (p as { umabans: unknown[] }).umabans.every((u) => typeof u === "number"),
+  );
 }
 
 interface ParsedTicketBody {
@@ -386,6 +403,19 @@ function decodeTicket(
   }
   body.state = row.state;
   body.returned = row.returned;
+  // R5: overlay the settled result breakdown, same pattern as state/returned
+  // (the flat column is authoritative; the payload snapshot is commit-time
+  // and never carries this). NULL until a settle path writes it, or on
+  // tickets settled before this column existed.
+  if (row.placings) {
+    try {
+      body.placings = JSON.parse(row.placings);
+    } catch {
+      body.placings = undefined;
+    }
+  } else {
+    delete body.placings;
+  }
   // Phase 3: claps are now server COUNT(*) from cheers. Strip the legacy
   // Phase 2 payload field so the client never renders a stale value.
   delete body.claps;
@@ -404,7 +434,7 @@ function decodeTicket(
 async function listTickets(db: D1Database, userId: string): Promise<Record<string, unknown>[]> {
   const { results } = await db
     .prepare(
-      `SELECT id, user_id, serial, race_key, payload, state, payout_base, returned, created_at
+      `SELECT id, user_id, serial, race_key, payload, state, payout_base, returned, created_at, placings
          FROM tickets
         WHERE user_id = ?
         ORDER BY created_at DESC`,
@@ -422,7 +452,7 @@ async function listTickets(db: D1Database, userId: string): Promise<Record<strin
 async function findTicket(db: D1Database, id: string): Promise<TicketRow | null> {
   return db
     .prepare(
-      `SELECT id, user_id, serial, race_key, payload, state, payout_base, returned, created_at
+      `SELECT id, user_id, serial, race_key, payload, state, payout_base, returned, created_at, placings
          FROM tickets
         WHERE id = ?`,
     )
@@ -467,6 +497,13 @@ async function patchTicket(
   } else if (patch.returned === null) {
     newReturned = null;
   }
+  // R5: result breakdown, written by the client's auto-settle path. Garbage
+  // (wrong shape) is silently ignored rather than rejecting the whole PATCH —
+  // state/returned are the load-bearing fields; placings is a display extra.
+  let newPlacings = row.placings;
+  if (isValidPlacings(patch.placings)) {
+    newPlacings = JSON.stringify(patch.placings);
+  }
 
   // Phase 3: strip any cached claps on write too, so the next read stays clean.
   delete body.claps;
@@ -475,10 +512,10 @@ async function patchTicket(
   await db
     .prepare(
       `UPDATE tickets
-          SET state = ?, returned = ?, payload = ?
+          SET state = ?, returned = ?, payload = ?, placings = ?
         WHERE id = ? AND user_id = ?`,
     )
-    .bind(newState, newReturned, newPayload, id, userId)
+    .bind(newState, newReturned, newPayload, newPlacings, id, userId)
     .run();
 
   const decoded = decodeTicket({
@@ -486,6 +523,7 @@ async function patchTicket(
     state: newState,
     returned: newReturned,
     payload: newPayload,
+    placings: newPlacings,
   });
   return { status: 200, row: decoded ?? body };
 }
@@ -806,7 +844,7 @@ async function buildFeed(
   const { results } = await db
     .prepare(
       `SELECT t.id, t.user_id, t.serial, t.race_key, t.payload, t.state,
-              t.payout_base, t.returned, t.created_at,
+              t.payout_base, t.returned, t.created_at, t.placings,
               u.handle AS owner_handle,
               u.display_name AS owner_display_name,
               u.avatar AS owner_avatar,
@@ -848,7 +886,7 @@ async function buildProfile(
     db
       .prepare(
         `SELECT t.id, t.user_id, t.serial, t.race_key, t.payload, t.state,
-                t.payout_base, t.returned, t.created_at,
+                t.payout_base, t.returned, t.created_at, t.placings,
                 u.handle AS owner_handle,
                 u.display_name AS owner_display_name,
                 u.avatar AS owner_avatar,

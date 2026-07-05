@@ -351,7 +351,11 @@ export async function postTicket(
 export async function patchTicket(
   token: string | null,
   id: string,
-  patch: { state?: "won" | "miss" | "open" | "refunded"; returned?: number | null },
+  patch: {
+    state?: "won" | "miss" | "open" | "refunded";
+    returned?: number | null;
+    placings?: { pos: number; umabans: number[] }[];
+  },
 ): Promise<
   | { ok: true; ticket: CommittedTicket }
   | { ok: false; err: SocialError }

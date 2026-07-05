@@ -51,6 +51,7 @@ interface SweepTicketRow {
   returned: number | null;
   settle_result_hash: string | null;
   created_at: number;
+  placings?: string | null;
 }
 
 /** Build a fake D1 that handles exactly the two sweep statements. */
@@ -93,14 +94,15 @@ function makeFakeD1(initial: SweepTicketRow[]) {
       async run(): Promise<{ meta: { changes: number } }> {
         const s = sql.trim();
         const m =
-          /UPDATE tickets\s+SET state = \?, returned = \?, settle_result_hash = \?\s+WHERE id = \?/i.exec(
+          /UPDATE tickets\s+SET state = \?, returned = \?, settle_result_hash = \?, placings = \?\s+WHERE id = \?/i.exec(
             s,
           );
         if (m) {
-          const [newState, newReturned, newHash, id] = entry.bindings as [
+          const [newState, newReturned, newHash, newPlacings, id] = entry.bindings as [
             string,
             number | null,
             string,
+            string | null,
             string,
           ];
           const row = store.get(id);
@@ -108,6 +110,7 @@ function makeFakeD1(initial: SweepTicketRow[]) {
             row.state = newState;
             row.returned = newReturned;
             row.settle_result_hash = newHash;
+            row.placings = newPlacings;
             return { meta: { changes: 1 } };
           }
           return { meta: { changes: 0 } };

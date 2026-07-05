@@ -259,6 +259,14 @@ export interface CommittedTicket {
   state: CommittedState;
   payoutBase: number; // "if it hits" estimate at commit
   returned?: number; // settled payout (won)
+  /**
+   * R5: the top finishing positions (dead-heat aware) captured at settle
+   * time, independent of `race.runners`' commit-time odds. Undefined until
+   * settled, and on tickets settled before this field existed — the race
+   * that produced a result can age out of /api/live before someone opens an
+   * old ticket, so this is the ONLY place the finish order survives.
+   */
+  placings?: { pos: number; umabans: number[] }[];
   race: RaceSnapshot;
   owner: "you" | TicketOwner;
   claps: number;

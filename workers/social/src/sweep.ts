@@ -26,7 +26,20 @@
 // no-ops (so a misconfigured deploy degrades gracefully rather than
 // stranding the cron).
 
-import { resolveTicket, type BetType, type RaceResult, type ResolveTicket } from "./settle";
+import {
+  resolveTicket,
+  topPlacings,
+  hashResult,
+  type BetType,
+  type RaceResult,
+  type ResolveTicket,
+} from "./settle";
+
+// hashResult moved to settle.ts (R5) so it's importable from a plain Node
+// script without pulling in this module's D1Database / Cloudflare `fetch`
+// types — see workers/social/scripts/backfill-stuck-tickets.ts. Re-exported
+// here so existing imports (`from "./sweep"`, sweep.test.ts) don't need to change.
+export { hashResult };
 
 /** Cap per sweep — one race day's worth of tickets is well under this. */
 const SWEEP_CAP = 200;
@@ -82,44 +95,6 @@ function raceKeyOf(
   return `${date}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
 }
 
-/**
- * Stable serialization of the resolver-relevant fields of a result block.
- * Two semantically-equivalent result blocks (same placings/scratches/payouts,
- * possibly different array orders or row order) serialize identically so the
- * hash doesn't flap on benign producer re-emits.
- *
- * placings  — sorted by pos; umabans sorted ascending within each pos.
- * scratched — sorted ascending.
- * payouts   — sorted by (pool, combo); yen as-is.
- */
-function stableResultJson(result: RaceResult): string {
-  const placings = [...(result.placings ?? [])]
-    .sort((a, b) => a.pos - b.pos)
-    .map((p) => ({ pos: p.pos, umabans: [...p.umabans].sort((a, b) => a - b) }));
-  const scratched = [...(result.scratched ?? [])].sort((a, b) => a - b);
-  const payouts = [...(result.payouts ?? [])]
-    .map((p) => ({ pool: p.pool, combo: p.combo, yen: p.yen }))
-    .sort((a, b) =>
-      a.pool === b.pool ? a.combo.localeCompare(b.combo) : a.pool.localeCompare(b.pool),
-    );
-  return JSON.stringify({ placings, scratched, payouts });
-}
-
-/** SHA-256 hex digest via Web Crypto (available in Workers + Node 20+). */
-async function sha256Hex(s: string): Promise<string> {
-  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
-  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-/**
- * Identity of the result block a ticket was settled against. Stored on the
- * ticket row; the sweep compares it to the current result's hash and
- * re-settles when they differ.
- */
-export async function hashResult(result: RaceResult): Promise<string> {
-  return sha256Hex(stableResultJson(result));
-}
-
 /** Short hash prefix for log lines (full hash is in D1 for audit). */
 function shortHash(h: string | null | undefined): string {
   return h ? h.slice(0, 8) : "(none)";
@@ -157,14 +132,15 @@ async function applySweepSettlement(
   state: "won" | "miss" | "refunded",
   returned: number | null,
   resultHash: string,
+  placings: string | null,
 ): Promise<boolean> {
   const { meta } = await db
     .prepare(
       `UPDATE tickets
-          SET state = ?, returned = ?, settle_result_hash = ?
+          SET state = ?, returned = ?, settle_result_hash = ?, placings = ?
         WHERE id = ?`,
     )
-    .bind(state, returned, resultHash, id)
+    .bind(state, returned, resultHash, placings, id)
     .run();
   const changes = (meta as { changes?: number } | null)?.changes ?? 0;
   return changes > 0;
@@ -286,11 +262,16 @@ export async function settleSweep(
 
     const newState = outcome.state as "won" | "miss" | "refunded";
     const newReturned = outcome.state === "won" ? outcome.returned : null;
+    // R5: capture the finish order alongside the settlement so the ticket
+    // detail view can show it later even after this race ages out of
+    // /api/live's rolling window (the only other place it'd come from).
+    const placings = topPlacings(result);
+    const newPlacings = placings ? JSON.stringify(placings) : null;
 
     if (row.state === "open") {
       // First settlement (the original Phase 4 path).
       const didUpdate = await applySweepSettlement(
-        env.DB, row.id, newState, newReturned, currentHash,
+        env.DB, row.id, newState, newReturned, currentHash, newPlacings,
       );
       if (didUpdate) {
         settled++;
@@ -305,7 +286,7 @@ export async function settleSweep(
       // correction. Either way, re-resolve against the CURRENT result and
       // update state/returned/hash in one row.
       const didUpdate = await applySweepSettlement(
-        env.DB, row.id, newState, newReturned, currentHash,
+        env.DB, row.id, newState, newReturned, currentHash, newPlacings,
       );
       if (didUpdate) {
         reSettled++;

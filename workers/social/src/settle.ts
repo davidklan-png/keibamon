@@ -257,6 +257,70 @@ function payoutYen(
 }
 
 /**
+ * Top N finishing positions, dead-heat aware, for DISPLAY only (not used by
+ * the resolver itself, which reasons over `expandPlacings`' enumerated
+ * orderings). Returns null when the result carries no placing data yet.
+ *
+ * Callers persist this alongside a settled ticket so the UI can show what
+ * actually happened in a race (1st/2nd/3rd, with ties) without having to
+ * re-fetch a result block that may no longer be reachable — `/api/live` only
+ * carries a rolling window of recent race days, so a result available at
+ * settle time can be gone by the time someone opens the ticket later.
+ */
+export function topPlacings(
+  result: RaceResult | null | undefined,
+  n = 3,
+): { pos: number; umabans: number[] }[] | null {
+  if (isEmptyResult(result)) return null;
+  const placings = placingsFromResult(result!);
+  if (!placings || placings.length === 0) return null;
+  return placings.slice(0, n);
+}
+
+/**
+ * Stable serialization of the resolver-relevant fields of a result block.
+ * Two semantically-equivalent result blocks (same placings/scratches/payouts,
+ * possibly different array orders or row order) serialize identically so the
+ * hash doesn't flap on benign producer re-emits.
+ *
+ * placings  — sorted by pos; umabans sorted ascending within each pos.
+ * scratched — sorted ascending.
+ * payouts   — sorted by (pool, combo); yen as-is.
+ *
+ * Lives here (not sweep.ts) so it's importable from a plain Node script —
+ * this module is pure (no I/O, no Cloudflare deps), unlike sweep.ts which
+ * needs D1Database + Workers' `fetch` extensions. See
+ * workers/social/scripts/backfill-stuck-tickets.ts.
+ */
+function stableResultJson(result: RaceResult): string {
+  const placings = [...(result.placings ?? [])]
+    .sort((a, b) => a.pos - b.pos)
+    .map((p) => ({ pos: p.pos, umabans: [...p.umabans].sort((a, b) => a - b) }));
+  const scratched = [...(result.scratched ?? [])].sort((a, b) => a - b);
+  const payouts = [...(result.payouts ?? [])]
+    .map((p) => ({ pool: p.pool, combo: p.combo, yen: p.yen }))
+    .sort((a, b) =>
+      a.pool === b.pool ? a.combo.localeCompare(b.combo) : a.pool.localeCompare(b.pool),
+    );
+  return JSON.stringify({ placings, scratched, payouts });
+}
+
+/** SHA-256 hex digest via Web Crypto (available in Workers + Node 20+). */
+async function sha256Hex(s: string): Promise<string> {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(s));
+  return [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Identity of the result block a ticket was settled against. Stored on the
+ * ticket row; the sweep compares it to the current result's hash and
+ * re-settles when they differ.
+ */
+export async function hashResult(result: RaceResult): Promise<string> {
+  return sha256Hex(stableResultJson(result));
+}
+
+/**
  * Resolve a committed ticket to won/miss/open/refunded against a result payload.
  *
  *   - No placings in the result yet → `{state:'open', reason:...}`.

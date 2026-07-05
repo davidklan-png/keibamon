@@ -2311,6 +2311,28 @@ select:focus {
 }
 .mt-result-value { font-weight: 900; font-size: 22px; letter-spacing: -0.01em; }
 
+.mt-finish {
+  margin-top: 14px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+}
+.mt-finish-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 4px 0;
+  font-size: 12px;
+}
+.mt-finish-pos {
+  flex: none;
+  width: 32px;
+  font-weight: 800;
+  color: var(--soft);
+}
+.mt-finish-names { color: var(--ink); font-weight: 600; }
+
 /* Detail card footer */
 .mt-card-foot {
   display: flex;

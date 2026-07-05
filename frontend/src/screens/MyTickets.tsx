@@ -50,7 +50,7 @@ import {
   pushPending,
   clearPending,
 } from "../auth/ticketQueue";
-import { resolveTicket, type RaceResult } from "../lib/settle";
+import { resolveTicket, topPlacings, type RaceResult } from "../lib/settle";
 import { storageKeyFor } from "../auth/storageKey";
 import { exportTicketCard, type ShareOutcome } from "../lib/share";
 import { yen } from "../lib/format";
@@ -454,10 +454,15 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         if (outcome.state === "open") continue; // result block not populated yet
         const idx = next.findIndex((x) => x.id === tk.id);
         if (idx < 0) continue;
+        // R5: capture the finish order alongside the settlement. This is the
+        // only place it survives once the race ages out of /api/live's
+        // rolling window (see the sweep's server-side twin in sweep.ts).
+        const placings = topPlacings(result) ?? undefined;
         const settled = {
           ...tk,
           state: outcome.state as CommittedState,
           ...(outcome.state === "won" ? { returned: outcome.returned } : {}),
+          ...(placings ? { placings } : {}),
         };
         next[idx] = settled;
         mutated = true;
@@ -466,6 +471,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         void patchTicket(token, tk.id, {
           state: outcome.state,
           returned: outcome.state === "won" ? outcome.returned : 0,
+          ...(placings ? { placings } : {}),
         });
       }
       if (mutated && !cancelled) {
@@ -1088,8 +1094,17 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
           )}
 
           {(() => {
-            const openTk = tickets.filter((tk) => tk.state === "open");
-            const resolvedTk = tickets.filter((tk) => tk.state !== "open");
+            // Sort by race date (the leading YYYYMMDD token of raceKey — see
+            // mtRaceKey/raceKeyOf), not ticket creation order. Open tickets:
+            // soonest race first (what's coming up). Resolved: most recent
+            // result first (what just happened). Ties (same-day tickets)
+            // keep their relative creation order (Array#sort is stable).
+            const openTk = tickets
+              .filter((tk) => tk.state === "open")
+              .sort((a, b) => raceDateOf(a).localeCompare(raceDateOf(b)));
+            const resolvedTk = tickets
+              .filter((tk) => tk.state !== "open")
+              .sort((a, b) => raceDateOf(b).localeCompare(raceDateOf(a)));
             return (
               <>
                 {/* "Open" sub-label renders only when there's a real split —
@@ -1142,6 +1157,11 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
 
   function runnerRaceName(tk: CommittedTicket): string {
     return (ja ? tk.race.nameJa : tk.race.nameEn) || tk.race.nameEn || "";
+  }
+
+  /** The raceKey's leading YYYYMMDD token (see mtRaceKey/raceKeyOf) — sortable as a string. */
+  function raceDateOf(tk: CommittedTicket): string {
+    return tk.race.raceKey.split("|")[0] || "";
   }
 
   // ====================== NEW BET ======================
@@ -1664,6 +1684,39 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
                       {yen(payValue)}
                     </div>
                   </div>
+                </div>
+              )}
+
+              {/* R5: the actual finishing order, dead-heat aware, captured at
+                  settle time. Absent on tickets settled before this field
+                  existed (or a straggler that never settled automatically —
+                  see the "why didn't this settle" investigation) — the
+                  fallback line is honest about that rather than showing
+                  nothing with no explanation. */}
+              {!open && (
+                <div className="mt-finish">
+                  <div className="mt-board-title" style={{ marginBottom: 6 }}>
+                    {t("mine.finishOrder")}
+                  </div>
+                  {tk.placings && tk.placings.length > 0 ? (
+                    tk.placings.map((p) => (
+                      <div key={p.pos} className="mt-finish-row">
+                        <span className="mt-finish-pos">
+                          {t(`fillGuide.pos${p.pos}`) || `#${p.pos}`}
+                        </span>
+                        <span className="mt-finish-names">
+                          {p.umabans
+                            .map((u) => {
+                              const r = tk.race.runners.find((x) => x.num === u);
+                              return `#${u} ${r ? runnerName(r) : ""}`.trim();
+                            })
+                            .join(" / ")}
+                        </span>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="hint">{t("mine.finishOrderUnavailable")}</p>
+                  )}
                 </div>
               )}
 
