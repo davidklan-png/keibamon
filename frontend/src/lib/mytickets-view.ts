@@ -92,6 +92,11 @@ export function mtRunnersOf(race: LiveRace): Runner[] {
     uma: String(r.umaban),
     name: r.name ?? null,
     odds: (r.win_odds ?? r.win_odds_est ?? 0) as number,
+    // Pass through 枠 (bracket) so the manual-ticket-builder can price
+    // 枠連 (bracket_quinella) over the live field. null/absent when the
+    // entries scrape hasn't published the draw yet — the builder simply
+    // disables the 枠連 bet-type chip in that case.
+    gate: (r.gate ?? null) as number | null,
   }));
 }
 
