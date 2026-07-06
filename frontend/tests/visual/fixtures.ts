@@ -36,6 +36,13 @@ export const FIXTURE_SNAPSHOT: LiveSnapshot = {
       grade_label: "G1",
       post_time: "15:40",
       venue: "Tokyo",
+      // #14 — surface/distance_m so the RaceContextBar's surf-dist segment
+      // is exercised in visual baselines. Without these, every baseline shows
+      // the segment omitted and a formatter regression would pass CI. Going
+      // is still prop-only-optional on LiveRace (not on the type yet), so we
+      // don't set it here.
+      surface: "turf",
+      distance_m: 2000,
       status: "open",
       runners: RACE_RUNNERS,
     },

@@ -101,6 +101,13 @@ test.describe("visual regression", () => {
       await landOnLegacyRace(page, lang);
       await expect(page.locator(".race-selector, .race-card").first()).toBeVisible({ timeout: 10_000 });
       await page.waitForTimeout(300);
+      // #14 — durable text assertion on the RaceContextBar surface/distance
+      // segment so a formatter regression can't pass CI by pixel-matching a
+      // stale baseline. en: "turf 2000m" (latin space), ja: "芝2000m" (CJK
+      // joiner, no space — see RaceContextBar.hasWideChar). The fixture race
+      // now carries surface:"turf" + distance_m:2000.
+      const expectedSurfDist = lang === "en" ? "turf 2000m" : "芝2000m";
+      await expect(page.locator(".rcb-surf-dist")).toHaveText(expectedSurfDist);
       await expect(page).toHaveScreenshot(`legacy-race.${lang}.png`);
     });
 
