@@ -1,4 +1,4 @@
-// ADR-0007 Phase 4 + R3 — cron settle sweep.
+// ADR-0007 Phase 4 + R3 + #15 — cron settle sweep.
 //
 // The 45s client poll in App.tsx is the fast path: when a signed-in user
 // has an OPEN ticket and `/api/live` reports the race as `status === 'result'`,
@@ -16,9 +16,21 @@
 // authoritative — only official results attach, so re-settlement reconciles
 // partial→complete and any rare 確定 correction, never provisional flapping.
 //
+// **#15 — results archive for rotated-off races.** The snapshot pass alone
+// can't settle tickets whose race has aged out of /api/live's rolling window
+// (the publisher overwrites that single row when next weekend's card goes
+// up). The sweep now ARCHIVEs every snapshot result race into `race_results`
+// (hash-gated upsert — steady state is zero writes) before settling, then
+// runs a FALLBACK pass: OPEN tickets whose race_key isn't in the snapshot
+// but IS in race_results get settled against the archived result, with
+// identical resolver/hash bookkeeping. Already-settled tickets stay
+// snapshot-window-only — the "left alone unless open" rule. SWEEP_CAP bounds
+// the combined work across both passes.
+//
 // The sweep is idempotent (same result hash → no UPDATE), bounded
-// (SWEEP_CAP per run — one race day's worth), and never throws — a sweep
-// failure is recoverable on the next tick. It doesn't fetch its own origin:
+// (SWEEP_CAP per run across both passes — one race day's worth), and never
+// throws — a sweep failure is recoverable on the next tick. It doesn't fetch
+// its own origin:
 // it calls D1 directly + the resolver.
 //
 // LIVE_BASE: the racing Worker URL (no trailing slash). Set via
@@ -50,16 +62,18 @@ const SWEEP_CAP = 200;
  * Kept here (not imported from the frontend) so the worker package stays
  * self-contained.
  */
+interface SnapshotRace {
+  date?: string;
+  race_no: number;
+  name?: string | null;
+  venue?: string | null;
+  status?: string;
+  result?: RaceResult | null;
+}
+
 interface LiveSnapshot {
   meta?: { date?: string };
-  races?: Array<{
-    date?: string;
-    race_no: number;
-    name?: string | null;
-    venue?: string | null;
-    status?: string;
-    result?: RaceResult | null;
-  }>;
+  races?: SnapshotRace[];
 }
 
 /**
@@ -86,11 +100,18 @@ interface TicketRow {
   settle_result_hash: string | null;
 }
 
+/**
+ * #15 — Row shape the fallback pass SELECTs. Joins `tickets` to
+ * `race_results` so a single query carries both the ticket state and the
+ * archived result block + hash. Same TicketRow fields plus the archive cols.
+ */
+interface ArchiveTicketRow extends TicketRow {
+  result_json: string;
+  result_hash: string;
+}
+
 /** Build the same race_key the frontend's `mtRaceKey` / `keyFor` produce. */
-function raceKeyOf(
-  race: LiveSnapshot["races"] extends (infer T)[] | undefined ? T : never,
-  fallbackDate: string,
-): string {
+function raceKeyOf(race: SnapshotRace, fallbackDate: string): string {
   const date = (race.date ?? fallbackDate ?? "") as string;
   return `${date}|${race.venue ?? ""}|${race.race_no}|${race.name ?? ""}`;
 }
@@ -147,25 +168,160 @@ async function applySweepSettlement(
 }
 
 /**
+ * Resolve a single ticket against a result + apply the settlement UPDATE.
+ * Shared by the snapshot pass and the #15 fallback pass — identical math,
+ * identical hash bookkeeping. `source` only flows into the log line so an
+ * operator reading the Worker tail can tell which pass fired.
+ *
+ *   - row.state === 'open'        → first settlement, log "open -> outcome".
+ *   - row.state settled, hash ≠   → re-settlement (R3), log transition.
+ *   - row.state settled, hash =   → idempotent skip (no UPDATE).
+ *
+ * Returns which kind of settlement happened (if any).
+ */
+async function trySettle(
+  db: D1Database,
+  row: TicketRow,
+  result: RaceResult,
+  currentHash: string,
+  source: "snapshot" | "archive",
+): Promise<{ settled: boolean; reSettled: boolean }> {
+  let payload: TicketPayload;
+  try {
+    payload = JSON.parse(row.payload) as TicketPayload;
+  } catch {
+    return { settled: false, reSettled: false }; // malformed — leave for human triage
+  }
+  const ticket = payload.ticket;
+  if (!ticket || !ticket.type || !Array.isArray(ticket.lines)) {
+    return { settled: false, reSettled: false };
+  }
+  const unit = typeof payload.unit === "number" && payload.unit > 0 ? payload.unit : 100;
+  const resolveInput: ResolveTicket = {
+    type: ticket.type,
+    lines: ticket.lines,
+    avgPayout: typeof ticket.avgPayout === "number" ? ticket.avgPayout : 0,
+  };
+  const outcome = resolveTicket(resolveInput, unit, result);
+  if (outcome.state === "open") return { settled: false, reSettled: false };
+
+  const newState = outcome.state as "won" | "miss" | "refunded";
+  const newReturned = outcome.state === "won" ? outcome.returned : null;
+  const placings = topPlacings(result);
+  const newPlacings = placings ? JSON.stringify(placings) : null;
+  const sourceTag = `[${source}]`;
+
+  if (row.state === "open") {
+    const didUpdate = await applySweepSettlement(
+      db, row.id, newState, newReturned, currentHash, newPlacings,
+    );
+    if (didUpdate) {
+      console.log(
+        `settleSweep: settled ${row.id} open -> ${formatOutcome(newState, newReturned)} ` +
+        `${sourceTag} [hash ${shortHash(currentHash)}]`,
+      );
+      return { settled: true, reSettled: false };
+    }
+  } else if (row.settle_result_hash !== currentHash) {
+    const didUpdate = await applySweepSettlement(
+      db, row.id, newState, newReturned, currentHash, newPlacings,
+    );
+    if (didUpdate) {
+      const stateChanged = row.state !== newState;
+      const amountChanged = row.returned !== newReturned;
+      const kind = stateChanged ? "state" : amountChanged ? "amount" : "hash-only";
+      console.log(
+        `settleSweep: re-settled ${row.id} ` +
+        `${formatTransition(row.state, row.returned, newState, newReturned)} ` +
+        `(${kind}) ${sourceTag} [hash ${shortHash(row.settle_result_hash)} -> ${shortHash(currentHash)}]`,
+      );
+      return { settled: false, reSettled: true };
+    }
+  }
+  // else: settled against the same hash already — idempotent skip.
+  return { settled: false, reSettled: false };
+}
+
+/**
+ * #15 — Upsert every snapshot result race into the `race_results` archive.
+ * Hash-gated via ON CONFLICT ... WHERE result_hash differs, so steady state
+ * (re-sweeping the same result) is zero writes. Never throws — a write
+ * failure is recoverable on the next tick.
+ *
+ * Returns the number of rows actually written (changed).
+ */
+async function archiveResults(
+  db: D1Database,
+  raceByKey: Map<string, SnapshotRace>,
+  hashByKey: Map<string, string>,
+): Promise<number> {
+  let archived = 0;
+  const now = Date.now();
+  for (const [k, race] of raceByKey.entries()) {
+    if (race.status !== "result" || !race.result) continue;
+    const hash = hashByKey.get(k);
+    if (!hash) continue;
+    const resultJson = JSON.stringify(race.result);
+    try {
+      const { meta } = await db
+        .prepare(
+          `INSERT INTO race_results (race_key, result_json, result_hash, source, archived_at)
+           VALUES (?, ?, ?, 'sweep', ?)
+           ON CONFLICT(race_key) DO UPDATE
+             SET result_json = excluded.result_json,
+                 result_hash = excluded.result_hash,
+                 source = excluded.source,
+                 archived_at = excluded.archived_at
+           WHERE race_results.result_hash != excluded.result_hash`,
+        )
+        .bind(k, resultJson, hash, now)
+        .run();
+      const changes = (meta as { changes?: number } | null)?.changes ?? 0;
+      if (changes > 0) archived++;
+    } catch (e) {
+      console.warn(`archiveResults: failed to archive ${k}: ${(e as Error).message}`);
+    }
+  }
+  return archived;
+}
+
+/**
  * Fetch `/api/live`, walk tickets for finished races, and resolve each
  * against its race's result block. Idempotent (same result hash → no UPDATE);
- * bounded by SWEEP_CAP. Logs a summary line; never throws — a sweep failure
- * is recoverable on the next tick.
+ * bounded by SWEEP_CAP across both passes. Logs a summary line; never throws
+ * — a sweep failure is recoverable on the next tick.
  *
- * Two paths:
- *   - OPEN ticket + result-available  → initial settle, write hash.
- *   - Settled ticket + hash changed   → re-settle, log transition, update hash.
- *   - Settled ticket + hash unchanged → idempotent skip.
+ * Two passes, sharing one SWEEP_CAP budget:
+ *
+ *   1. SNAPSHOT pass — settle/re-settle tickets whose race is in the current
+ *      /api/live snapshot. OPEN tickets get their first settlement; already-
+ *      settled tickets get re-settled if their stored hash differs (R3).
+ *
+ *   2. FALLBACK pass (#15) — settle OPEN tickets whose race has rotated off
+ *      /api/live, joining against the `race_results` archive populated by
+ *      earlier sweeps (and by the recovery importer after capture outages).
+ *      Re-settlement of already-settled tickets stays snapshot-window-only
+ *      — the "left alone unless open" rule.
+ *
+ * Before either pass, every snapshot result race is upserted into
+ * `race_results` (hash-gated, zero writes at steady state) so a later sweep
+ * can settle it from the archive once /api/live moves on.
  *
  * Returns counts (for observability / tests).
  */
 export async function settleSweep(
   env: { DB: D1Database; LIVE_BASE?: string },
   fetchImpl: typeof fetch = fetch,
-): Promise<{ scanned: number; settled: number; reSettled: number; deferred: boolean }> {
+): Promise<{
+  scanned: number;
+  settled: number;
+  reSettled: number;
+  archived: number;
+  deferred: boolean;
+}> {
   if (!env.LIVE_BASE) {
     console.warn("settleSweep: LIVE_BASE not set; sweep is a no-op");
-    return { scanned: 0, settled: 0, reSettled: 0, deferred: false };
+    return { scanned: 0, settled: 0, reSettled: 0, archived: 0, deferred: false };
   }
 
   let snap: LiveSnapshot;
@@ -176,15 +332,15 @@ export async function settleSweep(
     });
     if (!res.ok) {
       console.warn(`settleSweep: /api/live returned HTTP ${res.status}`);
-      return { scanned: 0, settled: 0, reSettled: 0, deferred: false };
+      return { scanned: 0, settled: 0, reSettled: 0, archived: 0, deferred: false };
     }
     snap = (await res.json()) as LiveSnapshot;
   } catch (e) {
     console.warn(`settleSweep: /api/live fetch failed: ${(e as Error).message}`);
-    return { scanned: 0, settled: 0, reSettled: 0, deferred: false };
+    return { scanned: 0, settled: 0, reSettled: 0, archived: 0, deferred: false };
   }
   if (!snap.races || snap.races.length === 0) {
-    return { scanned: 0, settled: 0, reSettled: 0, deferred: false };
+    return { scanned: 0, settled: 0, reSettled: 0, archived: 0, deferred: false };
   }
 
   // Index races by race_key + pre-compute the result hash for finished races.
@@ -192,120 +348,134 @@ export async function settleSweep(
   // the result has changed (partial → complete, or a 確定 correction) and we
   // re-resolve the ticket against the current result.
   const fallbackDate = snap.meta?.date ?? "";
-  const raceByKey = new Map<
-    LiveSnapshot["races"] extends (infer T)[] | undefined ? T : never,
-    unknown
-  >() as unknown as Map<string, LiveSnapshot["races"] extends (infer T)[] | undefined ? T : never>;
+  const raceByKey = new Map<string, SnapshotRace>();
   const hashByKey = new Map<string, string>();
   const resultRaceKeys: string[] = [];
   for (const r of snap.races) {
-    const k = raceKeyOf(r, fallbackDate) as unknown as string;
-    (raceByKey as unknown as Map<string, unknown>).set(k, r);
+    const k = raceKeyOf(r, fallbackDate);
+    raceByKey.set(k, r);
     if (r.status === "result" && r.result) {
       resultRaceKeys.push(k);
       hashByKey.set(k, await hashResult(r.result));
     }
   }
 
-  if (resultRaceKeys.length === 0) {
-    return { scanned: 0, settled: 0, reSettled: 0, deferred: false };
-  }
+  // #15: ARCHIVE every snapshot result race before settling — even a sweep
+  // that settles nothing (all tickets already settled, or no tickets at all)
+  // must archive so a later sweep can settle these races from race_results
+  // once /api/live rotates. Hash-gated upsert; steady state is zero writes.
+  const archived = await archiveResults(env.DB, raceByKey, hashByKey);
 
-  // SELECT all tickets (open + settled) for races the snapshot reports as
-  // finished. Settled tickets for races NOT in the snapshot are left alone —
-  // we can't re-settle what we can't see, and an old settled ticket isn't
-  // blocking anything.
-  const placeholders = resultRaceKeys.map(() => "?").join(",");
-  const { results } = await env.DB
-    .prepare(
-      `SELECT id, race_key, payload, state, returned, settle_result_hash
-         FROM tickets
-        WHERE race_key IN (${placeholders})
-        ORDER BY created_at DESC
-        LIMIT ?`,
-    )
-    .bind(...resultRaceKeys, SWEEP_CAP + 1)
-    .all<TicketRow>();
-  const deferred = results.length > SWEEP_CAP;
-  const scanRows = deferred ? results.slice(0, SWEEP_CAP) : results;
-
+  let scanned = 0;
   let settled = 0;
   let reSettled = 0;
-  for (const row of scanRows) {
-    const race = (raceByKey as unknown as Map<string, unknown>).get(row.race_key) as
-      | (LiveSnapshot["races"] extends (infer T)[] | undefined ? T : never)
-      | undefined;
-    if (!race || race.status !== "result") continue;
-    const result = (race.result ?? null) as RaceResult | null;
-    const currentHash = hashByKey.get(row.race_key);
-    if (!currentHash || !result) continue;
+  let deferred = false;
+  let budget = SWEEP_CAP;
 
-    let payload: TicketPayload;
+  // ---- SNAPSHOT PASS -------------------------------------------------------
+  // SELECT all tickets (open + settled) for races the snapshot reports as
+  // finished. OPEN tickets get their first settlement; settled tickets get
+  // re-settled if their stored hash differs (R3). Settled tickets whose race
+  // is NOT in the snapshot are left alone — we can't re-settle what we can't
+  // see, and an old settled ticket isn't blocking anything.
+  if (resultRaceKeys.length > 0 && budget > 0) {
+    const placeholders = resultRaceKeys.map(() => "?").join(",");
+    const { results } = await env.DB
+      .prepare(
+        `SELECT id, race_key, payload, state, returned, settle_result_hash
+           FROM tickets
+          WHERE race_key IN (${placeholders})
+          ORDER BY created_at DESC
+          LIMIT ?`,
+      )
+      .bind(...resultRaceKeys, budget + 1)
+      .all<TicketRow>();
+    if (results.length > budget) {
+      deferred = true;
+      results.length = budget;
+    }
+    scanned += results.length;
+    budget -= results.length;
+    for (const row of results) {
+      const race = raceByKey.get(row.race_key);
+      if (!race || race.status !== "result") continue;
+      const result = (race.result ?? null) as RaceResult | null;
+      const currentHash = hashByKey.get(row.race_key);
+      if (!currentHash || !result) continue;
+      const r = await trySettle(env.DB, row, result, currentHash, "snapshot");
+      if (r.settled) settled++;
+      if (r.reSettled) reSettled++;
+    }
+  }
+
+  // ---- FALLBACK PASS (#15) -------------------------------------------------
+  // Settle OPEN tickets whose race has rotated off /api/live but is present
+  // in the race_results archive. Re-settlement of already-settled tickets
+  // stays snapshot-window-only — the "left alone unless open" rule. Same
+  // trySettle() path as the snapshot pass; only the source tag differs so an
+  // operator reading the Worker tail can tell the passes apart.
+  if (budget > 0) {
+    let sql: string;
+    let binds: (string | number)[];
+    if (resultRaceKeys.length > 0) {
+      // Exclude races the snapshot covers — they were handled above, or the
+      // snapshot pass attempted them and the resolver returned 'open' (result
+      // block not populated yet). Letting the fallback re-scan them would
+      // double-charge the budget without changing the outcome.
+      const notInPlaceholders = resultRaceKeys.map(() => "?").join(",");
+      sql =
+        `SELECT t.id, t.race_key, t.payload, t.state, t.returned, t.settle_result_hash,
+                r.result_json, r.result_hash
+           FROM tickets t
+           JOIN race_results r ON r.race_key = t.race_key
+          WHERE t.state = 'open'
+            AND t.race_key NOT IN (${notInPlaceholders})
+          ORDER BY t.created_at DESC
+          LIMIT ?`;
+      binds = [...resultRaceKeys, budget + 1];
+    } else {
+      sql =
+        `SELECT t.id, t.race_key, t.payload, t.state, t.returned, t.settle_result_hash,
+                r.result_json, r.result_hash
+           FROM tickets t
+           JOIN race_results r ON r.race_key = t.race_key
+          WHERE t.state = 'open'
+          ORDER BY t.created_at DESC
+          LIMIT ?`;
+      binds = [budget + 1];
+    }
+    let archiveRows: ArchiveTicketRow[];
     try {
-      payload = JSON.parse(row.payload) as TicketPayload;
-    } catch {
-      continue; // malformed payload — leave for human triage
+      const { results } = await env.DB.prepare(sql).bind(...binds).all<ArchiveTicketRow>();
+      archiveRows = results;
+    } catch (e) {
+      // Most likely cause: race_results doesn't exist yet (the 0008 migration
+      // hasn't been applied — e.g. a sweep firing between code deploy and
+      // remote migration). Harmless given never-throws; next sweep retries.
+      console.warn(`settleSweep: fallback pass query failed: ${(e as Error).message}`);
+      archiveRows = [];
     }
-    const ticket = payload.ticket;
-    if (!ticket || !ticket.type || !Array.isArray(ticket.lines)) continue;
-    const unit = typeof payload.unit === "number" && payload.unit > 0 ? payload.unit : 100;
-
-    const resolveInput: ResolveTicket = {
-      type: ticket.type,
-      lines: ticket.lines,
-      // avgPayout is the commit-time fair-value estimate; if absent, fall
-      // back to a sane default so the resolver doesn't crash.
-      avgPayout: typeof ticket.avgPayout === "number" ? ticket.avgPayout : 0,
-    };
-    const outcome = resolveTicket(resolveInput, unit, result);
-    if (outcome.state === "open") continue; // result block not populated yet
-
-    const newState = outcome.state as "won" | "miss" | "refunded";
-    const newReturned = outcome.state === "won" ? outcome.returned : null;
-    // R5: capture the finish order alongside the settlement so the ticket
-    // detail view can show it later even after this race ages out of
-    // /api/live's rolling window (the only other place it'd come from).
-    const placings = topPlacings(result);
-    const newPlacings = placings ? JSON.stringify(placings) : null;
-
-    if (row.state === "open") {
-      // First settlement (the original Phase 4 path).
-      const didUpdate = await applySweepSettlement(
-        env.DB, row.id, newState, newReturned, currentHash, newPlacings,
-      );
-      if (didUpdate) {
-        settled++;
-        console.log(
-          `settleSweep: settled ${row.id} open -> ${formatOutcome(newState, newReturned)} ` +
-          `[hash ${shortHash(currentHash)}]`,
-        );
-      }
-    } else if (row.settle_result_hash !== currentHash) {
-      // Re-settlement: the result has changed since we last settled this ticket.
-      // Common case: partial publish → complete publish. Rare case: a 確定
-      // correction. Either way, re-resolve against the CURRENT result and
-      // update state/returned/hash in one row.
-      const didUpdate = await applySweepSettlement(
-        env.DB, row.id, newState, newReturned, currentHash, newPlacings,
-      );
-      if (didUpdate) {
-        reSettled++;
-        const stateChanged = row.state !== newState;
-        const amountChanged = row.returned !== newReturned;
-        const kind = stateChanged ? "state" : amountChanged ? "amount" : "hash-only";
-        console.log(
-          `settleSweep: re-settled ${row.id} ` +
-          `${formatTransition(row.state, row.returned, newState, newReturned)} ` +
-          `(${kind}) [hash ${shortHash(row.settle_result_hash)} -> ${shortHash(currentHash)}]`,
-        );
-      }
+    if (archiveRows.length > budget) {
+      deferred = true;
+      archiveRows.length = budget;
     }
-    // else: settled against the same result hash already — idempotent skip.
+    scanned += archiveRows.length;
+    for (const row of archiveRows) {
+      let result: RaceResult;
+      try {
+        result = JSON.parse(row.result_json) as RaceResult;
+      } catch {
+        continue; // corrupt archive row — leave for human triage
+      }
+      const r = await trySettle(env.DB, row, result, row.result_hash, "archive");
+      if (r.settled) settled++;
+      // Fallback only selects state='open' — reSettled stays 0 here.
+    }
   }
 
   console.log(
-    `settleSweep: settled ${settled} + re-settled ${reSettled} of ${scanRows.length} tickets` +
-      (deferred ? ` (${results.length - SWEEP_CAP} deferred to next tick)` : ""),
+    `settleSweep: archived ${archived} result race(s); settled ${settled} + re-settled ${reSettled} of ${scanned} tickets` +
+      (deferred ? ` (${SWEEP_CAP} cap — remainder deferred to next tick)` : ""),
   );
-  return { scanned: scanRows.length, settled, reSettled, deferred };
+  return { scanned, settled, reSettled, archived, deferred };
 }
