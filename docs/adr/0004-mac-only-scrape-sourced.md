@@ -134,9 +134,12 @@ PC cutover status:
 - [x] Scrape adapters built and fixture-tested (12 tests, 159 passed overall).
 - [x] Cross-validation gate built; runs and prints `VERDICT: NO-OVERLAP-YET`
       on a lake with no overlap (exit 0).
-- [ ] Step 5 cross-validation gate passed 0.0000% on a real weekend overlap
-      (YYYY-MM-DD). **The PC is NOT switched off until this prints PASS over a
-      real weekend overlap window.**
+- [x] Step 5 cross-validation gate passed 0.0000% on a real weekend overlap
+      (2026-07-04/05). 72 overlap races, 858 payouts / 978 results / 978 entries
+      audited at 0 mismatch, 285 win/place bets settled identically. **One clean
+      weekend is necessary-not-sufficient** (`docs/runbooks/overlap-capture-weekend.md`'s
+      cutover criteria call for ≥2–3 consecutive PASS weekends before the PC is
+      powered off; the PC stays docked until then).
 - [x] Parser recalibrated against live netkeiba payloads. All four adapters
       (races / entries / results / payouts) drive REAL captured HTML fixtures
       end-to-end: `shutuba_202605030611.html` (2026-06-21 Tokyo R11, G3),
