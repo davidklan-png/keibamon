@@ -22,7 +22,7 @@ Each runner row on the Race screen gets a compact inline mark control. The drill
 | `anchor` | ◎ | Wheel axis (本命) |
 | `like` | ○ | Contender (対抗) |
 | `priceHorse` | ▲ | Upset contender (単穴) |
-| `distrust` | △ | Doubtful (連下) |
+| `distrust` | ▽ | Doubtful — NOT △: in JA 予想印 convention △ is the 4th pick (mildly positive), so △ mis-read as a recommendation. ▽ (hollow inverted triangle) corrects the signal (issue #12, 2026-07-06) |
 | `avoid` | × | No go (消し) |
 
 Per-kind glyph colors are shared between the badge and the chip via a single `.runner-mark-<kind>` class so the two surfaces feel identical. aria-labels reuse the existing `form.intuition.<kind>` strings; the unmarked badge uses a new `race.markAdd` aria; the clear chip uses a new `race.markClear`. Both new keys land in `en.ts` and `ja.ts`.

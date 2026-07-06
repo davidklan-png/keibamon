@@ -48,7 +48,12 @@ export const MARK_GLYPH: Record<IntuitionKind, string> = {
   anchor: "◎",
   like: "○",
   priceHorse: "▲",
-  distrust: "△",
+  // ▽ (hollow inverted triangle) — NOT △. In JA 予想印 convention △ is the
+  // 4th pick (mildly positive), so a JA reader saw the old △ distrust mark
+  // as a recommendation. ▽ inverts that signal visually and is script-neutral.
+  // Distinct from ▼ (filled) used by HorseDrillView drift arrows + MyTickets
+  // history toggle — different fill + the badge container differ them further.
+  distrust: "▽",
   avoid: "×",
 };
 
