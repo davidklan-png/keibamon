@@ -229,6 +229,20 @@ export function useImpressionsSync(
   // so it doesn't trigger a re-render.
   const mergedForSessionRef = useRef<boolean>(false);
 
+  // #13 — Mirror the latest `impressions` into a ref so the sign-in effect's
+  // async GET→PUT flow can read current state at PUT time without re-running
+  // on every impressions change. The sign-in effect deps are [auth.isSignedIn]
+  // only (re-running it on every mark would re-GET/re-PUT on every tap), so
+  // the closure's `impressions` is the snapshot from the render where sign-in
+  // flipped — stale by the time GET resolves. impressionsRef.current tracks
+  // every commit and lets the PUT body reflect marks made while GET was in
+  // flight. Residual race (mark between ref read and setImpressions commit)
+  // self-heals via the debounced steady-state PUT below.
+  const impressionsRef = useRef<ImpressionMap>(impressions);
+  useEffect(() => {
+    impressionsRef.current = impressions;
+  }, [impressions]);
+
   // ---------------------------------------------------------------------
   // Sign-in transition: GET → merge → setImpressions → PUT. One-time.
   // ---------------------------------------------------------------------
@@ -254,8 +268,8 @@ export function useImpressionsSync(
         return;
       }
       // Merge server-into-local (LWW). setImpressions gets the functional
-      // form so we read the latest in-flight state, not the stale closure
-      // copy of `impressions` from the effect's render.
+      // form so the merge sees the latest committed state at commit time,
+      // not the stale closure copy of `impressions` from the effect's render.
       setImpressions((prev) => {
         const merged = mergeImpressions(prev, got.data);
         // If the merge produced something byte-identical to prev (server was
@@ -265,12 +279,15 @@ export function useImpressionsSync(
         if (sameMap(merged, prev)) return prev;
         return merged;
       });
-      // PUT the merged result so the server reflects the union. Read post-
-      // merge state via a fresh effect (the setImpressions above is async).
-      // Easiest correct path: re-fetch the token and PUT the merged map.
-      // We can't read the just-set React state synchronously, so compute the
-      // merged map directly from the closure's `impressions` + got.data.
-      const mergedForPut = mergeImpressions(impressions, got.data);
+      // PUT the merged result so the server reflects the union. We can't
+      // read the just-scheduled React state synchronously, so compute the
+      // PUT body from impressionsRef.current (latest committed local) +
+      // got.data — same merge math as the updater above. Marks made between
+      // effect-mount and GET-resolution (the #13 bug) are now included;
+      // closure-impressions would have missed them. A mark made between
+      // this ref read and the setImpressions commit still races the PUT,
+      // but the debounced steady-state effect catches it ~2s later.
+      const mergedForPut = mergeImpressions(impressionsRef.current, got.data);
       await putMyImpressions(token, mergedForPut);
       mergedForSessionRef.current = true;
     })();
