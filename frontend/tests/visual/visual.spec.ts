@@ -67,6 +67,50 @@ test.describe("visual regression", () => {
     await page.waitForTimeout(600);
   }
 
+  /**
+   * Signed-out landing (#11): same lang + frozen-clock setup as landOnFeed, but
+   * sets the kbm.pw.signedout=1 flag BEFORE goto so AuthProvider's PLAYWRIGHT
+   * bypass branch serves a signed-out AuthState (isSignedIn:false → App routes
+   * MyTicketsHome to MyTicketsEmpty). The tab bar stays visible (it's a sibling
+   * of MyTicketsHome in App's view="mine" branch).
+   *
+   * If `seedImpressions` is passed, it's written to localStorage as the
+   * kbm.impressions.v1 blob so MyTicketsEmpty renders the N-horses/M-races
+   * teaser variant instead of the gentle zero-marks variant.
+   *
+   * Tracks /api/social requests to assert NONE fire signed-out (cheap guard:
+   * getToken returns null, MyTicketsHome's postMe effect bails on !isSignedIn,
+   * so a social request reaching the wire here would be a regression).
+   */
+  async function landOnSignedOutEmpty(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+    seedImpressions?: Record<string, unknown>,
+  ): Promise<{ socialHits: number }> {
+    let socialHits = 0;
+    page.on("request", (req) => {
+      if (req.url().includes("/api/social/")) socialHits++;
+    });
+    await page.addInitScript(([l, seed]) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+        // #11 — flip the bypass to signed-out for this page load.
+        window.localStorage.setItem("kbm.pw.signedout", "1");
+        if (seed) {
+          window.localStorage.setItem("kbm.impressions.v1", JSON.stringify(seed));
+        }
+      } catch { /* ignore */ }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, [lang, seedImpressions ?? null] as const);
+    await page.goto("/");
+    // Race-first landing: navigate to the MyTickets tab to reach the empty state.
+    await page.getByTestId("tab-mine").click();
+    await expect(page.locator(".mt-empty")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(600);
+    return { socialHits };
+  }
+
   for (const lang of LANGS) {
     // ---- MyTickets feed ----
     test(`mytickets feed (${lang})`, async ({ page }) => {
@@ -176,6 +220,44 @@ test.describe("visual regression", () => {
       await expect(page.locator(".stepper")).toHaveCount(0);
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`research-mode.${lang}.png`);
+    });
+
+    // ---- Signed-out MyTickets empty (zero marks, gentle variant) ---- (#11)
+    // ADR-0013 honest empty state: the surface that motivates ADR-0018's cross-
+    // device-sync promise. The bypass branch reads kbm.pw.signedout=1 and serves
+    // isSignedIn:false, so App routes MyTicketsHome → MyTicketsEmpty with zero
+    // local marks (gentle variant — no teaser numbers).
+    test(`signed-out empty zero-marks (${lang})`, async ({ page }) => {
+      const { socialHits } = await landOnSignedOutEmpty(page, lang);
+      // Sign-in affordance exists (not just pixels) — the CTA in the empty state.
+      await expect(page.locator(".mt-empty-cta")).toBeVisible();
+      // Tab bar visible signed-out (sibling of MyTicketsHome in App's view="mine").
+      await expect(page.getByTestId("tab-mine")).toBeVisible();
+      // No social Worker calls fire signed-out (getToken → null; postMe effect bails).
+      expect(socialHits).toBe(0);
+      await expect(page).toHaveScreenshot(`signed-out-empty-zero.${lang}.png`);
+    });
+
+    // ---- Signed-out MyTickets empty (≥1 mark, teaser variant) ---- (#11)
+    // The teaser variant: seed one local impression so summarizeMarks reports
+    // N=1 horse / M=1 race and the empty state shows the motivational "your
+    // research is waiting" teaser. Same race_id + horse_key shape the store uses
+    // (impressions.ts: `${race_id}|${normalizeName(name)}`).
+    test(`signed-out empty with-marks (${lang})`, async ({ page }) => {
+      const seed = {
+        "jra-20260621-05-11|croixdu nord": {
+          mark: "anchor",
+          umaban: 1,
+          odds_when_marked: 2.4,
+          odds_snapshot_at: null,
+          formed_at: 100,
+        },
+      };
+      const { socialHits } = await landOnSignedOutEmpty(page, lang, seed);
+      await expect(page.locator(".mt-empty-cta")).toBeVisible();
+      await expect(page.getByTestId("tab-mine")).toBeVisible();
+      expect(socialHits).toBe(0);
+      await expect(page).toHaveScreenshot(`signed-out-empty-marks.${lang}.png`);
     });
   }
 });

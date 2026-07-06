@@ -94,11 +94,44 @@ const PLAYWRIGHT_VALUE: AuthState = {
   },
 };
 
+// #11 — signed-out visual coverage, inside the bypass branch ONLY. The visual
+// suite sets localStorage "kbm.pw.signedout"="1" via page.addInitScript BEFORE
+// goto, so the flag is in storage before this module evaluates. Read ONCE at
+// module load (constant per page lifetime — same branch every render, Rules of
+// Hooks preserved). Prod builds never set VITE_PLAYWRIGHT_BYPASS_AUTH, so
+// PLAYWRIGHT_BYPASS is false in prod and this read never runs — dead code.
+// When set, the bypass serves a signed-out AuthState so the ADR-0013 empty
+// state + the signed-out account CTA can be captured without a second webServer.
+const PLAYWRIGHT_SIGNED_OUT =
+  PLAYWRIGHT_BYPASS &&
+  (() => {
+    try {
+      return globalThis.localStorage?.getItem("kbm.pw.signedout") === "1";
+    } catch {
+      return false;
+    }
+  })();
+
+const PLAYWRIGHT_SIGNED_OUT_VALUE: AuthState = {
+  isSignedIn: false,
+  userId: null,
+  ageVerified: false,
+  clerkMounted: false,
+  getToken: async () => null,
+  openSignIn: () => {
+    /* no-op in bypass mode */
+  },
+  setAgeVerified: async () => {
+    /* no-op in bypass mode */
+  },
+};
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Constant at module load — same branch every render, so the conditional
   // return below does not violate the Rules of Hooks.
   if (PLAYWRIGHT_BYPASS) {
-    return <AuthContext.Provider value={PLAYWRIGHT_VALUE}>{children}</AuthContext.Provider>;
+    const value = PLAYWRIGHT_SIGNED_OUT ? PLAYWRIGHT_SIGNED_OUT_VALUE : PLAYWRIGHT_VALUE;
+    return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
   }
   if (!CLERK_ENABLED) {
     return <AuthContext.Provider value={NOOP_VALUE}>{children}</AuthContext.Provider>;
