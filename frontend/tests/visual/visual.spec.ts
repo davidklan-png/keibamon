@@ -113,18 +113,55 @@ test.describe("visual regression", () => {
 
   for (const lang of LANGS) {
     // ---- MyTickets feed ----
+    // b85f7ab (manual-builder wiring) added the ✎ edit button
+    // (.mt-card-edit, MyTickets.tsx ~line 913) to OPEN ticket cards behind a
+    // {open && ...} render gate, but regenerated zero visual baselines — so
+    // both feed baselines drifted by exactly the pencil on the first (open)
+    // card. The fixture carries one open (kb-open-1) + one won (kb-won-1)
+    // ticket, and the Open section sorts before History, so the first card
+    // has the pencil and the second doesn't. Pin both branches of the gate
+    // with locator assertions so a future render-gate regression can't pass
+    // CI by pixel-matching a stale baseline — the #14 durable-assertion
+    // pattern.
     test(`mytickets feed (${lang})`, async ({ page }) => {
       await landOnFeed(page, lang);
+      // Edit pencil visible on the OPEN (first) card, absent on the WON (second).
+      await expect(page.locator(".mt-card").first().locator(".mt-card-edit")).toBeVisible();
+      await expect(page.locator(".mt-card").nth(1).locator(".mt-card-edit")).toHaveCount(0);
+      // Exactly one pencil in the whole feed (the open card's).
+      await expect(page.locator(".mt-card-edit")).toHaveCount(1);
       await expect(page).toHaveScreenshot(`mytickets-feed.${lang}.png`);
     });
 
     // ---- MyTickets new bet ----
+    // The "Build manually" CTA (button.mt-manual-entry, MyTickets.tsx ~line
+    // 1288) was added in b85f7ab as a 4th vibe-pick sibling BELOW the
+    // screenshot fold of this baseline, so it had ZERO CI coverage (pixel
+    // OR semantic) until this assertion. toBeVisible auto-scrolls it into
+    // view; placed AFTER the screenshot so the existing top-of-page frame
+    // is unchanged. The dedicated scrolled capture below covers the pixels.
     test(`mytickets new (${lang})`, async ({ page }) => {
       await landOnFeed(page, lang);
       await page.locator(".mt-fab").click();
       await expect(page.locator(".mt-new")).toBeVisible();
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`mytickets-new.${lang}.png`);
+      // Assert the manual-entry CTA exists + is visible (ends its CI invisibility).
+      await expect(page.locator(".mt-manual-entry")).toBeVisible();
+    });
+
+    // ---- MyTickets new bet: manual-entry CTA (scrolled into view) ----
+    // Dedicated pixel capture of the 4th "Build manually" CTA, scrolled into
+    // the frame. Covers the visual treatment the fold-hidden baseline above
+    // can't reach.
+    test(`mytickets new manual-entry (${lang})`, async ({ page }) => {
+      await landOnFeed(page, lang);
+      await page.locator(".mt-fab").click();
+      await expect(page.locator(".mt-new")).toBeVisible();
+      await page.locator(".mt-manual-entry").scrollIntoViewIfNeeded();
+      await expect(page.locator(".mt-manual-entry")).toBeVisible();
+      await page.waitForTimeout(300);
+      await expect(page).toHaveScreenshot(`mytickets-new-manual-entry.${lang}.png`);
     });
 
     // ---- MyTickets detail (open) ----
