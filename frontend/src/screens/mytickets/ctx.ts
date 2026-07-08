@@ -82,6 +82,10 @@ export interface MtCtx {
 
   // live helpers (close over snap/driftMap/now in the container)
   liveOdds: (tk: CommittedTicket, num: number) => number;
+  /** Runner field for `tk`'s own race — never the app's globally "featured"
+   *  race. Live-matched by raceKey when possible, else the frozen field
+   *  captured on the ticket at commit time. */
+  runnersForTicket: (tk: CommittedTicket) => Runner[];
   driftView: (
     num: number,
     tk: CommittedTicket,

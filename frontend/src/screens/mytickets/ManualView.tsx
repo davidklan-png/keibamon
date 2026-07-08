@@ -13,6 +13,7 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
     tickets,
     feature,
     featRunners,
+    runnersForTicket,
     unit,
     setUnit,
     commitManual,
@@ -32,6 +33,13 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
         unit: editTk.unit,
       }
     : undefined;
+  // Editing must stay pinned to the ticket's own race. `featRunners` tracks
+  // whichever race the app currently highlights as "featured", which is a
+  // different race as soon as more than one is live — that mismatch is what
+  // truncated the picker to the featured race's (smaller) field instead of
+  // the ticket's real one. New tickets have no race of their own yet, so
+  // they still build against the featured race.
+  const builderRunners = editTk ? runnersForTicket(editTk) : featRunners;
   return (
     <>
       <div className="mt-back-head">
@@ -44,7 +52,7 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
       </div>
       {feature ? (
         <ManualTicketBuilder
-          runners={featRunners}
+          runners={builderRunners}
           unit={unit}
           onUnitChange={setUnit}
           initial={initial}

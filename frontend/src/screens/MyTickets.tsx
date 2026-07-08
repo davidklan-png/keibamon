@@ -60,6 +60,7 @@ import {
   mtRaceKey,
   mtPickFeature,
   mtRunnersOf,
+  mtRunnersForTicket,
   mtLoadStored,
   snapshotRace,
   type MtView,
@@ -499,6 +500,9 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       tk.race.runners.find((r) => r.num === num)?.odds ??
       0
     );
+  }
+  function runnersForTicket(tk: CommittedTicket): Runner[] {
+    return mtRunnersForTicket(tk, snap, fallbackDate);
   }
   function driftView(num: number, tk: CommittedTicket, open: boolean) {
     const dir = open ? driftMap[tk.race.raceKey + "|" + num] : undefined;
@@ -983,6 +987,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     setReportReason,
     reportSending,
     liveOdds,
+    runnersForTicket,
     driftView,
     runnerName,
     countdownText,

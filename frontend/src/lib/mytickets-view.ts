@@ -101,6 +101,38 @@ export function mtRunnersOf(race: LiveRace): Runner[] {
 }
 
 /**
+ * Runner field for a specific ticket's OWN race — never mtPickFeature's
+ * single globally-"featured" race. On a normal race day several races are
+ * live at once; a ticket built against a 7-runner field must not borrow a
+ * different, currently-featured race's (possibly smaller) field when it's
+ * later opened for edit or a manual line is added to it. That mismatch is
+ * what truncated the edit-ticket picker to 3 slots for a 7-horse ticket:
+ * the builder rendered mtPickFeature's race instead of resolving the
+ * ticket's own raceKey.
+ *
+ * Prefers the live race matched by raceKey (fresh odds/gate); falls back to
+ * the runners frozen on the ticket at commit time if that race has aged out
+ * of /api/live (bracket data is unavailable in that fallback, same as any
+ * other race missing a published draw).
+ */
+export function mtRunnersForTicket(
+  tk: CommittedTicket,
+  snap: LiveSnapshot | null,
+  fallbackDate?: string,
+): Runner[] {
+  const live = (snap?.races || []).find(
+    (r) => mtRaceKey(r, fallbackDate) === tk.race.raceKey,
+  );
+  if (live) return mtRunnersOf(live);
+  return tk.race.runners.map((r) => ({
+    uma: String(r.num),
+    name: r.en || r.ja || null,
+    odds: r.odds,
+    gate: null,
+  }));
+}
+
+/**
  * Freeze a race into a RaceSnapshot at commit time. Extracted here so the
  * TicketsScreen "Place" CTA and the MyTickets "commit" path share one
  * definition (ADR-0007 race-first loop). `fallbackDate` is the snapshot's
