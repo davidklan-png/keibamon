@@ -100,6 +100,10 @@ longer come from JV-Link. Recommend keeping the names short-term to avoid a
 migration, and adding a `source` provenance column (`jravan` | `netkeiba` |
 `yahoo`) to every ingested row so post-cutover data is distinguishable from the
 licensed history. A rename to source-neutral names is a separate, later decision.
+*(Status 2026-07-08: the provenance column is implemented as `source_name` —
+`'jravan'`/`'jravan_rt'` on JV-Link silver rows, `'netkeiba'` on scrape rows,
+and part of each scrape adapter's natural key. Only the table rename remains
+open.)*
 
 ## Alternatives considered
 

@@ -1,5 +1,11 @@
 # Keibamon App Plan
 
+> **⚠ SUPERSEDED (2026-07-08).** Historical planning doc from 2026-06-17.
+> Superseded by ADR-0005 (one-tap simplification), ADR-0011 (research/ticket
+> restructure), ADR-0012+ (NetKeiba UX rebuild) and
+> `docs/ux-implementation-plan.md`. Kept for the origin record only — do not
+> implement from this file.
+
 ## Next Development Target
 
 Build Keibamon into a recreational race companion for younger horse-racing fans.
