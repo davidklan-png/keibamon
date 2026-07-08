@@ -105,12 +105,14 @@ One clean overlap is **necessary, not sufficient**. Before actually switching of
 - [ ] Parser-vs-live-payload item closed (ADR-0004 checkbox).
 - [ ] Mac live-capture reliability proven (lid-open discipline held a full day without
       a missed curve).
-- [ ] Loud scrape-failure monitoring in place (a silent scrape outage = a lost,
+- [x] Loud scrape-failure monitoring in place (a silent scrape outage = a lost,
       unrecoverable race day). Implemented in `src/keibamon_core/alerting.py`
       (wired into `track`): export `KEIBAMON_NTFY_TOPIC=<long-random-topic>` in
       the same sourced profile as the `CF_*` creds and subscribe to that topic
       in the ntfy phone app. Check this box only after a test alert has
-      actually appeared on the phone.
+      actually appeared on the phone. *(Live 2026-07-08 — topic in
+      `~/.keibamon/cf.env`, subscribed on iPhone, test alert "keibamon test"
+      received.)*
 - [x] Weekly lake backup running (`make lake-backup` → USB KEIBA, see
       `docs/runbooks/lake-backup.md`) with at least one verified backup on the
       stick. Post-cutover the Mac is the only machine holding the lake and the
