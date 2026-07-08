@@ -111,11 +111,13 @@ One clean overlap is **necessary, not sufficient**. Before actually switching of
       the same sourced profile as the `CF_*` creds and subscribe to that topic
       in the ntfy phone app. Check this box only after a test alert has
       actually appeared on the phone.
-- [ ] Weekly lake backup running (`make lake-backup` → USB KEIBA, see
+- [x] Weekly lake backup running (`make lake-backup` → USB KEIBA, see
       `docs/runbooks/lake-backup.md`) with at least one verified backup on the
       stick. Post-cutover the Mac is the only machine holding the lake and the
       odds curves cannot be backfilled — do not power off the PC while the lake
-      exists on exactly one disk.
+      exists on exactly one disk. *(First verified backup: 2026-07-08 —
+      LAST_BACKUP 2026-07-08T06:50:06Z, 4273 content files mirrored exactly to
+      `/Volumes/KEIBA/keibamon-lake-backup/data`.)*
 
 When all hold, the human flips it: archive the final JV-Link bronze as the historical
 record of truth, set the PC's `.device` aside, update `device-topology.md` from
