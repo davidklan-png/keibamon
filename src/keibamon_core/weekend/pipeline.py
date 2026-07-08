@@ -413,6 +413,7 @@ def track(
     snapshot_key: str = "netkeiba_track",
     max_cycles: int | None = None,
     sleep_fn: Any = None,
+    alerter: Any = None,
 ) -> dict[str, Any]:
     """Capture the live odds time-series, announcement -> post. mac-dev only.
 
@@ -445,6 +446,13 @@ def track(
     N cycles so the test runs one pass; ``inhibit_sleep=False`` skips the
     caffeinate spawn entirely. Device guard is the single source of truth here
     (ADR-0003 D1 / ADR-0004) -- the CLI does NOT re-check.
+
+    Loud-failure alerting (ADR-0004 mandatory monitoring): a
+    :class:`keibamon_core.alerting.CaptureAlerter` is fed each cycle's
+    ok/failed fetch counts — consecutive total-failure cycles or a stale
+    capture push a phone notification via ntfy (``KEIBAMON_NTFY_TOPIC``).
+    ``alerter`` is the injection seam: pass a fake to test, or ``False`` to
+    disable entirely. Alerting is best-effort and can never break the loop.
     """
     _require_role(("mac-dev",), "track", role_file)
 
@@ -464,6 +472,10 @@ def track(
     if inhibit_sleep:
         sleep_proc, sleep_warning = _inhibit_sleep_or_warn()
 
+    if alerter is None:
+        from keibamon_core.alerting import CaptureAlerter
+        alerter = CaptureAlerter()
+
     try:
         open_state: dict[tuple[str, int], float] = {}
         cycles: list[dict[str, Any]] = []
@@ -476,6 +488,12 @@ def track(
                 open_state=open_state, snapshot_key=snapshot_key,
             )
             cycles.append(cycle)
+            if alerter:
+                try:
+                    failed = cycle.get("fetch_failures", 0)
+                    alerter.record_cycle(ok=cycle["races"] - failed, failed=failed)
+                except Exception as exc:  # noqa: BLE001 - alerting never kills capture
+                    print(f"alerter error ({exc!r}); continuing", file=sys.stderr)
             if max_cycles is not None and cycle_no >= max_cycles:
                 break
             _sleep_between_cycles(
@@ -547,6 +565,7 @@ def track_once(
 
     races_out: list[dict[str, Any]] = []
     total_banked = 0
+    fetch_failures = 0
     for spec in race_specs:
         race_id = spec["race_id"]
         nk_id = spec["nk_race_id"]
@@ -560,6 +579,7 @@ def track_once(
         except Exception as exc:  # noqa: BLE001 - one race must not kill the cycle
             print(f"  {race_id}: fetch/parse failed ({exc!r})", file=sys.stderr)
             races_out.append(_empty_race_snapshot(spec, captured, reason=f"fetch_failed: {exc!r}"))
+            fetch_failures += 1
             continue
 
         # LAKE FIRST: bank the curve before any push runs. A failure here is
@@ -590,6 +610,7 @@ def track_once(
     return {
         "cycle_at": snapshot["meta"]["published_at"],
         "races": len(races_out),
+        "fetch_failures": fetch_failures,
         "snapshots_banked": total_banked,
         "movers": sum(
             1 for r in races_out for x in r["runners"] if x.get("edge_label")
