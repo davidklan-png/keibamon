@@ -106,7 +106,16 @@ One clean overlap is **necessary, not sufficient**. Before actually switching of
 - [ ] Mac live-capture reliability proven (lid-open discipline held a full day without
       a missed curve).
 - [ ] Loud scrape-failure monitoring in place (a silent scrape outage = a lost,
-      unrecoverable race day).
+      unrecoverable race day). Implemented in `src/keibamon_core/alerting.py`
+      (wired into `track`): export `KEIBAMON_NTFY_TOPIC=<long-random-topic>` in
+      the same sourced profile as the `CF_*` creds and subscribe to that topic
+      in the ntfy phone app. Check this box only after a test alert has
+      actually appeared on the phone.
+- [ ] Weekly lake backup running (`make lake-backup` → USB KEIBA, see
+      `docs/runbooks/lake-backup.md`) with at least one verified backup on the
+      stick. Post-cutover the Mac is the only machine holding the lake and the
+      odds curves cannot be backfilled — do not power off the PC while the lake
+      exists on exactly one disk.
 
 When all hold, the human flips it: archive the final JV-Link bronze as the historical
 record of truth, set the PC's `.device` aside, update `device-topology.md` from
