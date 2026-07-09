@@ -251,7 +251,7 @@ export function ownerFromUser(user: PublicUser): TicketOwner {
 }
 
 export interface CommittedTicket {
-  id: string; // "kb-" + base36 timestamp
+  id: string; // "kb-" + crypto.randomUUID() (see lib/ticketId)
   serial: string; // "KB-XXXXXX" (display only)
   ticket: Ticket; // the recommender output (type, lines, cost, avgPayout, unit…)
   unit: number; // chosen stake per line

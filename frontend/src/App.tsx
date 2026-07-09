@@ -26,6 +26,7 @@ import {
   type LiveRace,
 } from "./api";
 import { raceHasLiveOdds, snapshotRace } from "./lib/mytickets-view";
+import { newTicketId } from "./lib/ticketId";
 import { useAuth } from "./auth/AuthProvider";
 import { postTicket } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
@@ -370,7 +371,7 @@ function App() {
       }
       return; // no race to snapshot — can't commit
     }
-    const id = "kb-" + Date.now().toString(36);
+    const id = newTicketId();
     const serial = "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
     const committed: CommittedTicket = {
       id,

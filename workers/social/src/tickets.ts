@@ -86,21 +86,33 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
 
 type InsertTicketResult =
   | { ok: true; row: TicketRow | null }
-  | { ok: false; code: "cannot_edit_settled_ticket" };
+  | { ok: false; code: "cannot_edit_settled_ticket" }
+  | { ok: false; code: "not_found" };
 
 /**
  * Insert-or-update by id. Used both for fresh ticket creation AND for
  * manual-ticket-builder edit-in-place: a POST with the SAME id overwrites
  * the row in place (the `ON CONFLICT(id) DO UPDATE` below).
  *
- * Guard: if an existing row for this id is in a settled state (anything
- * other than 'open'), reject with `{ok:false, code:"cannot_edit_settled_ticket"}`
- * BEFORE the upsert runs — otherwise a manual edit would silently reset
- * `state` to 'open' and NULL out `returned`, erasing settlement history.
- * The lookup is a separate statement rather than a CTE because D1's
- * `ON CONFLICT DO UPDATE` cannot itself be conditional on the existing row's
- * state (no `WHERE` clause on the DO UPDATE side that can reference the
- * pre-conflict row in D1's SQLite version).
+ * Two guards run BEFORE the upsert (the lookup is a separate statement rather
+ * than a CTE because D1's `ON CONFLICT DO UPDATE` cannot itself be conditional
+ * on the existing row in D1's SQLite version):
+ *
+ *   1. Ownership: if an existing row for this id belongs to ANOTHER user,
+ *      reject with `{ok:false, code:"not_found"}`. We deliberately return the
+ *      SAME shape as "doesn't exist" rather than a distinct "forbidden" so
+ *      this endpoint is not an oracle for probing which ids are taken
+ *      (defense-in-depth on top of the high-entropy client ids — coverage for
+ *      the case where a client id ever leaks). The `ON CONFLICT` update does
+ *      NOT touch `user_id`, so without this check a guessed open id would let
+ *      another user overwrite the payload while the row stayed attributed to
+ *      the victim — a silent hijack. Legit clients only ever POST ids they
+ *      generated themselves, so this branch is attacker-only.
+ *   2. Settlement: if an existing row for this id is in a settled state
+ *      (anything other than 'open'), reject with
+ *      `{ok:false, code:"cannot_edit_settled_ticket"}` — otherwise a manual
+ *      edit would silently reset `state` to 'open' and NULL out `returned`,
+ *      erasing settlement history.
  */
 export async function insertTicket(
   db: D1Database,
@@ -116,11 +128,16 @@ export async function insertTicket(
   },
 ): Promise<InsertTicketResult> {
   const existing = await db
-    .prepare("SELECT state FROM tickets WHERE id = ?")
+    .prepare("SELECT state, user_id FROM tickets WHERE id = ?")
     .bind(parsed.id)
-    .first<{ state: string }>();
-  if (existing && existing.state !== "open") {
-    return { ok: false, code: "cannot_edit_settled_ticket" };
+    .first<{ state: string; user_id: string }>();
+  if (existing) {
+    if (existing.user_id !== userId) {
+      return { ok: false, code: "not_found" };
+    }
+    if (existing.state !== "open") {
+      return { ok: false, code: "cannot_edit_settled_ticket" };
+    }
   }
   const row = await db
     .prepare(

@@ -981,6 +981,75 @@ describe("social Worker — Phase 2 (ticket persistence)", () => {
     });
   });
 
+  it("POST of another user's OPEN ticket id is rejected (404, not an oracle) and leaves the row untouched", async () => {
+    // Ownership guard: a POST carrying an id that already belongs to ANOTHER
+    // user must be rejected before the upsert. The `ON CONFLICT(id) DO UPDATE`
+    // does not touch user_id, so without this check the snoop would overwrite
+    // the victim's payload while the row stayed attributed to the victim — a
+    // silent hijack. We assert 404 (same shape as "not found"), NOT 403, so the
+    // endpoint can't be probed to learn which ids are taken.
+    jwtSub("user_owner");
+    const { db } = makeFakeD1();
+    await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(
+          sampleTicketBody({ id: "kb-cross-1", payoutBase: 5000 }),
+        ),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+
+    // Snoop reuses the victim's id with a hostile payload.
+    jwtSub("user_snoop");
+    const r = await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(
+          sampleTicketBody({
+            id: "kb-cross-1",
+            payoutBase: 9999,
+            ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }] },
+          }),
+        ),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r.status).toBe(404);
+    expect(await r.json()).toEqual({ error: "not_found" });
+
+    // The owner's row MUST be untouched — original payload, still open, still
+    // the owner's. (The snoop must NOT appear in their own list either.)
+    jwtSub("user_owner");
+    const ownerList = (await (
+      await worker.fetch(
+        req("/api/social/tickets", { method: "GET", headers: authed() }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      )
+    ).json()) as { tickets: Record<string, unknown>[] };
+    const survivor = ownerList.tickets.find((t) => t.id === "kb-cross-1");
+    expect(survivor).toMatchObject({
+      id: "kb-cross-1",
+      state: "open",
+      payoutBase: 5000, // NOT the 9999 the snoop tried to write
+    });
+
+    jwtSub("user_snoop");
+    const snoopList = (await (
+      await worker.fetch(
+        req("/api/social/tickets", { method: "GET", headers: authed() }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      )
+    ).json()) as { tickets: Record<string, unknown>[] };
+    expect(snoopList.tickets.find((t) => t.id === "kb-cross-1")).toBeUndefined();
+  });
+
   it("PATCH by the owner updates state + returned and returns the patched body", async () => {
     jwtSub("user_abc");
     const { db } = makeFakeD1();

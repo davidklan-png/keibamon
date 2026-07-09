@@ -54,6 +54,7 @@ import { resolveTicket, topPlacings, type RaceResult } from "../lib/settle";
 import { storageKeyFor } from "../auth/storageKey";
 import { exportTicketCard, type ShareOutcome } from "../lib/share";
 import { yen } from "../lib/format";
+import { newTicketId } from "../lib/ticketId";
 import { computePunterStats } from "../lib/punterStats";
 import {
   MT_VIBES,
@@ -784,7 +785,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
   function commit() {
     const opt = options[selIdx];
     if (!opt || !feature) return;
-    const id = "kb-" + Date.now().toString(36);
+    const id = newTicketId();
     const serial = "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
     const tk: CommittedTicket = {
       id,
@@ -874,7 +875,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
    */
   function commitManual(ticket: Ticket, existingId?: string) {
     if (!feature) return;
-    const id = existingId ?? "kb-" + Date.now().toString(36);
+    const id = existingId ?? newTicketId();
     const serial =
       existingId && tickets.find((x) => x.id === existingId)
         ? tickets.find((x) => x.id === existingId)!.serial

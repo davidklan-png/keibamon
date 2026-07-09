@@ -268,8 +268,12 @@ async function handleTickets(
       }
       const result = await insertTicket(env.DB, userId, parsed.ticket);
       if (!result.ok) {
-        // Edit-in-place guard: refuse to overwrite an already-settled ticket
-        // (settlement state/returned must survive a manual edit attempt).
+        // Cross-user id collision → 404, shaped exactly like "doesn't exist"
+        // so the endpoint can't be probed to learn which ids are taken
+        // (anti-oracle). Settled-ticket edit guard → 409.
+        if (result.code === "not_found") {
+          return json({ error: "not_found" }, 404, cors);
+        }
         return json({ error: result.code }, 409, cors);
       }
       if (!result.row) {
