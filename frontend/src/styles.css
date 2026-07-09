@@ -2216,6 +2216,27 @@ select:focus {
   font-size: 12px;
   color: var(--muted);
 }
+/* Edit-mode confirm/box banners (ticket-generation-alignment). */
+.mt-manual-locked-hint {
+  margin-top: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--soft);
+  border-left: 3px solid var(--sky);
+  border-radius: 6px;
+}
+.mt-manual-box-note {
+  margin-top: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--soft);
+  border-left: 3px solid var(--gold-amber);
+  border-radius: 6px;
+}
 .mt-manual-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);

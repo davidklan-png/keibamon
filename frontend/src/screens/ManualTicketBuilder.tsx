@@ -250,6 +250,16 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
 
       {/* Selection grid */}
       <div className="mt-manual-section">
+        {locked && initial?.lines && (
+          <p className="mt-manual-locked-hint" data-mt-locked-hint>
+            {tFmt("manual.lockedHint", { n: initial.lines.length })}
+          </p>
+        )}
+        {unlockedFromLock && !locked && (
+          <p className="mt-manual-box-note" data-mt-box-note>
+            {t("manual.boxNote")}
+          </p>
+        )}
         <div className="mt-vibe-label">
           {isBracket ? t("manual.pickBrackets") : t("manual.pickHorses")}
           {!locked && (

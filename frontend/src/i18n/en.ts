@@ -158,6 +158,10 @@ export const en = {
     linesCount: "{n} lines",
     editAria: "Edit this ticket",
     editConflict: "Ticket settled during edit — restored.",
+    lockedHint:
+      "Showing your original {n} lines as-is. Tap any horse to rebuild as a full box of every combination.",
+    boxNote:
+      "Now building a full box from your picks — every combination of the selected horses.",
   },
   explain: {
     title: "Why this ticket",
