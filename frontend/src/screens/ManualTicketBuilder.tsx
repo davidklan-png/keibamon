@@ -61,6 +61,12 @@ export interface ManualTicketBuilderProps {
 }
 
 const UNITS = [100, 200, 300];
+// Stage 6 guardrail: warn before committing a surprise-huge ticket. A full-
+// field trifecta FORMATION expands to 18P3 = 4896 priced lines; the user picks
+// "1st: all, 2nd: all, 3rd: all" without realizing the cost. 50 lines is past
+// any reasonable curated box (a 6-horse trifecta box is C(6,3)=20) and short
+// enough to catch the surprise early.
+const BIG_LINES = 50;
 
 function isOrderedType(type: BetType): boolean {
   return type === "exacta" || type === "trifecta";
@@ -364,7 +370,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
             {tFmt("manual.lockedHint", { n: initial.lines.length })}
           </p>
         )}
-        {unlockedFromLock && !locked && (
+        {unlockedFromLock && !locked && !isFormationMode && (
           <p className="mt-manual-box-note" data-mt-box-note>
             {t("manual.boxNote")}
           </p>
@@ -518,6 +524,14 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
               </div>
             </div>
           </div>
+          {ticket.lines.length >= BIG_LINES && (
+            <p className="mt-manual-warn" data-mt-big-warn>
+              {tFmt("manual.bigTicketWarn", {
+                n: ticket.lines.length,
+                cost: yen(ticket.cost),
+              })}
+            </p>
+          )}
         </div>
       )}
 

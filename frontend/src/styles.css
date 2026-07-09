@@ -2258,6 +2258,20 @@ select:focus {
   border-left: 3px solid var(--gold-amber);
   border-radius: 6px;
 }
+/* Stage 6: surprise-huge-ticket warning (formation trifecta → 100s of lines).
+   Stronger than the amber box-note — a warm red border + bold to read as a
+   stop-and-check, not a passive aside. */
+.mt-manual-warn {
+  margin-top: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--ink);
+  background: var(--soft);
+  border-left: 3px solid #d64545;
+  border-radius: 6px;
+}
 .mt-manual-grid {
   display: grid;
   grid-template-columns: repeat(6, 1fr);

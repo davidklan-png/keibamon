@@ -243,8 +243,7 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     expect(ticket.cost).toBe(600);
   });
 
-  it("reopens a saved formation with its position payload intact", () => {
-    const initial: ManualTicketInitial = {
+  it("reopens a saved formation with its position payload intact", () => {    const initial: ManualTicketInitial = {
       id: "kb-formation",
       type: "trifecta",
       unit: 100,
@@ -274,5 +273,46 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     expect(ticket.lines.map((l) => l.combo.join("-")).sort()).toEqual(
       initial.lines!.map((l) => l.join("-")).sort(),
     );
+  });
+
+  it("warns before a surprise-huge formation (≥50 lines)", () => {
+    // Stage 6 guardrail: a full-field trifecta formation expands to many
+    // priced lines; the builder must flag it before commit.
+    const { container } = mount();
+    clickType(container, "Trifecta");
+    // Every horse in every position → 8P3 = 336 lines.
+    for (const pos of [0, 1, 2]) {
+      for (const u of ["1", "2", "3", "4", "5", "6", "7", "8"]) {
+        clickPositionCell(container, pos, u);
+      }
+    }
+    expect(container.querySelector("[data-mt-big-warn]")).not.toBeNull();
+  });
+
+  it("does NOT show the box-rebuild note when a curated FORMATION unlocks", () => {
+    // Stage 6: the "building a full box" note was wrong for an ordered
+    // (formation) ticket. Unlocking a curated trifecta formation must NOT
+    // show it — the rebuild is a formation, not a box.
+    const initial: ManualTicketInitial = {
+      id: "kb-curated-form",
+      type: "trifecta",
+      unit: 100,
+      structure: "formation",
+      structurePayload: { positions: [["6"], ["3", "4"], ["1", "3", "4", "8"]] },
+      lines: [
+        ["6", "3", "1"],
+        ["6", "3", "4"],
+        ["6", "3", "8"],
+        ["6", "4", "1"],
+        ["6", "4", "3"],
+        ["6", "4", "8"],
+      ],
+    };
+    const { container } = mount({ initial });
+    expect(container.querySelector("[data-mt-locked-hint]")).not.toBeNull();
+    // Toggle a position pick → unlocks (mode stays formation).
+    clickPositionCell(container, 0, "5");
+    expect(container.querySelector("[data-mt-locked-hint]")).toBeNull();
+    expect(container.querySelector("[data-mt-box-note]")).toBeNull();
   });
 });

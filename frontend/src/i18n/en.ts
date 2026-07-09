@@ -124,8 +124,8 @@ export const en = {
     estReturn: "Expected return",
     estReturnLine: "Expected return per ¥100: ¥{ret} ({edge} house edge).",
     whyTicket: "Why this ticket",
-    placeCta: "Place ticket",
-    placeSignIn: "Sign in to place",
+    placeCta: "Save ticket",
+    placeSignIn: "Sign in to save",
     updatedMarks: "Updated with your marks",
   },
   mood: {
@@ -155,10 +155,13 @@ export const en = {
     pickPlacings: "Pick by finish",
     noBrackets: "Bracket data unavailable for this race — 枠連 disabled.",
     cancel: "Cancel",
-    register: "Register",
+    register: "Save ticket",
     save: "Save",
     hitProb: "Hit chance",
     linesCount: "{n} lines",
+    // Stage 6 guardrail: a formation trifecta can silently expand to hundreds
+    // of priced lines (a full-field formation = 18P3). Warn before commit.
+    bigTicketWarn: "Large ticket — {n} lines at {cost}.",
     editAria: "Edit this ticket",
     editConflict: "Ticket settled during edit — restored.",
     lockedHint:
@@ -245,6 +248,9 @@ export const en = {
     estimate: "estimate",
     empty: "No tickets yet — pick New bet to commit one.",
     offlineQueued: "Saved offline — will sync when you reconnect.",
+    // Stage 6: a real server reject (HTTP 4xx/5xx) is NOT offline — it won't
+    // succeed on retry, so don't pretend it's queued. Distinct honest copy.
+    saveFailed: "Couldn't save — the server rejected it. Try again.",
     you: "You",
     communityCard: "{n} friends are on today’s card",
     friendsOnRace: "{n} friends on this race",

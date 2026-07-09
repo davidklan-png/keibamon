@@ -397,9 +397,15 @@ function App() {
     if (r.ok) {
       setToast("");
       setView("mine");
+    } else if (r.err.kind === "http") {
+      // Real server reject (4xx/5xx) — won't succeed on retry, so don't pretend
+      // it's queued offline. Stay on the builder so the user can adjust/retry.
+      setToast(t("mine.saveFailed"));
     } else {
+      // Network failure (offline) — queue for the next reconnect.
       if (userId) pushPending(userId, committed);
       setToast(t("mine.offlineQueued"));
+      setView("mine");
     }
   }
 

@@ -813,11 +813,16 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
         }
         const r = await postTicket(token, tk);
         if (!r.ok) {
-          pushPending(userId, tk);
-          flash(t("mine.offlineQueued"));
+          if (r.err.kind === "http") {
+            // Server reject — won't succeed on retry; don't queue. Honest copy.
+            flash(t("mine.saveFailed"));
+          } else {
+            pushPending(userId, tk);
+            flash(t("mine.offlineQueued"));
+          }
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.warn("[commit] POST failed, queued for retry:", r.err);
+            console.warn("[commit] POST failed:", r.err);
           }
         }
       })();
@@ -923,6 +928,9 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
             );
             mirrorToCache(tickets);
             flash(t("manual.editConflict"));
+          } else if (r.err.kind === "http") {
+            // Non-409 server reject — won't succeed on retry; don't queue.
+            flash(t("mine.saveFailed"));
           } else if (!existingRow) {
             pushPending(userId, tk);
             flash(t("mine.offlineQueued"));
