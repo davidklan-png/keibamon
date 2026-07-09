@@ -1,10 +1,12 @@
 import { describe, it, expect } from "vitest";
 import {
   buildManualTicket,
+  finalizeTicket,
   K_BY_TYPE,
+  priceLines,
   runnersByBracket,
 } from "./manualBuilder";
-import { winProbs, type Runner } from "./fairvalue";
+import { kCombos, rankClass, varianceLabel, winProbs, type BetType, type Runner } from "./fairvalue";
 
 // 8-runner synthetic field with realistic odds spreads and brackets 1-8.
 const RUNNERS: Runner[] = [
@@ -203,5 +205,95 @@ describe("manualBuilder — K_BY_TYPE coverage", () => {
       expect(K_BY_TYPE[ty]).toBeDefined();
       expect([2, 3]).toContain(K_BY_TYPE[ty]);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 1 (ticket-generation-alignment): priceLines extraction + variance/tag
+// alignment with the recommender. priceLines must reproduce the box path's
+// line-for-line output; variance/tag must follow the SAME formulas recommend()
+// uses (via the shared varianceLabel + rankClass(core)), not the old
+// `ordered ? high : low` / per-line-majority-vote proxies.
+// ---------------------------------------------------------------------------
+describe("manualBuilder — priceLines extraction (parity with box path)", () => {
+  it("priceLines over the box combos reproduces buildManualTicket's lines", () => {
+    const { p, allUmas } = priced();
+    const picked = new Set(["3", "4", "6"]);
+    const t = buildManualTicket("trio", picked, new Set(), RUNNERS, p, allUmas, 100);
+    expect(t).not.toBeNull();
+    if (!t) return;
+    // Re-derive the SAME unordered combos the box path expanded and price them
+    // via priceLines — output must be byte-identical (the locked edit path
+    // relies on this so re-pricing never drifts from a fresh build).
+    const combos = kCombos(Array.from(picked).sort((a, b) => Number(a) - Number(b)), 3);
+    const { lines } = priceLines("trio", combos, p, allUmas, 100);
+    expect(lines).toEqual(t.lines);
+  });
+
+  it("priceLines → finalizeTicket round-trips to the full build (incl. wide)", () => {
+    const { p, allUmas } = priced();
+    const picked = new Set(["3", "6"]);
+    const t = buildManualTicket("wide", picked, new Set(), RUNNERS, p, allUmas, 100);
+    expect(t).not.toBeNull();
+    if (!t) return;
+    const { lines } = priceLines("wide", kCombos(["3", "6"], 2), p, allUmas, 100);
+    const rebuilt = finalizeTicket("wide", lines, 100, p, allUmas);
+    // Same lines, same assembled numbers — wide's wideTicketStats path runs
+    // inside finalizeTicket, so hitProb/bestCaseReturn match the full build.
+    expect(rebuilt.lines).toEqual(t.lines);
+    expect(rebuilt.hitProb).toBeCloseTo(t.hitProb, 6);
+    expect(rebuilt.bestCaseReturn).toBeCloseTo(t.bestCaseReturn, 6);
+    expect(rebuilt.variance).toBe(t.variance);
+    expect(rebuilt.tag).toBe(t.tag);
+  });
+
+  it("priceLines drops zero-probability (scratched) combos", () => {
+    const { p, allUmas } = priced();
+    // Horse "1" has p>0 in this field, so force a scratched entry by asking
+    // for a combo against a horse not in the market — comboProb returns 0.
+    const { lines } = priceLines("quinella", [["3", "NOPE"]], p, allUmas, 100);
+    expect(lines).toEqual([]);
+  });
+});
+
+describe("manualBuilder — variance/tag aligned with recommender", () => {
+  it("a longshot quinella box is 'high' variance (formula), not 'low' (old ordered proxy)", () => {
+    const { p, allUmas } = priced();
+    // Quinella is UNORDERED → the old manual proxy forced variance "low" for
+    // EVERY quinella. This longshot-only box has a tiny hit probability, so the
+    // shared formula (hitProb < 0.15 → high) flips it to "high". That flip is
+    // the alignment being proven, not a coincidence.
+    const picked = new Set(["5", "7", "8"]); // odds 12.0 / 20.0 / 10.0
+    const t = buildManualTicket("quinella", picked, new Set(), RUNNERS, p, allUmas, 100);
+    expect(t).not.toBeNull();
+    if (!t) return;
+    expect(t.hitProb).toBeLessThan(0.15);
+    expect(t.variance).toBe("high");
+  });
+
+  it("every manual ticket's variance === varianceLabel(hitProb, avgPayout, unit)", () => {
+    const { p, allUmas } = priced();
+    const cases: Array<{ type: BetType; pick: string[] }> = [
+      { type: "quinella", pick: ["3", "4", "6"] },
+      { type: "wide", pick: ["3", "6"] },
+      { type: "exacta", pick: ["3", "6"] },
+      { type: "trio", pick: ["3", "4", "6"] },
+      { type: "trifecta", pick: ["3", "4", "6"] },
+    ];
+    for (const c of cases) {
+      const t = buildManualTicket(c.type, new Set(c.pick), new Set(), RUNNERS, p, allUmas, 100);
+      expect(t).not.toBeNull();
+      if (!t) continue;
+      expect(t.variance).toBe(varianceLabel(t.hitProb, t.avgPayout, t.unit));
+    }
+  });
+
+  it("tag matches rankClass(core) (no per-line majority vote)", () => {
+    const { p, allUmas } = priced();
+    const picked = new Set(["3", "4", "6"]);
+    const t = buildManualTicket("trio", picked, new Set(), RUNNERS, p, allUmas, 100);
+    expect(t).not.toBeNull();
+    if (!t) return;
+    expect(t.tag).toBe(rankClass(t.core, p, allUmas));
   });
 });

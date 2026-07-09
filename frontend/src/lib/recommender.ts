@@ -27,6 +27,7 @@ import {
   kPerms,
   rankClass,
   RET,
+  varianceLabel,
   wideTicketStats,
   type BetType,
   type Runner,
@@ -379,8 +380,9 @@ function buildTicket(
   const core = unique(kept.flatMap((x) => x.combo));
   const tag = rankClass(core, input.p, input.allUmas);
   // High-variance label: low hit rate OR very large avg payout relative to unit.
-  const variance: "high" | "low" =
-    hitProb < 0.15 || avgPayout / Math.max(1, unit) > 30 ? "high" : "low";
+  // Shared with the manual builder via `varianceLabel` so both paths classify
+  // the same ticket shape identically (feeds `moodKey()`).
+  const variance = varianceLabel(hitProb, avgPayout, unit);
 
   // Rationale keys are i18n lookups used by the Explain screen.
   const rationaleKeys: string[] = [];
@@ -627,8 +629,7 @@ export function buildBoxTicket(
   const avgPayout = lines.reduce((s, x) => s + x.payout, 0) / lines.length;
   const core = unique(lines.flatMap((x) => x.combo));
   const tag = rankClass(core, p, allUmas);
-  const variance: "high" | "low" =
-    hitProb < 0.15 || avgPayout / Math.max(1, unitStake) > 30 ? "high" : "low";
+  const variance = varianceLabel(hitProb, avgPayout, unitStake);
 
   const payload: BoxPayload = { set: set.slice() };
 
@@ -845,8 +846,7 @@ export function buildFormationTicket(
   const avgPayout = lines.reduce((s, x) => s + x.payout, 0) / lines.length;
   const core = unique(lines.flatMap((x) => x.combo));
   const tag = rankClass(core, p, allUmas);
-  const variance: "high" | "low" =
-    hitProb < 0.15 || avgPayout / Math.max(1, unitStake) > 30 ? "high" : "low";
+  const variance = varianceLabel(hitProb, avgPayout, unitStake);
 
   const payload: FormationPayload = {
     positions: positions.map((s) => s.slice()),

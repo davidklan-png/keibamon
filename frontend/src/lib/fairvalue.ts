@@ -256,6 +256,26 @@ export function rankClass(
   return "blend";
 }
 
+/**
+ * Variance label shared by every ticket-producing path (recommender's
+ * buildTicket / buildBoxTicket / buildFormationTicket, and the manual builder's
+ * finalizeTicket). A ticket is "high" variance when it hits rarely OR pays very
+ * large relative to its unit stake; otherwise "low". This feeds `moodKey()` so a
+ * manually-built ticket and an equivalent-risk recommender ticket land on the
+ * same Safer/Balanced/Spicier pill regardless of which path built them.
+ *
+ * Pure function of three scalars — extracted so the formula can't drift between
+ * paths (it was previously inlined in three recommender spots and diverged in
+ * the manual builder, which used a crude `ordered ? high : low` proxy).
+ */
+export function varianceLabel(
+  hitProb: number,
+  avgPayout: number,
+  unit: number,
+): "high" | "low" {
+  return hitProb < 0.15 || avgPayout / Math.max(1, unit) > 30 ? "high" : "low";
+}
+
 export interface ComboEval {
   combo: string[];
   prob: number;

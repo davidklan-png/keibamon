@@ -35,10 +35,10 @@ import {
   kCombos,
   kPerms,
   rankClass,
+  varianceLabel,
   wideTicketStats,
   type BetType,
   type Runner,
-  type ValueTag,
 } from "./fairvalue";
 import type { Ticket, TicketLine } from "./types";
 
@@ -140,17 +140,15 @@ export function buildManualTicket(
     const arr = Array.from(pickedBrackets).sort((a, b) => a - b);
     if (arr.length < 2) return null;
     const lines: TicketLine[] = [];
-    let hitProb = 0;
     for (let i = 0; i < arr.length; i++) {
       for (let j = i + 1; j < arr.length; j++) {
         const out = priceBracketPair(arr[i], arr[j], byBracket, p, allUmas, unit);
         if (!out) continue;
         lines.push(out.line);
-        hitProb += out.hitProb;
       }
     }
     if (lines.length === 0) return null;
-    return finalizeTicket(type, lines, hitProb, unit, false);
+    return finalizeTicket(type, lines, unit, p, allUmas);
   }
 
   const k = K_BY_TYPE[type];
@@ -158,6 +156,32 @@ export function buildManualTicket(
   if (arr.length < k) return null;
   const ordered = type === "exacta" || type === "trifecta";
   const combos = ordered ? kPerms(arr, k) : kCombos(arr, k);
+  const { lines } = priceLines(type, combos, p, allUmas, unit);
+  if (lines.length === 0) return null;
+  return finalizeTicket(type, lines, unit, p, allUmas);
+}
+
+/**
+ * Price an EXPLICIT list of combos (not derived from a picked set). Each combo
+ * is priced through the SAME `comboProb` + `RET[type]` + `rankClass` path as
+ * `buildManualTicket`'s box expansion, so output is byte-identical for the same
+ * combos. Returns the naive `Σ line.prob` as `hitProb` — correct as-is for the
+ * five mutually-exclusive types, and an upper bound the wide caller overrides
+ * (via `finalizeTicket`'s `wideTicketStats` path). Zero-probability combos
+ * (scratched / unpriceable) are dropped, exactly as the box path does.
+ *
+ * Extracted so the edit/locked path (ManualTicketBuilder) can re-price a
+ * ticket's ORIGINAL combos against CURRENT odds without re-deriving them from
+ * a box expansion — that's what stops "open a curated ticket, change nothing,
+ * Save" from silently regenerating the full box.
+ */
+export function priceLines(
+  type: BetType,
+  combos: string[][],
+  p: Record<string, number>,
+  allUmas: string[],
+  unit: number,
+): { lines: TicketLine[]; hitProb: number } {
   const ret = RET[type];
   const lines: TicketLine[] = [];
   let hitProb = 0;
@@ -167,60 +191,60 @@ export function buildManualTicket(
     const fairOdds = 1 / prob;
     const payout = (ret / prob) * unit;
     lines.push({ combo, prob, fairOdds, payout, tag: rankClass(combo, p, allUmas) });
-    // For non-wide types, lines are mutually exclusive (at most one wins per
-    // race) → hitProb = Σ line.prob. Wide is special-cased below.
-    if (type !== "wide") hitProb += prob;
+    hitProb += prob;
   }
-  if (lines.length === 0) return null;
+  return { lines, hitProb };
+}
 
-  // Wide: use the same multi-pay-aware stats as the recommender so a manual
-  // wide ticket's hitProb / bestCaseReturn matches what a recommender wide
-  // ticket would show for the same lines. (Σ line.prob would overcount.)
+/**
+ * Assemble a `Ticket` from already-priced lines. Self-contained — derives
+ * hitProb / bestCaseReturn / variance / tag from `lines` + the win market, so
+ * both the box path (`buildManualTicket`) and the edit/locked re-price path
+ * (`ManualTicketBuilder`) run through ONE assembly definition.
+ *
+ *   - hitProb + bestCaseReturn: wide is the one bet type where multiple lines
+ *     can co-hit (up to C(3,2) pairs when covered horses fill the board), so
+ *     it routes through `wideTicketStats` for the true P(≥1) + multi-pay best
+ *     case. The other five types are mutually exclusive (at most one line wins
+ *     per race) → Σ line.prob is the true hitProb, and the max single-line
+ *     payout is the best case. Same kernel the recommender uses, so a manual
+ *     ticket's numbers match a recommender ticket's for the same lines.
+ *   - variance + tag use the SAME formulas as `recommend()` (`varianceLabel`
+ *     and `rankClass(core, …)`), so a manually-built ticket lands on the same
+ *     Safer/Balanced/Spicier mood pill as an equivalent-risk recommender ticket.
+ *     Previously variance was a crude `ordered ? high : low` proxy and tag was
+ *     a per-line majority vote, which could disagree with `rankClass(core)`.
+ */
+export function finalizeTicket(
+  type: BetType,
+  lines: TicketLine[],
+  unit: number,
+  p: Record<string, number>,
+  allUmas: string[],
+): Ticket {
+  const cost = lines.length * unit;
+  const expectedReturn = lines.reduce((s, l) => s + l.prob * l.payout, 0);
+  const avgPayout = lines.reduce((s, l) => s + l.payout, 0) / lines.length;
+  const core = Array.from(new Set(lines.flatMap((l) => l.combo)));
+
+  let hitProb: number;
+  let bestCaseReturn: number;
   if (type === "wide") {
     const stats = wideTicketStats(
       lines.map((l) => ({ combo: l.combo, payout: l.payout })),
       p,
       allUmas,
     );
-    return finalizeTicket(type, lines, stats.hitProb, unit, true, stats.bestCaseReturn);
+    hitProb = stats.hitProb;
+    bestCaseReturn = stats.bestCaseReturn;
+  } else {
+    hitProb = lines.reduce((s, l) => s + l.prob, 0);
+    bestCaseReturn = Math.max(...lines.map((l) => l.payout));
   }
 
-  return finalizeTicket(type, lines, hitProb, unit, ordered);
-}
+  const tag = rankClass(core, p, allUmas);
+  const variance = varianceLabel(hitProb, avgPayout, unit);
 
-/**
- * Assemble the final Ticket. `variance` is heuristic: ordered types (exacta,
- * trifecta) get "high" (one strict sequence to hit); unordered types get
- * "low". This feeds `moodKey()` so the existing mood-pill render on the
- * ticket card has a value to show — there's no personality behind a manual
- * ticket, but the UX wants a mood label and "balanced" / "safer" / "spicier"
- * are reasonable labels derived from the ticket's own properties.
- */
-function finalizeTicket(
-  type: BetType,
-  lines: TicketLine[],
-  hitProb: number,
-  unit: number,
-  ordered: boolean,
-  bestCaseOverride?: number,
-): Ticket {
-  const cost = lines.length * unit;
-  const expectedReturn = lines.reduce((s, l) => s + l.prob * l.payout, 0);
-  const avgPayout = lines.reduce((s, l) => s + l.payout, 0) / lines.length;
-  const bestCaseReturn =
-    bestCaseOverride ?? Math.max(...lines.map((l) => l.payout));
-  // Dominant tag = whichever ValueTag appears most often across lines. Ties
-  // break by the order ["chalk", "blend", "value"] — matches the recommender's
-  // "lowest variance wins" intuition.
-  const tagCounts: Record<ValueTag, number> = { chalk: 0, blend: 0, value: 0 };
-  for (const l of lines) tagCounts[l.tag]++;
-  const tag: ValueTag =
-    tagCounts.chalk >= tagCounts.blend && tagCounts.chalk >= tagCounts.value
-      ? "chalk"
-      : tagCounts.value >= tagCounts.blend
-        ? "value"
-        : "blend";
-  const core = Array.from(new Set(lines.flatMap((l) => l.combo)));
   return {
     id: "manual",
     type,
@@ -233,7 +257,7 @@ function finalizeTicket(
     core,
     tag,
     unit,
-    variance: ordered ? "high" : "low",
+    variance,
     rationaleKeys: [],
   };
 }

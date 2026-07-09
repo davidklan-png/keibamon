@@ -3,6 +3,7 @@ import { recommend, recommendDiverse } from "./recommender";
 import {
   winProbs,
   comboProb,
+  varianceLabel,
   wideTicketStats,
   type Runner,
 } from "./fairvalue";
@@ -312,5 +313,35 @@ describe("recommender — balanced tier structural mix (defect 3)", () => {
       if (out.length > 0 && out[0].tag === "blend") blendCount += 1;
     }
     expect(blendCount).toBeGreaterThanOrEqual(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Variance-formula pin (ticket-generation-alignment Step 1). The variance
+// label was inlined in three recommender spots and duplicated (divergently) in
+// the manual builder; it now lives in one shared `varianceLabel`. This pins the
+// relationship — every recommend() ticket's variance MUST equal
+// varianceLabel(hitProb, avgPayout, unit) — so any future drift in either the
+// formula or its call sites fails loudly. (recommend()'s own selection/scoring
+// math is untouched; this only re-asserts the classification formula.)
+// ---------------------------------------------------------------------------
+describe("recommender — variance formula pin (shared varianceLabel)", () => {
+  it("every recommend() ticket's variance === varianceLabel(hitProb, avgPayout, unit)", () => {
+    const personalities = ["safe", "balanced", "longshot", "fan", "antiChalk"] as const;
+    for (const personality of personalities) {
+      const out = recommend(mkInput({ personality, budget: 2400 }));
+      expect(out.length).toBeGreaterThan(0);
+      for (const t of out) {
+        expect(t.variance).toBe(varianceLabel(t.hitProb, t.avgPayout, t.unit));
+      }
+    }
+  });
+
+  it("every recommendDiverse() ticket satisfies the same variance relationship", () => {
+    const out = recommendDiverse(mkInput({ ...DEFAULT_STYLE }));
+    expect(out.length).toBeGreaterThan(0);
+    for (const t of out) {
+      expect(t.variance).toBe(varianceLabel(t.hitProb, t.avgPayout, t.unit));
+    }
   });
 });
