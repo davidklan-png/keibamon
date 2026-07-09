@@ -12,6 +12,46 @@
 
 import { TICKET_STATES, TicketRow } from "./core";
 
+/**
+ * Mirror of frontend/src/lib/fairvalue.ts `BetType`. NOTE: win/place are NOT
+ * committable bet types in this codebase (confirmed against the resolver in
+ * fairvalue.ts and the manual builder — the recommender/manual paths produce
+ * only these six exotic types). The original audit brief listed win/place too;
+ * they are intentionally absent here so a phantom type can't be stored.
+ */
+export const TICKET_TYPES = new Set([
+  "quinella",
+  "wide",
+  "exacta",
+  "trio",
+  "trifecta",
+  "bracket_quinella",
+]);
+
+/** Mirror of frontend TicketStructure (ADR-0011). */
+export const TICKET_STRUCTURES = new Set(["single", "box", "wheel", "formation"]);
+
+// Sanity bounds — generous enough to admit any ticket the UI can build, tight
+// enough to reject abuse. A full-field trifecta FORMATION expands to 18P3 =
+// 4896 priced lines (~390KB), which sets the floor for MAX_LINES and the byte
+// cap; D1 rows are practically capped near 1MB. (The audit's suggested ~16KB
+// cap would reject legitimate large boxes/formations — flagged for review.)
+const MAX_PAYLOAD_BYTES = 1_000_000;
+const MAX_LINES = 5_000;
+const MAX_UNIT = 1_000_000; // yen per line
+const MAX_UMABAN = 18; // JRA max field size
+const MAX_RACE_NO = 12; // JRA max races per venue per day
+
+interface TicketLineBody {
+  combo?: unknown;
+}
+interface TicketBody {
+  type?: unknown;
+  lines?: unknown;
+  cost?: unknown;
+  structure?: unknown;
+}
+
 interface CommittedTicketBody {
   id?: unknown;
   serial?: unknown;
@@ -20,6 +60,7 @@ interface CommittedTicketBody {
   unit?: unknown;
   createdAt?: unknown;
   race?: { raceKey?: unknown } | null;
+  ticket?: TicketBody | null;
   // The rest is opaque recommender output + race snapshot.
   [k: string]: unknown;
 }
@@ -52,6 +93,17 @@ export interface ParsedTicketBody {
   state: string;
   payoutBase: number;
   createdAt: number;
+  /**
+   * Stage 4 derived flat columns — payload stays authoritative; these mirror it
+   * for queryable feeds/analytics. NULL where the payload didn't carry the field.
+   */
+  ticketType: string | null;
+  lineCount: number | null;
+  cost: number | null;
+  unit: number | null;
+  structure: string | null;
+  venue: string | null;
+  raceNo: number | null;
 }
 
 export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicketBody } | { ok: false; code: string } {
@@ -70,6 +122,82 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
   const raceKey =
     typeof b.race?.raceKey === "string" && b.race.raceKey ? b.race.raceKey : "";
   if (!raceKey) return { ok: false, code: "bad_race_key" };
+
+  // Byte cap (abuse backstop). Computed after the cheap field checks so a
+  // garbage id doesn't pay for a stringify.
+  const payload = JSON.stringify(body);
+  if (payload.length > MAX_PAYLOAD_BYTES) return { ok: false, code: "payload_too_large" };
+
+  // ticket block: type allowlist + line bounds + per-line combo shape.
+  const t = b.ticket;
+  if (!t || typeof t !== "object") return { ok: false, code: "bad_ticket" };
+  const tb = t as TicketBody;
+  if (typeof tb.type !== "string" || !TICKET_TYPES.has(tb.type)) {
+    return { ok: false, code: "bad_ticket_type" };
+  }
+  const lines = tb.lines;
+  if (!Array.isArray(lines) || lines.length < 1 || lines.length > MAX_LINES) {
+    return { ok: false, code: "bad_lines" };
+  }
+  for (const ln of lines) {
+    const combo = (ln as TicketLineBody | null | undefined)?.combo;
+    if (!Array.isArray(combo) || combo.length < 1 || combo.length > MAX_UMABAN) {
+      return { ok: false, code: "bad_line_combo" };
+    }
+    for (const c of combo) {
+      // umabans arrive as strings ("01".."18"); reject non-numeric / out-of-range.
+      if (typeof c !== "string" || !/^\d{1,2}$/.test(c)) {
+        return { ok: false, code: "bad_line_combo" };
+      }
+      const n = Number(c);
+      if (!Number.isInteger(n) || n < 1 || n > MAX_UMABAN) {
+        return { ok: false, code: "bad_line_combo" };
+      }
+    }
+  }
+
+  // unit (stake per line) — validated only when present.
+  let unit: number | null = null;
+  if (b.unit !== undefined && b.unit !== null) {
+    if (typeof b.unit !== "number" || !Number.isFinite(b.unit) || b.unit < 1 || b.unit > MAX_UNIT) {
+      return { ok: false, code: "bad_unit" };
+    }
+    unit = Math.floor(b.unit);
+  }
+
+  // structure (optional ADR-0011 classification).
+  let structure: string | null = null;
+  if (tb.structure !== undefined && tb.structure !== null) {
+    if (typeof tb.structure !== "string" || !TICKET_STRUCTURES.has(tb.structure)) {
+      return { ok: false, code: "bad_structure" };
+    }
+    structure = tb.structure;
+  }
+
+  // cost: prefer the payload's own cost when it's a sane positive number;
+  // otherwise derive unit × line_count. Capped at unit_max × max_lines.
+  const costRaw = tb.cost;
+  let cost: number | null = null;
+  if (
+    typeof costRaw === "number" &&
+    Number.isFinite(costRaw) &&
+    costRaw >= 0 &&
+    costRaw <= MAX_UNIT * MAX_LINES
+  ) {
+    cost = Math.floor(costRaw);
+  } else if (unit !== null) {
+    cost = unit * lines.length;
+  }
+
+  // venue + race_no from raceKey "<date>|<venue>|<raceNo>|<name>".
+  const parts = raceKey.split("|");
+  const venue = parts.length > 1 && parts[1] ? parts[1] : null;
+  let raceNo: number | null = null;
+  if (parts.length > 2 && /^\d{1,2}$/.test(parts[2])) {
+    const rn = Number(parts[2]);
+    if (Number.isInteger(rn) && rn >= 1 && rn <= MAX_RACE_NO) raceNo = rn;
+  }
+
   return {
     ok: true,
     ticket: {
@@ -79,7 +207,14 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
       payoutBase: b.payoutBase,
       createdAt: b.createdAt,
       raceKey,
-      payload: JSON.stringify(body),
+      payload,
+      ticketType: tb.type,
+      lineCount: lines.length,
+      cost,
+      unit,
+      structure,
+      venue,
+      raceNo,
     },
   };
 }
@@ -125,6 +260,14 @@ export async function insertTicket(
     state: string;
     payoutBase: number;
     createdAt: number;
+    // Stage 4 derived flat columns (parsed by parseTicketBody).
+    ticketType: string | null;
+    lineCount: number | null;
+    cost: number | null;
+    unit: number | null;
+    structure: string | null;
+    venue: string | null;
+    raceNo: number | null;
   },
 ): Promise<InsertTicketResult> {
   const existing = await db
@@ -141,13 +284,21 @@ export async function insertTicket(
   }
   const row = await db
     .prepare(
-      `INSERT INTO tickets (id, user_id, serial, race_key, payload, state, payout_base, returned, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)
+      `INSERT INTO tickets (id, user_id, serial, race_key, payload, state, payout_base, returned, created_at,
+                            ticket_type, line_count, cost, unit, structure, venue, race_no)
+       VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          payload = excluded.payload,
          state = excluded.state,
          payout_base = excluded.payout_base,
-         returned = NULL
+         returned = NULL,
+         ticket_type = excluded.ticket_type,
+         line_count = excluded.line_count,
+         cost = excluded.cost,
+         unit = excluded.unit,
+         structure = excluded.structure,
+         venue = excluded.venue,
+         race_no = excluded.race_no
        RETURNING *`,
     )
     .bind(
@@ -159,6 +310,13 @@ export async function insertTicket(
       parsed.state,
       parsed.payoutBase,
       Math.floor(parsed.createdAt / 1000),
+      parsed.ticketType,
+      parsed.lineCount,
+      parsed.cost,
+      parsed.unit,
+      parsed.structure,
+      parsed.venue,
+      parsed.raceNo,
     )
     .first<TicketRow>();
   return { ok: true, row };

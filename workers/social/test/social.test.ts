@@ -45,6 +45,15 @@ interface TicketRow {
   payout_base: number;
   returned: number | null;
   created_at: number;
+  placings?: string | null;
+  /** Stage 4 derived flat columns (optional — mirror src/core.ts TicketRow). */
+  ticket_type?: string | null;
+  line_count?: number | null;
+  cost?: number | null;
+  unit?: number | null;
+  structure?: string | null;
+  venue?: string | null;
+  race_no?: number | null;
 }
 
 interface FollowRow {
@@ -180,9 +189,14 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       // it to handle_taken.
       const newHandle = "handle" in sets ? (sets.handle as string | null) : undefined;
       if (newHandle !== undefined) {
-        const ownerOfHandle = [...usersById.values()].find((u) => u.handle === newHandle);
+        // Case-insensitive (0010 idx_users_handle_ci_unique): "Bob" and "bob"
+        // collide, so a claim matching another user's handle in any case raises.
+        const nh = newHandle == null ? null : newHandle.toLowerCase();
+        const ownerOfHandle = [...usersById.values()].find(
+          (u) => u.handle != null && u.handle.toLowerCase() === nh,
+        );
         if (ownerOfHandle && ownerOfHandle.clerk_user_id !== clerkId) {
-          const err = new Error("UNIQUE constraint failed: users.handle");
+          const err = new Error("UNIQUE constraint failed: users.lower(handle)");
           (err as Error & { name?: string }).name = "ConstraintError";
           throw err;
         }
@@ -240,25 +254,21 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       const id = b[0] as string;
       return usersById.get(id) ?? null;
     }
-    m = /^SELECT \* FROM users WHERE handle = \?/i.exec(s);
+    m = /^SELECT \* FROM users WHERE lower\(handle\) = lower\(\?\)/i.exec(s);
     if (m) {
-      const handle = b[0] as string;
-      return [...usersById.values()].find((u) => u.handle === handle) ?? null;
+      // Case-insensitive handle lookup (userByHandle, post-0010).
+      const handle = String(b[0]).toLowerCase();
+      return [...usersById.values()].find((u) => u.handle?.toLowerCase() === handle) ?? null;
     }
 
     // ---- TICKETS ----
     m = /^INSERT INTO tickets [\s\S]*RETURNING \*/i.exec(s);
     if (m) {
-      const [id, userId, serial, raceKey, payload, state, payoutBase, , createdAt] = b as [
-        string,
-        string,
-        string,
-        string,
-        string,
-        string,
-        number,
-        unknown,
-        number,
+      // 15 binds: id,user_id,serial,race_key,payload,state,payout_base,created_at,
+      // then the Stage 4 flat columns (returned is literal NULL in the SQL).
+      const [id, userId, serial, raceKey, payload, state, payoutBase, createdAt, ticketType, lineCount, cost, unit, structure, venue, raceNo] = b as [
+        string, string, string, string, string, string, number, number,
+        string | null, number | null, number | null, number | null, string | null, string | null, number | null,
       ];
       const row: TicketRow = {
         id,
@@ -270,6 +280,13 @@ function makeFakeD1(opts: FakeD1Options = {}) {
         payout_base: payoutBase,
         returned: null,
         created_at: createdAt,
+        ticket_type: ticketType,
+        line_count: lineCount,
+        cost,
+        unit,
+        structure,
+        venue,
+        race_no: raceNo,
       };
       tickets.set(id, row);
       return row;
@@ -628,7 +645,7 @@ function sampleTicketBody(overrides: Partial<Record<string, unknown>> = {}): Rec
     createdAt: 1_700_000_000_000,
     race: { raceKey: "20260621|Hanshin|11|Takarazuka Kinen" },
     unit: 200,
-    ticket: { type: "quinella", lines: [] },
+    ticket: { type: "quinella", lines: [{ combo: ["1", "2"] }], cost: 200 },
     ...overrides,
   };
 }
@@ -1730,6 +1747,57 @@ describe("social Worker — Phase 3 (social graph)", () => {
     );
     expect(r2.status).toBe(409);
     expect(await r2.json()).toMatchObject({ error: "handle_taken" });
+  });
+
+  it("handle uniqueness is CASE-INSENSITIVE: a case variant of a taken handle → 409", async () => {
+    // 0010 swapped the case-sensitive index for lower(handle); "Bob" and "bob"
+    // must collide so public profile routing can't split them.
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const r1 = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "Bob" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r1.status).toBe(200);
+    jwtSub("clerk_b");
+    const r2 = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "bob" }), // case variant
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r2.status).toBe(409);
+    expect(await r2.json()).toMatchObject({ error: "handle_taken" });
+  });
+
+  it("POST /tickets persists the Stage 4 derived flat columns", async () => {
+    jwtSub("user_abc");
+    const { db, calls } = makeFakeD1();
+    const r = await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(sampleTicketBody({ id: "kb-flat-1" })),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(r.status).toBe(200);
+    const insertCall = calls.find((c) => /INSERT INTO tickets/i.test(c.sql));
+    expect(insertCall, "expected an INSERT INTO tickets call").toBeTruthy();
+    // The flat columns are written alongside the payload.
+    expect(insertCall!.sql).toMatch(/ticket_type/);
+    expect(insertCall!.sql).toMatch(/line_count/);
+    expect(insertCall!.sql).toMatch(/\bvenue\b/);
+    expect(insertCall!.sql).toMatch(/\brace_no\b/);
   });
 
   it("rejects malformed handle on POST /me (bad characters / too long)", async () => {

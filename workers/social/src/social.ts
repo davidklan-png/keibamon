@@ -70,7 +70,13 @@ export async function userById(db: D1Database, id: string): Promise<UserRow | nu
 }
 
 export async function userByHandle(db: D1Database, handle: string): Promise<UserRow | null> {
-  return db.prepare(`SELECT * FROM users WHERE handle = ?`).bind(handle).first<UserRow>();
+  // Case-insensitive: handles are unique on lower(handle) (0010's
+  // idx_users_handle_ci_unique), which this predicate seeks directly. Public
+  // profile routing must not split "Bob" and "bob" into two users.
+  return db
+    .prepare(`SELECT * FROM users WHERE lower(handle) = lower(?)`)
+    .bind(handle)
+    .first<UserRow>();
 }
 
 /** Insert-or-nothing follow. Idempotent — a repeat follow is a no-op 200. */

@@ -44,6 +44,19 @@ export interface TicketRow {
   created_at: number;
   /** JSON `{pos, umabans}[]` (top-N finish, dead-heat aware); NULL until settled. */
   placings: string | null;
+  /**
+   * Stage 4 (0010) derived flat columns — payload stays authoritative; these
+   * mirror it so feeds/analytics can filter/sort without parsing JSON. NULL
+   * where the payload didn't carry the field (or pre-0010 rows not backfilled).
+   * Not yet SELECTed by the read paths — write-only until feeds migrate.
+   */
+  ticket_type?: string | null;
+  line_count?: number | null;
+  cost?: number | null;
+  unit?: number | null;
+  structure?: string | null;
+  venue?: string | null;
+  race_no?: number | null;
 }
 
 /** A ticket row joined with its owner + cheer aggregate, for feed/profile. */
