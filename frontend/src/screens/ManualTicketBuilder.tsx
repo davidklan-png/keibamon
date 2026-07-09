@@ -27,8 +27,11 @@ import {
 } from "../lib/fairvalue";
 import {
   buildManualTicket,
+  finalizeTicket,
+  isFullBox,
   K_BY_TYPE,
   MANUAL_BET_TYPES,
+  priceLines,
   runnersByBracket,
 } from "../lib/manualBuilder";
 import type { Ticket } from "../lib/types";
@@ -94,6 +97,37 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
     return s;
   });
 
+  // ---- Edit-mode lock (ticket-generation-alignment) -----------------------
+  // Opening a CURATED ticket — one that is NOT a full combinatorial box, e.g.
+  // a recommend() ticket that kept only its top ~10 of 35 trio combos — must
+  // not silently regenerate the full box when the user taps Save without
+  // changing anything. While locked, the preview is the ticket's ORIGINAL
+  // combos re-priced against the CURRENT odds (line set unchanged; prices may
+  // drift with the market, which is correct), not a fresh buildManualTicket()
+  // over the picked set. The first pick change flips `locked` off for the rest
+  // of the session and switches to normal full-box behavior.
+  //
+  // Never locks for: new tickets (no `initial`), full-box edits (a manually-
+  // built box regenerates to itself anyway), or bracket_quinella (always full-
+  // box; recommend() never produces it). Changing the unit stake does NOT
+  // unlock — it only re-prices, and the line set should be preserved.
+  const initialCore = useMemo(() => {
+    if (!initial?.lines || initial.type === "bracket_quinella") return [];
+    const s = new Set<string>();
+    for (const ln of initial.lines) for (const c of ln) s.add(c);
+    return Array.from(s);
+  }, [initial]);
+  const initiallyLocked =
+    !!initial?.lines &&
+    !!initial.type &&
+    initial.type !== "bracket_quinella" &&
+    !isFullBox(initial.type, initial.lines, initialCore);
+  const [locked, setLocked] = useState(initiallyLocked);
+  // Flips on the locked→box transition so the UI can show a one-time "now
+  // rebuilding the full box" note. Stays false for tickets that were never
+  // locked (new / full-box edits).
+  const [unlockedFromLock, setUnlockedFromLock] = useState(false);
+
   const isBracket = type === "bracket_quinella";
   const k = K_BY_TYPE[type];
   const hasBrackets = useMemo(() => runnersByBracket(runners) !== null, [runners]);
@@ -113,22 +147,45 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   );
   const bracketCells = ["1", "2", "3", "4", "5", "6", "7", "8"];
 
-  // Build the priced ticket from current picks.
-  const ticket = useMemo(
-    () =>
-      buildManualTicket(
-        type,
-        pickedUma,
-        pickedBrackets,
-        runners,
+  // Build the priced ticket from current picks. While locked (editing a
+  // curated ticket before any pick change), re-price the ticket's ORIGINAL
+  // combos against the live market instead of regenerating the box — so an
+  // unchanged Save comes back out with the same line set (and cost) it went
+  // in with. Once unlocked, this is exactly today's buildManualTicket() path.
+  const ticket = useMemo(() => {
+    if (locked && initial?.lines && initial?.type) {
+      const { lines } = priceLines(
+        initial.type,
+        initial.lines,
         p,
         allUmas,
         unit,
-      ),
-    [type, pickedUma, pickedBrackets, runners, p, allUmas, unit],
-  );
+      );
+      if (lines.length === 0) return null;
+      return finalizeTicket(initial.type, lines, unit, p, allUmas);
+    }
+    return buildManualTicket(
+      type,
+      pickedUma,
+      pickedBrackets,
+      runners,
+      p,
+      allUmas,
+      unit,
+    );
+  }, [locked, initial, type, pickedUma, pickedBrackets, runners, p, allUmas, unit]);
 
+  // Any structural pick change permanently ends locked mode for this session
+  // (we don't re-lock if the picks happen to return to the original set —
+  // simpler to reason about and test than set-equality tracking on every tap).
+  function unlock() {
+    if (locked) {
+      setLocked(false);
+      setUnlockedFromLock(true);
+    }
+  }
   function toggleUma(u: string) {
+    unlock();
     setPickedUma((prev) => {
       const next = new Set(prev);
       if (next.has(u)) next.delete(u);
@@ -137,6 +194,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
     });
   }
   function toggleBracket(b: number) {
+    unlock();
     setPickedBrackets((prev) => {
       const next = new Set(prev);
       if (next.has(b)) next.delete(b);
@@ -146,6 +204,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   }
   function pickType(next: BetType) {
     if (next === type) return;
+    unlock();
     setType(next);
     // Clear picks so an old selection in the other number space doesn't
     // leak into the new view (a 3-bracket 枠連 selection shouldn't silently
@@ -193,9 +252,11 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
       <div className="mt-manual-section">
         <div className="mt-vibe-label">
           {isBracket ? t("manual.pickBrackets") : t("manual.pickHorses")}
-          <span className="mt-manual-pickcount">
-            {pickedCount}/{k}
-          </span>
+          {!locked && (
+            <span className="mt-manual-pickcount">
+              {pickedCount}/{k}
+            </span>
+          )}
         </div>
         {isBracket ? (
           <div className="mt-manual-grid" role="list">

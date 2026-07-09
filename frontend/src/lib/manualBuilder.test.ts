@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   buildManualTicket,
   finalizeTicket,
+  isFullBox,
   K_BY_TYPE,
   priceLines,
   runnersByBracket,
@@ -295,5 +296,46 @@ describe("manualBuilder — variance/tag aligned with recommender", () => {
     expect(t).not.toBeNull();
     if (!t) return;
     expect(t.tag).toBe(rankClass(t.core, p, allUmas));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Step 2 (ticket-generation-alignment): isFullBox heuristic. Count-based —
+// lines.length >= C(core,k) (unordered) or P(core,k) (ordered). Drives the
+// ManualTicketBuilder's locked-mode decision: a curated (non-full-box) auto
+// ticket locks onto its original lines until the user changes a pick, so Save
+// without any change can't silently regenerate the full box.
+// ---------------------------------------------------------------------------
+describe("manualBuilder — isFullBox", () => {
+  // isFullBox only reads combos.length + core + type, so empty combos suffice.
+  function combos(n: number): string[][] {
+    return Array.from({ length: n }, () => []);
+  }
+
+  it("an exact full box → true (C(n,k) unordered; P(n,k) ordered)", () => {
+    expect(isFullBox("quinella", combos(3), ["1", "2", "3"])).toBe(true); // C(3,2)=3
+    expect(isFullBox("trifecta", combos(6), ["1", "2", "3"])).toBe(true); // P(3,3)=6
+    expect(isFullBox("trio", combos(10), ["1", "2", "3", "4", "5"])).toBe(true); // C(5,3)=10
+    expect(isFullBox("exacta", combos(2), ["3", "6"])).toBe(true); // P(2,2)=2
+  });
+
+  it("a curated (recommend()-shaped) ticket with fewer lines than the full count → false", () => {
+    // recommend()-style trio over a 7-horse core keeps ~10 of C(7,3)=35.
+    expect(isFullBox("trio", combos(10), ["1", "2", "3", "4", "5", "6", "7"])).toBe(false);
+    // Curated exacta: 1 line over a 2-horse core, P(2,2)=2 expected.
+    expect(isFullBox("exacta", combos(1), ["3", "6"])).toBe(false);
+  });
+
+  it("bracket_quinella is always full-box (recommend() never produces it)", () => {
+    expect(isFullBox("bracket_quinella", combos(1), ["3"])).toBe(true);
+  });
+
+  it("a full box with one zero-prob combo removed reads as curated (safe false-negative)", () => {
+    // A quinella box over 4 horses = C(4,2)=6 combos, but a scratched horse
+    // made one combo unpriceable so the builder dropped it → 5 combos. The
+    // count heuristic can't tell this from a curated subset → false (lock
+    // engages). Safe: the user confirms the reduced set as-is, or taps to
+    // rebuild. Documented limitation, never the unsafe direction.
+    expect(isFullBox("quinella", combos(5), ["1", "2", "3", "4"])).toBe(false);
   });
 });

@@ -262,6 +262,68 @@ export function finalizeTicket(
   };
 }
 
+/** n! for small n (the manual field is ≤ ~18, so no overflow concern). */
+function factorial(n: number): number {
+  let f = 1;
+  for (let i = 2; i <= n; i++) f *= i;
+  return f;
+}
+
+/** C(n, k) — count of unordered k-combos over n elements. */
+function combinations(n: number, k: number): number {
+  return factorial(n) / (factorial(k) * factorial(n - k));
+}
+
+/** P(n, k) = n!/(n-k)! — count of ordered k-perms over n elements. */
+function permutations(n: number, k: number): number {
+  return factorial(n) / factorial(n - k);
+}
+
+/**
+ * Does `combos` constitute the FULL combinatorial box over `core` for `type`,
+ * or a curated subset? Count-based heuristic — NOT a combo-set diff: the
+ * expected full count is C(core.length, k) for the unordered types
+ * (quinella/wide/trio) and P(core.length, k) for the ordered ones
+ * (exacta/trifecta); `combos.length >= expected` ⇒ full box.
+ *
+ * Why this exists: `recommend()` keeps only its top-scored, value-preserving
+ * lines (often 6–14 of the 35–56 a full trio/trifecta box would have). Opening
+ * such a curated ticket for edit must NOT silently regenerate the full box on
+ * Save — the ManualTicketBuilder uses this to decide whether to lock onto the
+ * original line set (re-price, don't regenerate) until the user actually
+ * changes a pick.
+ *
+ * Takes raw combos (`string[][]`) rather than `TicketLine[]` so it can classify
+ * a `ManualTicketInitial` (whose `lines` ARE `string[][]`) without pricing it;
+ * for a priced `Ticket`, pass `ticket.lines.map((l) => l.combo)`. It only reads
+ * the count.
+ *
+ * bracket_quinella always returns true: it expands every picked bracket-pair,
+ * `recommend()` never produces that type, and the locked-mode path that
+ * consumes this never applies to it.
+ *
+ * False-negative tolerance (safe direction): a genuinely-full box CAN carry
+ * fewer combos than the raw count when some were unpriceable (zero probability
+ * — a scratched horse; the builder drops them in `priceLines`). Such a box
+ * reads as "curated" here → lock engages slightly more often than strictly
+ * necessary, never less. Accepted over coupling this pure helper to a live
+ * combo-set diff.
+ */
+export function isFullBox(
+  type: BetType,
+  combos: string[][],
+  core: string[],
+): boolean {
+  if (type === "bracket_quinella") return true;
+  const n = core.length;
+  const k = K_BY_TYPE[type];
+  if (n < k) return false; // can't be a full k-box with fewer than k in the core
+  const expected = (type === "exacta" || type === "trifecta")
+    ? permutations(n, k)
+    : combinations(n, k);
+  return combos.length >= expected;
+}
+
 /** The 6 bet types the manual builder offers, in display order. */
 export const MANUAL_BET_TYPES: BetType[] = [
   "quinella",
