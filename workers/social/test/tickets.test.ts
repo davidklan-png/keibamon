@@ -79,6 +79,16 @@ describe("parseTicketBody — validation", () => {
     expect(parseTicketBody(body({ unit: 10_000_000 }))).toMatchObject({ ok: false, code: "bad_unit" });
   });
 
+  it("rejects a fractional unit instead of silently flooring it", () => {
+    // 200.5 must NOT be floored to 200 (that would let a client understate the
+    // derived cost and pass a matching forged ticket.cost).
+    expect(parseTicketBody(body({ unit: 200.5 }))).toMatchObject({ ok: false, code: "bad_unit" });
+    expect(parseTicketBody(body({ unit: 99.99 }))).toMatchObject({ ok: false, code: "bad_unit" });
+    // An integer-valued float is still an integer number of yen → accepted.
+    const ok = parseTicketBody(body({ unit: 200.0 }));
+    expect(ok.ok).toBe(true);
+  });
+
   it("rejects an unknown structure", () => {
     expect(
       parseTicketBody(body({ ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], structure: "parlay" } })),
@@ -116,6 +126,16 @@ describe("parseTicketBody — validation", () => {
     // negative cost is rejected.
     expect(
       parseTicketBody(body({ ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], cost: -1 } })),
+    ).toMatchObject({ ok: false, code: "bad_cost" });
+    // A supplied cost with NO unit is rejected: the equality can't be checked
+    // and cost must be derivable (persisting NULL would not meet "supplied cost
+    // must equal server-derived unit × line_count").
+    expect(
+      parseTicketBody(body({ unit: undefined, ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], cost: 200 } })),
+    ).toMatchObject({ ok: false, code: "bad_cost" });
+    // ...and the same when unit is explicitly null.
+    expect(
+      parseTicketBody(body({ unit: null, ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], cost: 200 } })),
     ).toMatchObject({ ok: false, code: "bad_cost" });
   });
 

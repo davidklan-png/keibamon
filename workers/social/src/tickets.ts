@@ -167,13 +167,22 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
     }
   }
 
-  // unit (stake per line) — validated only when present.
+  // unit (stake per line) — validated only when present. Must be an INTEGER
+  // number of yen; a fractional unit is rejected (bad_unit), NOT silently
+  // floored — flooring would let a client understate the derived cost
+  // (200.5 → 200) and pass a matching forged ticket.cost.
   let unit: number | null = null;
   if (b.unit !== undefined && b.unit !== null) {
-    if (typeof b.unit !== "number" || !Number.isFinite(b.unit) || b.unit < 1 || b.unit > MAX_UNIT) {
+    if (
+      typeof b.unit !== "number" ||
+      !Number.isFinite(b.unit) ||
+      !Number.isInteger(b.unit) ||
+      b.unit < 1 ||
+      b.unit > MAX_UNIT
+    ) {
       return { ok: false, code: "bad_unit" };
     }
-    unit = Math.floor(b.unit);
+    unit = b.unit;
   }
 
   // structure (optional ADR-0011 classification).
@@ -187,10 +196,11 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
 
   // cost is DERIVED server-side from validated unit × line_count — NEVER
   // trusted from the payload. If the payload supplies ticket.cost, it must be
-  // finite, integral, non-negative, and EXACTLY equal to the derived cost; any
-  // mismatch (forged or stale) is rejected with bad_cost. When unit is absent
-  // the cost can't be derived and is stored NULL (ticket.cost is still NOT
-  // trusted — it's only checked, never stored).
+  // finite, integral, non-negative, and EXACTLY equal to the derived cost. A
+  // supplied cost with NO unit is rejected (bad_cost): the equality can't be
+  // checked and cost must be derivable — persisting NULL would not meet
+  // "supplied cost must equal server-derived unit × line_count." Any mismatch
+  // → bad_cost.
   const derivedCost = unit !== null ? unit * lines.length : null;
   if (tb.cost !== undefined && tb.cost !== null) {
     const clientCost = tb.cost;
@@ -202,7 +212,10 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
     ) {
       return { ok: false, code: "bad_cost" };
     }
-    if (derivedCost !== null && clientCost !== derivedCost) {
+    if (derivedCost === null) {
+      return { ok: false, code: "bad_cost" };
+    }
+    if (clientCost !== derivedCost) {
       return { ok: false, code: "bad_cost" };
     }
   }
