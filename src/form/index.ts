@@ -18,6 +18,7 @@ import {
 } from "./cardBuilder";
 import { normalizeName } from "./normalize";
 import {
+  HORSE_FORM_BATCH_SQL,
   HORSE_FORM_SQL,
   JOCKEY_FORM_SQL,
   RACE_RUNNERS_FROM_STARTS_SQL,
@@ -118,20 +119,35 @@ async function handleRaceForm(
     }
   }
 
-  // For each runner, fetch their horse form (PIT-filtered to asOf) and build
-  // a card. Mirror Python's response shape: race_id + as_of (raw) + runners[].
-  const cards: { horse_number: number; horse_name: string | null; form: unknown }[] = [];
-  for (const rn of runners) {
+  // Fetch every runner's horse form in ONE batched query (PIT-filtered to
+  // asOf), then build a card per runner from the grouped rows. Byte-identical
+  // to the former per-runner HORSE_FORM_SQL loop (same predicate + ORDER BY,
+  // just IN-listed) — the TS↔Python parity gate covers buildHorseCard.
+  const keys = Array.from(
+    new Set(runners.map((rn) => normalizeName(rn.horse_name)).filter((k): k is string => !!k)),
+  );
+  const rowsByKey = new Map<string, FormStartRow[]>();
+  if (keys.length > 0) {
+    const placeholders = keys.map(() => "?").join(",");
+    const sql = HORSE_FORM_BATCH_SQL.replace("PLACEHOLDERS", placeholders);
+    const { results } = await env.FORM.prepare(sql).bind(...keys, asOf).all();
+    for (const row of (results ?? []) as unknown as FormStartRow[]) {
+      const k = row.horse_name_key;
+      if (!k) continue; // null key can't match any runner; skip
+      const bucket = rowsByKey.get(k);
+      if (bucket) bucket.push(row);
+      else rowsByKey.set(k, [row]);
+    }
+  }
+  const cards: { horse_number: number; horse_name: string | null; form: unknown }[] = runners.map((rn) => {
     const key = normalizeName(rn.horse_name);
-    const rows: FormStartRow[] = key
-      ? ((await env.FORM.prepare(HORSE_FORM_SQL).bind(key, asOf).all()).results ?? []) as unknown as FormStartRow[]
-      : [];
-    cards.push({
+    const rows: FormStartRow[] = key ? (rowsByKey.get(key) ?? []) : [];
+    return {
       horse_number: rn.horse_number,
       horse_name: rn.horse_name,
       form: buildHorseCard(rows, rn.horse_name, asOfRaw),
-    });
-  }
+    };
+  });
 
   return jsonResponse({ race_id: raceId, as_of: asOfRaw, runners: cards });
 }

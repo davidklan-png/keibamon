@@ -310,6 +310,24 @@ describe("settleSweep — initial settlement (OPEN → settled)", () => {
     expect(row.settle_result_hash).toHaveLength(64); // SHA-256 hex
   });
 
+  it("prunes expired rate_limit buckets on every sweep (TTL)", async () => {
+    // Stage 5: the sweep deletes rate_limits rows from prior windows so the
+    // table can't grow unbounded — rides the existing cron, no new infra.
+    // Runs even when the card is empty (the TTL precedes the /api/live fetch).
+    const { db, calls } = makeFakeD1([]);
+    await settleSweep(
+      { DB: db, LIVE_BASE: "https://racing.example" },
+      fetchStub(makeSnapshot([])),
+    );
+    const del = calls.find((c) => /DELETE FROM rate_limits WHERE bucket < \?/i.test(c.sql));
+    expect(del, "expected a DELETE FROM rate_limits ... WHERE bucket < ?").toBeDefined();
+    // The cutoff is a non-negative integer (the current 60s bucket — keep the
+    // active window, delete older ones). Exact value not asserted to avoid
+    // flakiness across a minute boundary.
+    expect(typeof del!.bindings[0]).toBe("number");
+    expect(del!.bindings[0]).toBeGreaterThanOrEqual(0);
+  });
+
   it("resolves a missing OPEN ticket (quinella miss → miss, returned=null)", async () => {
     const rows: SweepTicketRow[] = [
       {

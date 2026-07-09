@@ -23,6 +23,26 @@ export const HORSE_FORM_SQL = `
   ORDER BY available_at DESC
 `;
 
+/**
+ * Same selection/PIT filter as HORSE_FORM_SQL but for MANY horse keys at once
+ * (the race-card route fetches one card per runner). `?placeholders` is the
+ * caller's `keys.map(() => "?").join(",")` IN-list, with `available_at` bound
+ * last. Results are grouped locally by horse_name_key — output is byte-identical
+ * to running HORSE_FORM_SQL per runner (same predicate, same ORDER BY). The
+ * TS↔Python parity gate covers buildHorseCard, which is unchanged.
+ */
+export const HORSE_FORM_BATCH_SQL = `
+  SELECT
+    horse_name_key, horse_name, jockey_id, trainer_id, race_id, horse_number,
+    available_at, race_date, racecourse, surface, distance_m, distance_band,
+    going, going_wetness, is_wet, grade_label, field_size, finish_position,
+    finish_time_seconds, margin, last_3f_seconds, last_3f_rank, win_odds,
+    popularity, beat_market, style_signal
+  FROM form_starts
+  WHERE horse_name_key IN (PLACEHOLDERS) AND available_at < ?
+  ORDER BY available_at DESC
+`;
+
 export const JOCKEY_FORM_SQL = `
   SELECT
     horse_name_key, horse_name, jockey_id, trainer_id, race_id, horse_number,

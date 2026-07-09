@@ -277,11 +277,19 @@ export async function getFriendsOnRace(
   };
 }
 
-/** Phase 3: GET /api/social/friends/on-card?race=k1&race=k2... — today's-card strip. */
+/** Phase 3: GET /api/social/friends/on-card?race=k1&race=k2... — today's-card strip.
+ *  Stage 5: the batch endpoint also returns a per-race breakdown, so the
+ *  MyTickets snapshot refresh needs ONE request (not 1 + up-to-12). */
 export async function getFriendsOnCard(
   token: string | null,
   raceKeys: string[],
-): Promise<SocialResult<{ count: number; avatars: FriendsAvatar[] }>> {
+): Promise<
+  SocialResult<{
+    count: number;
+    avatars: FriendsAvatar[];
+    perRace: Record<string, { count: number; avatars: FriendsAvatar[] }>;
+  }>
+> {
   if (!token) return { ok: false, err: { kind: "no_token" } };
   const qs = raceKeys.map((k) => `race=${encodeURIComponent(k)}`).join("&");
   const r = await authedFetch(token, `/api/social/friends/on-card${qs ? `?${qs}` : ""}`, {
@@ -289,12 +297,23 @@ export async function getFriendsOnCard(
   });
   if (!r.ok) return { ok: false, err: r.err };
   if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
-  const body = (await readJson(r.res)) as { count?: number; avatars?: FriendsAvatar[] } | null;
+  const body = (await readJson(r.res)) as {
+    count?: number;
+    avatars?: FriendsAvatar[];
+    perRace?: Record<string, { count?: number; avatars?: FriendsAvatar[] }>;
+  } | null;
+  const perRace: Record<string, { count: number; avatars: FriendsAvatar[] }> = {};
+  if (body?.perRace) {
+    for (const [rk, v] of Object.entries(body.perRace)) {
+      perRace[rk] = { count: v?.count ?? 0, avatars: Array.isArray(v?.avatars) ? v!.avatars : [] };
+    }
+  }
   return {
     ok: true,
     data: {
       count: body?.count ?? 0,
       avatars: Array.isArray(body?.avatars) ? body!.avatars : [],
+      perRace,
     },
   };
 }

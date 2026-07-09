@@ -523,32 +523,36 @@ function makeFakeD1(opts: FakeD1Options = {}) {
 
     // Feed / profile JOIN.
     if (/FROM tickets t\s+JOIN users u ON u\.id = t\.user_id/i.test(s)) {
-      const userId = b[0] as string;
-      const limitMatch = /LIMIT (\d+)/i.exec(s);
-      const limit = limitMatch ? Number(limitMatch[1]) : 100;
       const isFeed = /OR t\.user_id IN \(SELECT followee_id FROM follows/i.test(s);
       const hasBlockFilter = /NOT EXISTS[\s\S]*FROM blocks[\s\S]*WHERE blocker_id = \?/i.test(s);
+      // Stage 5: the viewer's-cheer LEFT JOIN (me.user_id = ?) is the FIRST bind.
+      // FEED binds [viewer, viewer, viewer, viewer]; PROFILE binds [viewer, profileUser].
+      // The scope user is the viewer for feed, the profile user (b[1]) for profile.
+      const viewerId = (b[0] as string | null) ?? null;
+      const scopeUserId = isFeed ? (viewerId as string) : (b[1] as string);
+      const limitMatch = /LIMIT (\d+)/i.exec(s);
+      const limit = limitMatch ? Number(limitMatch[1]) : 100;
       const blockedByViewer = new Set(
         [...blocks]
-          .filter((bk) => bk.startsWith(`${userId}|`))
+          .filter((bk) => bk.startsWith(`${viewerId}|`))
           .map((bk) => bk.split("|")[1]),
       );
       let scope: TicketRow[];
       if (isFeed) {
         const followees = new Set(
           [...follows]
-            .filter((f) => f.startsWith(`${userId}|`))
+            .filter((f) => f.startsWith(`${viewerId}|`))
             .map((f) => f.split("|")[1]),
         );
         scope = [...tickets.values()].filter(
           (t) =>
-            (t.user_id === userId || followees.has(t.user_id)) &&
+            (t.user_id === scopeUserId || followees.has(t.user_id)) &&
             (!hasBlockFilter || !blockedByViewer.has(t.user_id)),
         );
       } else {
         scope = [...tickets.values()].filter(
           (t) =>
-            t.user_id === userId &&
+            t.user_id === scopeUserId &&
             (!hasBlockFilter || !blockedByViewer.has(t.user_id)),
         );
       }
@@ -556,12 +560,14 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       const out = scope.slice(0, limit).map((t) => {
         const owner = usersById.get(t.user_id);
         const n = [...cheers].filter((c) => c.startsWith(`${t.id}|`)).length;
+        const cheeredByMe = viewerId != null && cheers.has(`${t.id}|${viewerId}`);
         return {
           ...t,
           owner_handle: owner?.handle ?? null,
           owner_display_name: owner?.display_name ?? null,
           owner_avatar: owner?.avatar ?? null,
           cheers_count: n,
+          cheered_by_me: cheeredByMe ? 1 : 0,
         } as unknown as T;
       });
       return out;
@@ -588,6 +594,38 @@ function makeFakeD1(opts: FakeD1Options = {}) {
         seen.add(t.user_id);
         const owner = usersById.get(t.user_id);
         out.push({
+          handle: owner?.handle ?? null,
+          display_name: owner?.display_name ?? null,
+          avatar: owner?.avatar ?? null,
+        } as unknown as T);
+      }
+      return out;
+    }
+
+    // Friends-on-card BATCHED (Stage 5): SELECT DISTINCT f.followee_id, t.race_key,
+    // u.handle, ... FROM follows f JOIN tickets t ON t.user_id = f.followee_id
+    // JOIN users u ... WHERE f.follower_id = ? AND t.race_key IN (?,?,..)
+    // → b = [followerId, ...raceKeys]. Returns (followee_id, race_key, avatar) rows.
+    if (/FROM follows f\s+JOIN tickets t ON t\.user_id = f\.followee_id\s+JOIN users u/i.test(s)) {
+      const followerId = b[0] as string;
+      const followees = new Set(
+        [...follows]
+          .filter((f) => f.startsWith(`${followerId}|`))
+          .map((f) => f.split("|")[1]),
+      );
+      const raceKeys = new Set(b.slice(1).map(String));
+      const seen = new Set<string>(); // followee_id|race_key
+      const out: T[] = [];
+      for (const t of tickets.values()) {
+        if (!followees.has(t.user_id)) continue;
+        if (!raceKeys.has(t.race_key)) continue;
+        const key = `${t.user_id}|${t.race_key}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const owner = usersById.get(t.user_id);
+        out.push({
+          followee_id: t.user_id,
+          race_key: t.race_key,
           handle: owner?.handle ?? null,
           display_name: owner?.display_name ?? null,
           avatar: owner?.avatar ?? null,
@@ -1593,6 +1631,79 @@ describe("social Worker — Phase 3 (social graph)", () => {
     void a;
   });
 
+  it("feed sets cheeredByMe via the LEFT JOIN (no per-row lookup)", async () => {
+    // Stage 5: cheeredByMe is now folded into the feed query, not an N+1
+    // hasCheered() per row. A followed ticket the viewer cheered → true; one
+    // they didn't → false. Both in the same feed response.
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const a = (await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    ).then((r) => r.json())) as { id: string };
+    jwtSub("clerk_b");
+    const b = (await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    ).then((r) => r.json())) as { id: string };
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(sampleTicketBody({ id: "kb-feed-cheer" })),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    // Cheers are won-only (Phase 3 rule) — settle the ticket so it can be cheered.
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req("/api/social/tickets/kb-feed-cheer", {
+        method: "PATCH",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ state: "won", returned: 9000 }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(sampleTicketBody({ id: "kb-feed-plain" })),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    // a follows b, then cheers exactly one of b's tickets.
+    jwtSub("clerk_a");
+    await worker.fetch(req(`/api/social/follow/${b.id}`, { method: "POST", headers: authed() }), {
+      ...BASE_ENV,
+      DB: db,
+    }, {} as ExecutionContext);
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/tickets/kb-feed-cheer/cheer", { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req("/api/social/feed", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const body = (await res.json()) as { tickets: { id: string; cheeredByMe?: boolean }[] };
+    const byId = new Map(body.tickets.map((t) => [t.id, t]));
+    expect(byId.get("kb-feed-cheer")?.cheeredByMe).toBe(true);
+    expect(byId.get("kb-feed-plain")?.cheeredByMe).toBe(false);
+    void a;
+  });
+
   it("feed EXCLUDES tickets from users the caller does NOT follow", async () => {
     const { db } = makeFakeD1();
     jwtSub("clerk_a");
@@ -1672,6 +1783,66 @@ describe("social Worker — Phase 3 (social graph)", () => {
     const body = (await res.json()) as { count: number; avatars: unknown[] };
     expect(body.count).toBe(1);
     expect(body.avatars).toHaveLength(1);
+  });
+
+  it("friends-on-card (batched): one request returns card count + per-race breakdown", async () => {
+    // Stage 5: the endpoint folds the card-level count/avatars AND a per-race
+    // breakdown into one response, so MyTickets no longer fans out up-to-12
+    // per-race requests per snapshot.
+    const { db } = makeFakeD1();
+    const rk1 = "20260621|Hanshin|11|Takarazuka Kinen";
+    const rk2 = "20260621|Hanshin|12|Panther Stakes";
+    jwtSub("clerk_b");
+    const b = (await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    ).then((r) => r.json())) as { id: string };
+    // b holds a ticket on each of two races.
+    for (const [id, rk] of [["kb-c-1", rk1], ["kb-c-2", rk2]] as const) {
+      jwtSub("clerk_b");
+      await worker.fetch(
+        req("/api/social/tickets", {
+          method: "POST",
+          headers: { ...authed(), "Content-Type": "application/json" },
+          body: JSON.stringify(sampleTicketBody({ id, race: { raceKey: rk } })),
+        }),
+        { ...BASE_ENV, DB: db },
+        {} as ExecutionContext,
+      );
+    }
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/follow/${b.id}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a");
+    const qs = `race=${encodeURIComponent(rk1)}&race=${encodeURIComponent(rk2)}`;
+    const res = await worker.fetch(
+      req(`/api/social/friends/on-card?${qs}`, { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      count: number;
+      avatars: unknown[];
+      perRace: Record<string, { count: number; avatars: unknown[] }>;
+    };
+    // Card-level: one distinct friend across the card.
+    expect(body.count).toBe(1);
+    expect(body.avatars).toHaveLength(1);
+    // Per-race: b appears on BOTH races.
+    expect(Object.keys(body.perRace).sort()).toEqual([rk1, rk2]);
+    expect(body.perRace[rk1].count).toBe(1);
+    expect(body.perRace[rk2].count).toBe(1);
   });
 
   it("rate limit: 31st follow in a minute returns 429 + Retry-After", async () => {

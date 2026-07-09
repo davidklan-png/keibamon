@@ -40,7 +40,6 @@ import {
   block as socialBlock,
   report as socialReport,
   getProfile,
-  getFriendsOnRace,
   getFriendsOnCard,
   type PublicProfile,
   type FriendsAvatar,
@@ -404,16 +403,14 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       const raceKeys = (snap?.races || [])
         .filter((r) => (r.runners || []).length > 0)
         .map((r) => mtRaceKey(r, fallbackDate));
+      // ONE batched request returns BOTH the card-level count/avatars AND a
+      // per-race breakdown (Stage 5) — replaces the former 1 card + up-to-12
+      // per-race requests this loop made every 45s snapshot refresh.
       const card = await getFriendsOnCard(token, raceKeys);
-      if (!cancelled && card.ok) setFriendsOnCard(card.data);
-      // Per-race counts: fetch for each raceKey with tickets we care about.
-      // Cheap upper bound — the snapshot rarely has >12 races.
-      const perRace: Record<string, { count: number; avatars: FriendsAvatar[] }> = {};
-      for (const rk of raceKeys.slice(0, 12)) {
-        const r = await getFriendsOnRace(token, rk);
-        if (r.ok) perRace[rk] = r.data;
+      if (!cancelled && card.ok) {
+        setFriendsOnCard({ count: card.data.count, avatars: card.data.avatars });
+        setFriendsOnRace(card.data.perRace);
       }
-      if (!cancelled) setFriendsOnRace(perRace);
     })();
     return () => {
       cancelled = true;

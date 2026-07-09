@@ -133,6 +133,26 @@ describe("GET /api/weekly-report", () => {
     expect(inputs[0].gate_snapshot_at).toBe("2026-06-26T08:00:00Z");
   });
 
+  it("limits to the latest edition — older editions are not returned", async () => {
+    const db = new Database(":memory:");
+    withTable(db);
+    // An older edition (W25 < W26 lexicographically).
+    db.prepare(
+      "INSERT INTO weekly_report (edition_key, version, payload, published_at) VALUES (?, ?, ?, ?)",
+    ).run("2026-W25", 1, JSON.stringify(weekendInput(1)), "2026-06-19T09:00:00Z");
+    // The current edition.
+    seed(db, 1, JSON.stringify(weekendInput(2)));
+    const env = withFakeDb(makeFakeD1(db));
+    const res = await handleWeeklyReportRoutes(
+      new Request("https://test/api/weekly-report"),
+      env,
+    );
+    const inputs = await publishedInputs(res!);
+    // Only the latest edition (W26) — its history of past editions is not streamed.
+    expect(inputs.length).toBe(1);
+    expect(inputs[0].edition_key).toBe("2026-W26");
+  });
+
   it("degrades to empty when the table is missing (prepare throws)", async () => {
     // A DB whose .prepare throws on any SQL — emulates an unmigrated D1.
     // Cast to the global D1Database type (no import of the local shim type).

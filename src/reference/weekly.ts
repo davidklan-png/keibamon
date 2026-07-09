@@ -64,10 +64,16 @@ export async function handleWeeklyReportRoutes(
     if (rows.length === 0) {
       return jsonResponse({ status: "empty" });
     }
+    // SELECT_EDITIONS is ordered edition_key DESC, so rows[0] is the latest
+    // edition. Limit to that one edition (all its versions) instead of
+    // streaming the full history of past editions — the surface renders only
+    // the current edition, and this bounds the payload.
+    const latestEdition = rows[0].edition_key;
+    const latest = rows.filter((r) => r.edition_key === latestEdition);
     // Parse each payload; skip any row that doesn't deserialize so one bad
     // row can't blank the whole surface.
     const inputs: unknown[] = [];
-    for (const r of rows) {
+    for (const r of latest) {
       try {
         inputs.push(JSON.parse(r.payload));
       } catch {

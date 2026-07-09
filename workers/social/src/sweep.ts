@@ -38,6 +38,7 @@
 // no-ops (so a misconfigured deploy degrades gracefully rather than
 // stranding the cron).
 
+import { NOW, RATE_WINDOW } from "./core";
 import {
   resolveTicket,
   topPlacings,
@@ -322,6 +323,17 @@ export async function settleSweep(
   if (!env.LIVE_BASE) {
     console.warn("settleSweep: LIVE_BASE not set; sweep is a no-op");
     return { scanned: 0, settled: 0, reSettled: 0, archived: 0, deferred: false };
+  }
+
+  // rate_limits TTL: rows are bucketed per RATE_WINDOW (60s). Prune every
+  // bucket older than the current window so the table can't grow unbounded.
+  // Rides this existing 5-min cron — no new timer / KV / DO. Best-effort: a
+  // failure must never block settlement.
+  try {
+    const cutoff = Math.floor(NOW() / RATE_WINDOW);
+    await env.DB.prepare("DELETE FROM rate_limits WHERE bucket < ?").bind(cutoff).run();
+  } catch (e) {
+    console.warn(`settleSweep: rate_limit TTL prune failed: ${(e as Error).message}`);
   }
 
   let snap: LiveSnapshot;

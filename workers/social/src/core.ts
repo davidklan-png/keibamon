@@ -65,6 +65,8 @@ export interface TicketWithSocial extends TicketRow {
   owner_display_name: string | null;
   owner_avatar: string | null;
   cheers_count: number;
+  /** 1/0 from the viewer's-cheer LEFT JOIN (Stage 5); absent when logged-out. */
+  cheered_by_me?: number | null;
 }
 
 export const NOW = () => Math.floor(Date.now() / 1000);

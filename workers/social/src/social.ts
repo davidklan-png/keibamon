@@ -271,10 +271,7 @@ export async function addReport(
 }
 
 /** Decode a TicketWithSocial into the client's CommittedTicket shape. */
-function decodeSocialTicket(
-  row: TicketWithSocial,
-  cheeredByMe: boolean,
-): Record<string, unknown> | null {
+function decodeSocialTicket(row: TicketWithSocial): Record<string, unknown> | null {
   // owner per Decision 9: client derives TicketOwner; server sends flat fields.
   const owner =
     row.owner_handle || row.owner_display_name
@@ -288,7 +285,7 @@ function decodeSocialTicket(
   return decodeTicket(row, {
     owner,
     cheers: row.cheers_count ?? 0,
-    cheeredByMe,
+    cheeredByMe: !!row.cheered_by_me,
   });
 }
 
@@ -310,11 +307,13 @@ export async function buildFeed(
               u.handle AS owner_handle,
               u.display_name AS owner_display_name,
               u.avatar AS owner_avatar,
-              COALESCE(c.n, 0) AS cheers_count
+              COALESCE(c.n, 0) AS cheers_count,
+              (me.ticket_id IS NOT NULL) AS cheered_by_me
          FROM tickets t
          JOIN users u ON u.id = t.user_id
          LEFT JOIN (SELECT ticket_id, COUNT(*) AS n FROM cheers GROUP BY ticket_id) c
            ON c.ticket_id = t.id
+         LEFT JOIN cheers me ON me.ticket_id = t.id AND me.user_id = ?
         WHERE (t.user_id = ?
            OR t.user_id IN (SELECT followee_id FROM follows WHERE follower_id = ?))
            AND NOT EXISTS (
@@ -324,13 +323,11 @@ export async function buildFeed(
         ORDER BY t.created_at DESC
         LIMIT 100`,
     )
-    .bind(userId, userId, userId)
+    .bind(userId, userId, userId, userId)
     .all<TicketWithSocial>();
   const out: Record<string, unknown>[] = [];
   for (const row of results) {
-    // Single-row cheeredByMe lookup — N+1 is fine at cap 100 with an index.
-    const byMe = await hasCheered(db, row.id, userId);
-    const decoded = decodeSocialTicket(row, byMe);
+    const decoded = decodeSocialTicket(row);
     if (decoded) out.push(decoded);
   }
   return out;
@@ -352,16 +349,20 @@ export async function buildProfile(
                 u.handle AS owner_handle,
                 u.display_name AS owner_display_name,
                 u.avatar AS owner_avatar,
-                COALESCE(c.n, 0) AS cheers_count
+                COALESCE(c.n, 0) AS cheers_count,
+                (me.ticket_id IS NOT NULL) AS cheered_by_me
            FROM tickets t
            JOIN users u ON u.id = t.user_id
            LEFT JOIN (SELECT ticket_id, COUNT(*) AS n FROM cheers GROUP BY ticket_id) c
              ON c.ticket_id = t.id
+           LEFT JOIN cheers me ON me.ticket_id = t.id AND me.user_id = ?
           WHERE t.user_id = ?
           ORDER BY t.created_at DESC
           LIMIT 50`,
       )
-      .bind(profileUser.id)
+      // viewerUserId ?? null: a logged-out viewer binds NULL, and
+      // `me.user_id = NULL` never matches → cheered_by_me = 0. One query shape.
+      .bind(viewerUserId ?? null, profileUser.id)
       .all<TicketWithSocial>(),
   ]);
   const isFollowing = viewerUserId
@@ -369,8 +370,7 @@ export async function buildProfile(
     : false;
   const tickets: Record<string, unknown>[] = [];
   for (const row of ticketsRaw.results) {
-    const byMe = viewerUserId ? await hasCheered(db, row.id, viewerUserId) : false;
-    const decoded = decodeSocialTicket(row, byMe);
+    const decoded = decodeSocialTicket(row);
     if (decoded) tickets.push(decoded);
   }
   return {
@@ -395,6 +395,16 @@ async function isFollowingCheck(
 export interface FriendsAvatars {
   count: number;
   avatars: { handle: string | null; display_name: string | null; avatar: string | null }[];
+}
+
+/**
+ * Friends-on-card PLUS a per-race breakdown, in ONE query (Stage 5). Replaces
+ * the former 1 card + up-to-12 per-race requests the MyTickets snapshot loop
+ * made. The single join returns every (followed user × snapshot race they hold
+ * a ticket on); card-level + perRace are grouped locally from that.
+ */
+export interface FriendsCardResult extends FriendsAvatars {
+  perRace: Record<string, FriendsAvatars>;
 }
 
 /** Friends-on-race: followed users with ≥1 ticket on this raceKey. */
@@ -422,30 +432,48 @@ export async function friendsOnRace(
   };
 }
 
-/** Friends-on-card: followed users with ≥1 ticket on ANY race in the snapshot. */
+/** Friends-on-card (batched): card-level count/avatars + per-race breakdown. */
 export async function friendsOnCard(
   db: D1Database,
   userId: string,
   raceKeys: string[],
-): Promise<FriendsAvatars> {
-  if (raceKeys.length === 0) return { count: 0, avatars: [] };
-  // D1 prepared bindings cap at a conservative number; chunk with an IN list.
+): Promise<FriendsCardResult> {
+  if (raceKeys.length === 0) return { count: 0, avatars: [], perRace: {} };
   const placeholders = raceKeys.map(() => "?").join(",");
   const { results } = await db
     .prepare(
-      `SELECT DISTINCT u.handle, u.display_name, u.avatar
+      `SELECT DISTINCT f.followee_id, t.race_key, u.handle, u.display_name, u.avatar
          FROM follows f
+         JOIN tickets t ON t.user_id = f.followee_id
          JOIN users u ON u.id = f.followee_id
-        WHERE f.follower_id = ?
-          AND EXISTS (
-            SELECT 1 FROM tickets t
-             WHERE t.user_id = f.followee_id AND t.race_key IN (${placeholders})
-          )`,
+        WHERE f.follower_id = ? AND t.race_key IN (${placeholders})`,
     )
     .bind(userId, ...raceKeys)
-    .all<{ handle: string | null; display_name: string | null; avatar: string | null }>();
-  return {
-    count: results.length,
-    avatars: results.slice(0, 8),
-  };
+    .all<{
+      followee_id: string;
+      race_key: string;
+      handle: string | null;
+      display_name: string | null;
+      avatar: string | null;
+    }>();
+  type Avatar = { handle: string | null; display_name: string | null; avatar: string | null };
+  const byRace = new Map<string, Map<string, Avatar>>();
+  const cardFriends = new Map<string, Avatar>();
+  for (const r of results) {
+    const a: Avatar = { handle: r.handle, display_name: r.display_name, avatar: r.avatar };
+    cardFriends.set(r.followee_id, a);
+    let bucket = byRace.get(r.race_key);
+    if (!bucket) {
+      bucket = new Map();
+      byRace.set(r.race_key, bucket);
+    }
+    bucket.set(r.followee_id, a);
+  }
+  const perRace: Record<string, FriendsAvatars> = {};
+  for (const [rk, friends] of byRace) {
+    const arr = [...friends.values()];
+    perRace[rk] = { count: arr.length, avatars: arr.slice(0, 8) };
+  }
+  const cardArr = [...cardFriends.values()];
+  return { count: cardArr.length, avatars: cardArr.slice(0, 8), perRace };
 }
