@@ -17,6 +17,12 @@ import { describe, it, expect } from "vitest";
 import Database from "better-sqlite3";
 import type { Database as SqliteDb } from "better-sqlite3";
 import { makeFakeD1 } from "./form/test/fakeD1";
+// worker.js is the hand-written Cloudflare Worker entry (JS, not TS) — wrangler
+// bundles it for deploy; tsc has no .d.ts for it. The test drives it opaquely
+// via the typed `scheduled` cast below, so the untyped default import is fine.
+// Self-flagging: if a worker.d.ts or allowJs lands, this expect-error errors.
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-expect-error TS7016: no declaration file for the JS worker entry
 import worker from "./worker.js";
 import { LIVE_VERSION } from "./reference/buildLiveEdition";
 

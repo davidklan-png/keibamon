@@ -1,0 +1,27 @@
+# Minimal CI install for `PYTHONPATH=src python -m pytest -q`.
+#
+# This is the subset of pyproject.toml [project.dependencies] / [optional-dependencies.dev]
+# that the COLLECTED code (src/ + backend/ + tests/, per pyproject [tool.pytest.ini_options])
+# actually imports. Bounds are transcribed verbatim from pyproject — no version
+# guessing. Keep this in sync when a test (or a src/backend module a test reaches)
+# gains a new third-party import. Full project install (incl. mlflow/shap/dagster):
+#   pip install -e ".[dev]"
+#
+# Intentionally OMITTED (declared in pyproject but never imported on the test path):
+#   dagster   — only src/keibamon_orchestration (lazy import, no test reaches it)
+#   mlflow, shap, polars, pandera — modeling/orchestration-only, not imported by tests
+#
+# fastapi[standard] (not plain fastapi) because fastapi.testclient.TestClient needs
+# httpx at runtime and plain `fastapi` does not declare it; [standard] bundles it.
+# pydantic rides along with fastapi (backend/keibamon_api imports it).
+duckdb>=1.0
+fastapi[standard]>=0.115
+lightgbm>=4.5
+numpy>=2.0
+pandas>=2.2
+pyarrow>=17.0
+# pytz: not imported directly, but duckdb's read_parquet on TIMESTAMPTZ columns
+# (every lake query) requires it at runtime — test_import_realtime fails without it.
+pytz
+pytest>=8.2
+scikit-learn>=1.5

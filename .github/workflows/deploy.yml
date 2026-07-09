@@ -32,12 +32,40 @@ jobs:
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
+            workers/social/package-lock.json
 
-      # Root suite (Worker: weekly/form/settle) — gate the deploy on green.
+      - uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-ci.txt
+
+      # Root suite (Worker: weekly/form/settle) + typecheck — gate the deploy on green.
       - name: Install root deps
         run: npm ci
       - name: Root tests
         run: npm test
+      - name: Root typecheck
+        run: npm run tsc
+
+      # Social worker (D1: tickets/cheers/follows/settle) — typecheck + unit tests.
+      - name: Install social worker deps
+        run: npm ci
+        working-directory: workers/social
+      - name: Social worker typecheck
+        run: npx tsc --noEmit
+        working-directory: workers/social
+      - name: Social worker tests
+        run: npx vitest run
+        working-directory: workers/social
+
+      # Python lake/pipeline suite. requirements-ci.txt is the minimal subset of
+      # pyproject [project.dependencies] the collected tests import; PYTHONPATH=src
+      # is belt-and-suspenders over pyproject's [tool.pytest.ini_options].pythonpath.
+      - name: Install Python deps
+        run: pip install -r requirements-ci.txt
+      - name: Python tests
+        run: PYTHONPATH=src python -m pytest -q
 
       # Frontend: test, then build INTO splash/app so the deploy manifest is fresh.
       - name: Install frontend deps

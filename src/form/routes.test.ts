@@ -96,21 +96,30 @@ beforeAll(() => {
       },
     ],
   };
-  env = { FORM: makeFakeD1(db), DB: makeSnapshotD1({ current: liveSnap }) };
+  // The fakes implement only the D1 subset handleFormRoutes touches (prepare/
+  // bind/all/first); cast past the fuller global D1Database surface the typed
+  // env demands (batch/exec/withSession/dump). Test-only — production uses real D1.
+  env = {
+    FORM: makeFakeD1(db) as unknown as D1Database,
+    DB: makeSnapshotD1({ current: liveSnap }) as unknown as D1Database,
+  };
 });
 
 async function callRoute(pathWithQuery: string): Promise<Response> {
-  return handleFormRoutes(
+  // handleFormRoutes returns Promise<Response | null> (null = non-form path
+  // fell through). Every callRoute() test hits a form route, so the null branch
+  // never fires here — assert it away after awaiting.
+  return (await handleFormRoutes(
     new Request(`https://test${pathWithQuery}`),
     env,
-  ) as Response;
+  )) as Response;
 }
 
 describe("GET /api/horses/:name/form", () => {
   it("Alpha (as_of at G3 post) → ok + 2 starts (R4 PIT-excluded)", async () => {
     const r = await callRoute("/api/horses/Alpha/form?as_of=2026-06-28T06:30:00Z");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("ok");
     expect(body.career.starts).toBe(2);
     expect(body.career.wins).toBe(1);
@@ -120,7 +129,7 @@ describe("GET /api/horses/:name/form", () => {
   it("Alpha (no as_of) → ok + 2 starts (now = 2026-06-25 excludes R4)", async () => {
     const r = await callRoute("/api/horses/Alpha/form");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("ok");
     expect(body.career.starts).toBe(2);
     expect(body.as_of).toBeNull(); // raw param value reflected back
@@ -129,7 +138,7 @@ describe("GET /api/horses/:name/form", () => {
   it("Alpha (compact YYYYMMDD as_of) → tolerant parse", async () => {
     const r = await callRoute("/api/horses/Alpha/form?as_of=20260628");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("ok");
     expect(body.career.starts).toBe(2); // R0+R1; R4 still in the future
   });
@@ -137,7 +146,7 @@ describe("GET /api/horses/:name/form", () => {
   it("Nobody (unknown) → no_history", async () => {
     const r = await callRoute("/api/horses/Nobody/form");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("no_history");
     expect(body.horse_name).toBe("Nobody");
     expect(body.as_of).toBeNull();
@@ -147,7 +156,7 @@ describe("GET /api/horses/:name/form", () => {
     // ガンバレ is a normalized-key candidate (NFKC-stable).
     const r = await callRoute("/api/horses/%E3%82%AC%E3%83%B3%E3%83%90%E3%83%AC/form");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("no_history");
     expect(body.horse_name).toBe("ガンバレ");
   });
@@ -157,7 +166,7 @@ describe("GET /api/jockeys/:id/form", () => {
   it("j01 (as_of at G3) → 3 starts + Alpha/Beta combos", async () => {
     const r = await callRoute("/api/jockeys/j01/form?as_of=2026-06-28T06:30:00Z");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("ok");
     expect(body.career.starts).toBe(3);
     const byHorse = Object.fromEntries(
@@ -169,7 +178,7 @@ describe("GET /api/jockeys/:id/form", () => {
   it("j02 (no completed starts; R3 is upcoming) → no_history", async () => {
     const r = await callRoute("/api/jockeys/j02/form");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.status).toBe("no_history");
     expect(body.jockey_id).toBe("j02");
   });
@@ -179,7 +188,7 @@ describe("GET /api/races/:race_id/form", () => {
   it("upcoming G3 (no as_of) → defaults to race post_time; Alpha card has 2 starts", async () => {
     const r = await callRoute(`/api/races/${G3_RACE_ID}/form`);
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.race_id).toBe(G3_RACE_ID);
     expect(body.as_of).toBeNull();
     expect(body.runners).toHaveLength(1);
@@ -195,7 +204,7 @@ describe("GET /api/races/:race_id/form", () => {
       `/api/races/${G3_RACE_ID}/form?as_of=2026-12-31T00:00:00Z`,
     );
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.as_of).toBe("2026-12-31T00:00:00Z");
     expect(body.runners[0].form.career.starts).toBe(3);
   });
@@ -204,7 +213,7 @@ describe("GET /api/races/:race_id/form", () => {
     // R1 (jra-20260601-05-01) is in the past — not in the live snapshot.
     const r = await callRoute("/api/races/jra-20260601-05-01/form");
     expect(r.status).toBe(200);
-    const body = await r.json();
+    const body = (await r.json()) as any;
     expect(body.race_id).toBe("jra-20260601-05-01");
     const names = body.runners.map((r: { horse_name: string }) => r.horse_name).sort();
     expect(names).toEqual(["Alpha", "Gamma"]);
