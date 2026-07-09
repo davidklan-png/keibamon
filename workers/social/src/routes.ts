@@ -270,14 +270,15 @@ async function handleTickets(
       if (!result.ok) {
         // Cross-user id collision → 404, shaped exactly like "doesn't exist"
         // so the endpoint can't be probed to learn which ids are taken
-        // (anti-oracle). Settled-ticket edit guard → 409.
+        // (anti-oracle). Settled-ticket edit guard → 409. The conditional
+        // upsert's unreachable no-row case → 500.
         if (result.code === "not_found") {
           return json({ error: "not_found" }, 404, cors);
         }
+        if (result.code === "server_error") {
+          return json({ error: "server_error" }, 500, cors);
+        }
         return json({ error: result.code }, 409, cors);
-      }
-      if (!result.row) {
-        return json({ error: "server_error" }, 500, cors);
       }
       const decoded = decodeTicket(result.row);
       return json(decoded ?? { ok: true }, 200, cors);

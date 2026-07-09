@@ -93,6 +93,32 @@ describe("parseTicketBody — validation", () => {
     expect(r).toMatchObject({ ok: false, code: "payload_too_large" });
   });
 
+  it("measures the byte cap in UTF-8, not UTF-16 code units", () => {
+    // "あ" is ONE UTF-16 code unit but THREE UTF-8 bytes. 350k of them ⇒
+    // JS .length ≈ 350k (under the 1M cap) but UTF-8 ≈ 1.05MB (over it). A
+    // .length-based check would wrongly admit this payload.
+    const multibyte = "あ".repeat(350_000);
+    const payload = JSON.stringify(body({ note: multibyte }));
+    expect(payload.length).toBeLessThan(1_000_000); // UTF-16 length under the cap
+    const r = parseTicketBody(body({ note: multibyte }));
+    expect(r).toMatchObject({ ok: false, code: "payload_too_large" });
+  });
+
+  it("rejects a forged / mismatched ticket.cost (cost is server-derived)", () => {
+    // unit 200 × 1 line = 200; a client claiming 999 must be rejected.
+    expect(
+      parseTicketBody(body({ ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], cost: 999 } })),
+    ).toMatchObject({ ok: false, code: "bad_cost" });
+    // non-integral cost is rejected too.
+    expect(
+      parseTicketBody(body({ ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], cost: 200.5 } })),
+    ).toMatchObject({ ok: false, code: "bad_cost" });
+    // negative cost is rejected.
+    expect(
+      parseTicketBody(body({ ticket: { type: "exacta", lines: [{ combo: ["1", "2"] }], cost: -1 } })),
+    ).toMatchObject({ ok: false, code: "bad_cost" });
+  });
+
   it("rejects a missing ticket block", () => {
     const { ticket, ...noTicket } = body();
     expect(parseTicketBody(noTicket)).toMatchObject({ ok: false, code: "bad_ticket" });

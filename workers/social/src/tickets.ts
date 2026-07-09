@@ -42,6 +42,16 @@ const MAX_UNIT = 1_000_000; // yen per line
 const MAX_UMABAN = 18; // JRA max field size
 const MAX_RACE_NO = 12; // JRA max races per venue per day
 
+// UTF-8 byte length. A JS string's `.length` counts UTF-16 code units, NOT
+// bytes — a payload of CJK chars (3 bytes/codepoint in UTF-8) can be ~3×
+// larger in UTF-8 than `.length` claims. D1 stores UTF-8, so the byte cap must
+// measure UTF-8 or a multibyte payload sails past it. TextEncoder is global in
+// the Workers runtime (and Node ≥11); one reused instance.
+const _utf8Encoder = new TextEncoder();
+function utf8ByteLength(s: string): number {
+  return _utf8Encoder.encode(s).length;
+}
+
 interface TicketLineBody {
   combo?: unknown;
 }
@@ -123,10 +133,11 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
     typeof b.race?.raceKey === "string" && b.race.raceKey ? b.race.raceKey : "";
   if (!raceKey) return { ok: false, code: "bad_race_key" };
 
-  // Byte cap (abuse backstop). Computed after the cheap field checks so a
-  // garbage id doesn't pay for a stringify.
+  // Byte cap (abuse backstop), measured in UTF-8 bytes (not UTF-16 code units).
+  // Computed after the cheap field checks so a garbage id doesn't pay for a
+  // stringify.
   const payload = JSON.stringify(body);
-  if (payload.length > MAX_PAYLOAD_BYTES) return { ok: false, code: "payload_too_large" };
+  if (utf8ByteLength(payload) > MAX_PAYLOAD_BYTES) return { ok: false, code: "payload_too_large" };
 
   // ticket block: type allowlist + line bounds + per-line combo shape.
   const t = b.ticket;
@@ -174,20 +185,28 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
     structure = tb.structure;
   }
 
-  // cost: prefer the payload's own cost when it's a sane positive number;
-  // otherwise derive unit × line_count. Capped at unit_max × max_lines.
-  const costRaw = tb.cost;
-  let cost: number | null = null;
-  if (
-    typeof costRaw === "number" &&
-    Number.isFinite(costRaw) &&
-    costRaw >= 0 &&
-    costRaw <= MAX_UNIT * MAX_LINES
-  ) {
-    cost = Math.floor(costRaw);
-  } else if (unit !== null) {
-    cost = unit * lines.length;
+  // cost is DERIVED server-side from validated unit × line_count — NEVER
+  // trusted from the payload. If the payload supplies ticket.cost, it must be
+  // finite, integral, non-negative, and EXACTLY equal to the derived cost; any
+  // mismatch (forged or stale) is rejected with bad_cost. When unit is absent
+  // the cost can't be derived and is stored NULL (ticket.cost is still NOT
+  // trusted — it's only checked, never stored).
+  const derivedCost = unit !== null ? unit * lines.length : null;
+  if (tb.cost !== undefined && tb.cost !== null) {
+    const clientCost = tb.cost;
+    if (
+      typeof clientCost !== "number" ||
+      !Number.isFinite(clientCost) ||
+      !Number.isInteger(clientCost) ||
+      clientCost < 0
+    ) {
+      return { ok: false, code: "bad_cost" };
+    }
+    if (derivedCost !== null && clientCost !== derivedCost) {
+      return { ok: false, code: "bad_cost" };
+    }
   }
+  const cost = derivedCost;
 
   // venue + race_no from raceKey "<date>|<venue>|<raceNo>|<name>".
   const parts = raceKey.split("|");
@@ -220,34 +239,34 @@ export function parseTicketBody(body: unknown): { ok: true; ticket: ParsedTicket
 }
 
 type InsertTicketResult =
-  | { ok: true; row: TicketRow | null }
+  | { ok: true; row: TicketRow }
   | { ok: false; code: "cannot_edit_settled_ticket" }
-  | { ok: false; code: "not_found" };
+  | { ok: false; code: "not_found" }
+  | { ok: false; code: "server_error" };
 
 /**
  * Insert-or-update by id. Used both for fresh ticket creation AND for
- * manual-ticket-builder edit-in-place: a POST with the SAME id overwrites
- * the row in place (the `ON CONFLICT(id) DO UPDATE` below).
+ * manual-ticket-builder edit-in-place.
  *
- * Two guards run BEFORE the upsert (the lookup is a separate statement rather
- * than a CTE because D1's `ON CONFLICT DO UPDATE` cannot itself be conditional
- * on the existing row in D1's SQLite version):
+ * The preliminary SELECT below is for user-facing classification only — the
+ * common "different owner" / "already settled" cases short-circuit before
+ * paying for an upsert. The MUTATION is authoritative: the
+ * `ON CONFLICT(id) DO UPDATE` carries
+ *   `WHERE tickets.user_id = excluded.user_id AND tickets.state = 'open'`,
+ * so a row that appears BETWEEN the SELECT and the upsert (the TOCTOU window —
+ * e.g. a concurrent first-write of the same id by another user) CANNOT be
+ * overwritten: the conditional update matches no row and RETURNING yields
+ * nothing. On that no-row result we re-read and classify safely:
  *
- *   1. Ownership: if an existing row for this id belongs to ANOTHER user,
- *      reject with `{ok:false, code:"not_found"}`. We deliberately return the
- *      SAME shape as "doesn't exist" rather than a distinct "forbidden" so
- *      this endpoint is not an oracle for probing which ids are taken
- *      (defense-in-depth on top of the high-entropy client ids — coverage for
- *      the case where a client id ever leaks). The `ON CONFLICT` update does
- *      NOT touch `user_id`, so without this check a guessed open id would let
- *      another user overwrite the payload while the row stayed attributed to
- *      the victim — a silent hijack. Legit clients only ever POST ids they
- *      generated themselves, so this branch is attacker-only.
- *   2. Settlement: if an existing row for this id is in a settled state
- *      (anything other than 'open'), reject with
- *      `{ok:false, code:"cannot_edit_settled_ticket"}` — otherwise a manual
- *      edit would silently reset `state` to 'open' and NULL out `returned`,
- *      erasing settlement history.
+ *   - different owner  → {ok:false, code:"not_found"} — the anti-oracle 404,
+ *     indistinguishable from "doesn't exist" so the endpoint can't be probed
+ *     for which ids are taken (defense-in-depth on the high-entropy client ids).
+ *   - same owner, non-open → {ok:false, code:"cannot_edit_settled_ticket"} —
+ *     the row settled in the window; refuse to wipe state/returned.
+ *   - no row at all (unreachable: an empty RETURNING implies a conflict
+ *     existed) → {ok:false, code:"server_error"}.
+ *
+ * Legitimate fresh creates and same-owner open-ticket edits return the row.
  */
 export async function insertTicket(
   db: D1Database,
@@ -270,6 +289,7 @@ export async function insertTicket(
     raceNo: number | null;
   },
 ): Promise<InsertTicketResult> {
+  // Preliminary read — classification only; NOT the authority.
   const existing = await db
     .prepare("SELECT state, user_id FROM tickets WHERE id = ?")
     .bind(parsed.id)
@@ -282,6 +302,10 @@ export async function insertTicket(
       return { ok: false, code: "cannot_edit_settled_ticket" };
     }
   }
+
+  // Authoritative mutation: the conditional WHERE closes the TOCTOU window.
+  // RETURNING yields the row on a fresh insert OR a same-owner-open update;
+  // yields nothing when a conflicting row fails the WHERE.
   const row = await db
     .prepare(
       `INSERT INTO tickets (id, user_id, serial, race_key, payload, state, payout_base, returned, created_at,
@@ -299,6 +323,7 @@ export async function insertTicket(
          structure = excluded.structure,
          venue = excluded.venue,
          race_no = excluded.race_no
+       WHERE tickets.user_id = excluded.user_id AND tickets.state = 'open'
        RETURNING *`,
     )
     .bind(
@@ -319,7 +344,25 @@ export async function insertTicket(
       parsed.raceNo,
     )
     .first<TicketRow>();
-  return { ok: true, row };
+
+  if (row) return { ok: true, row };
+
+  // No row returned → a conflicting row exists that failed the WHERE (it
+  // appeared between the preliminary SELECT and this upsert, or settled in
+  // that window). Re-read to classify authoritatively.
+  const conflicting = await db
+    .prepare("SELECT state, user_id FROM tickets WHERE id = ?")
+    .bind(parsed.id)
+    .first<{ state: string; user_id: string }>();
+  if (!conflicting) {
+    // Unreachable in practice: an empty RETURNING means a conflict was hit,
+    // yet no row is present now. Surface as a server error rather than guess.
+    return { ok: false, code: "server_error" };
+  }
+  if (conflicting.user_id !== userId) {
+    return { ok: false, code: "not_found" };
+  }
+  return { ok: false, code: "cannot_edit_settled_ticket" };
 }
 
 /**

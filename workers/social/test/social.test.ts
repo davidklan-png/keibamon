@@ -270,9 +270,17 @@ function makeFakeD1(opts: FakeD1Options = {}) {
         string, string, string, string, string, string, number, number,
         string | null, number | null, number | null, number | null, string | null, string | null, number | null,
       ];
+      // Model the conditional upsert: ON CONFLICT(id) DO UPDATE SET ...
+      // WHERE existing.user_id = excluded.user_id AND existing.state = 'open'.
+      // A conflicting row that fails the WHERE returns no row (RETURNING empty),
+      // exactly like real SQLite — insertTicket then re-reads to classify.
+      const prior = tickets.get(id);
+      if (prior && (prior.user_id !== userId || prior.state !== "open")) {
+        return null;
+      }
       const row: TicketRow = {
         id,
-        user_id: userId,
+        user_id: prior ? prior.user_id : userId,
         serial,
         race_key: raceKey,
         payload,

@@ -30,21 +30,21 @@ ALTER TABLE tickets ADD COLUMN venue TEXT;
 ALTER TABLE tickets ADD COLUMN race_no INTEGER
   CHECK (race_no IS NULL OR race_no BETWEEN 1 AND 12);
 
--- ---- backfill existing rows from the payload (direct json_extract paths) ----
+-- ---- backfill existing rows from the payload ----
+-- cost is DERIVED from validated unit × line_count — never trusted from the
+-- payload's ticket.cost (which a client could forge). unit/lines missing → NULL.
 UPDATE tickets
 SET ticket_type = json_extract(payload, '$.ticket.type'),
     line_count  = json_array_length(json_extract(payload, '$.ticket.lines')),
     unit        = json_extract(payload, '$.unit'),
     structure   = json_extract(payload, '$.ticket.structure'),
-    cost        = COALESCE(json_extract(payload, '$.ticket.cost'),
-                           json_extract(payload, '$.unit')
-                             * json_array_length(json_extract(payload, '$.ticket.lines')))
+    cost        = CAST(json_extract(payload, '$.unit') AS INTEGER)
+                    * json_array_length(json_extract(payload, '$.ticket.lines'))
 WHERE ticket_type IS NULL;
 
--- venue + race_no from raceKey "<date>|<venue>|<raceNo>|<name>". raceKey parsing
--- in pure SQL (no SPLIT_PART): peel the date prefix, take the next |-field as
--- venue, then the next as race_no. NULL where raceKey is absent/malformed.
--- `instr(x || '|', '|')` guards a missing trailing field.
+-- venue from raceKey "<date>|<venue>|<raceNo>|<name>" (no CHECK — free text).
+-- NULL where raceKey is absent/malformed. `instr(x || '|', '|')` guards a
+-- missing trailing field.
 UPDATE tickets SET venue = CASE
   WHEN json_extract(payload,'$.race.raceKey') IS NULL
     OR instr(json_extract(payload,'$.race.raceKey'), '|') = 0 THEN NULL
@@ -58,28 +58,36 @@ UPDATE tickets SET venue = CASE
 END
 WHERE venue IS NULL;
 
-UPDATE tickets SET race_no = CAST(
-  CASE
-    WHEN json_extract(payload,'$.race.raceKey') IS NULL
-      OR instr(json_extract(payload,'$.race.raceKey'), '|') = 0 THEN NULL
-    -- rest after date + venue; if it has no '|', there is no race_no field.
-    WHEN instr(substr(json_extract(payload,'$.race.raceKey'),
-                      instr(json_extract(payload,'$.race.raceKey'),'|') + 1), '|') = 0 THEN NULL
-    ELSE substr(
-      substr(substr(json_extract(payload,'$.race.raceKey'),
-                    instr(json_extract(payload,'$.race.raceKey'),'|') + 1),
-             instr(substr(json_extract(payload,'$.race.raceKey'),
-                          instr(json_extract(payload,'$.race.raceKey'),'|') + 1), '|') + 1),
-      1,
-      instr(substr(substr(json_extract(payload,'$.race.raceKey'),
-                          instr(json_extract(payload,'$.race.raceKey'),'|') + 1),
-                   instr(substr(json_extract(payload,'$.race.raceKey'),
-                                instr(json_extract(payload,'$.race.raceKey'),'|') + 1), '|') + 1)
-            || '|', '|') - 1
+-- race_no from the 3rd raceKey field. ONLY a canonical 1–12 value is written;
+-- anything else becomes NULL. This is load-bearing: SQLite's
+-- `CAST('<non-numeric>' AS INTEGER)` coerces to 0, which would violate the new
+-- `CHECK (race_no BETWEEN 1 AND 12)` and ABORT a production migration. The
+-- GLOB guards accept exactly "1".."9" / "10".."12"; "0", "13", "abc", "01",
+-- "" and a missing field all → NULL. Extract the field once per row via a
+-- derived table (UPDATE ... FROM), then validate.
+UPDATE tickets AS t SET race_no = CASE
+  WHEN f.rno GLOB '[1-9]' OR f.rno GLOB '1[0-2]' THEN CAST(f.rno AS INTEGER)
+  ELSE NULL
+END
+FROM (
+  SELECT id, substr(after_venue, 1, instr(after_venue || '|', '|') - 1) AS rno
+  FROM (
+    SELECT id,
+      substr(after_date, instr(after_date, '|') + 1) AS after_venue
+    FROM (
+      SELECT id,
+        substr(rk, instr(rk, '|') + 1) AS after_date,
+        rk
+      FROM (
+        SELECT id, json_extract(payload, '$.race.raceKey') AS rk
+        FROM tickets
+      )
+      WHERE rk IS NOT NULL AND instr(rk, '|') > 0
+        AND instr(substr(rk, instr(rk, '|') + 1), '|') > 0
     )
-  END AS INTEGER
-)
-WHERE race_no IS NULL;
+  )
+) AS f
+WHERE t.id = f.id AND t.race_no IS NULL;
 
 -- ---- case-insensitive handle uniqueness (Stage 4) ----
 -- 0003 made handles unique CASE-SENSITIVELY (idx_users_handle_unique), so "Bob"
@@ -88,11 +96,20 @@ WHERE race_no IS NULL;
 -- are O(log n), and a case variant of a taken handle is rejected. upsertUser
 -- already maps any UNIQUE violation to handle_taken.
 --
--- PRE-CHECK (operator): if existing rows collide case-insensitively, the CREATE
--- UNIQUE INDEX below FAILS. Detect first and dedupe:
+-- PRE-CHECK (operator, MANDATORY before applying): if any two existing handles
+-- collide case-insensitively, the CREATE UNIQUE INDEX below FAILS and the
+-- migration ABORTS. Detect and dedupe FIRST:
 --   SELECT lower(handle) AS h, COUNT(*) AS n, GROUP_CONCAT(handle) AS examples
 --     FROM users WHERE handle IS NOT NULL
 --    GROUP BY lower(handle) HAVING COUNT(*) > 1;
-DROP INDEX IF EXISTS idx_users_handle_unique;
+--
+-- ORDER IS FAIL-SAFE: the case-insensitive index is CREATED FIRST and the
+-- case-sensitive predecessor is dropped ONLY AFTER a successful create. So:
+--   - On a collision, CREATE fails, the migration aborts, and the ORIGINAL
+--     idx_users_handle_unique is still in place → handles stay unique
+--     (case-sensitively), the guarantee never broken. Dedupe and re-run.
+--   - On success, both briefly coexist (CI is the stricter), then the old one
+--     is dropped. Either way a uniqueness guarantee is always present.
 CREATE UNIQUE INDEX IF NOT EXISTS idx_users_handle_ci_unique
   ON users (lower(handle)) WHERE handle IS NOT NULL;
+DROP INDEX IF EXISTS idx_users_handle_unique;
