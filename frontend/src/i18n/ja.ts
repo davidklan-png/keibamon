@@ -143,7 +143,6 @@ export const ja = {
     pickHorses: "馬番を選ぶ",
     pickBrackets: "枠を選ぶ",
     noBrackets: "このレースの枠データがありません — 枠連は無効です。",
-    updateOdds: "オッズ更新",
     cancel: "キャンセル",
     register: "登録",
     save: "保存",

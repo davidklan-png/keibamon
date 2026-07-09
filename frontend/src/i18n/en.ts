@@ -150,7 +150,6 @@ export const en = {
     pickHorses: "Pick horses",
     pickBrackets: "Pick brackets",
     noBrackets: "Bracket data unavailable for this race — 枠連 disabled.",
-    updateOdds: "Update odds",
     cancel: "Cancel",
     register: "Register",
     save: "Save",

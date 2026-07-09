@@ -54,15 +54,13 @@ export interface ManualTicketBuilderProps {
   /** Built-ticket callback. Parent decides POST vs PATCH path. */
   onRegister: (built: { ticket: Ticket; id?: string }) => void;
   onCancel: () => void;
-  /** Optional: hook to force a parent-level /api/live refresh. */
-  onRefreshOdds?: () => void;
 }
 
 const UNITS = [100, 200, 300];
 
 export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   const { t, tFmt } = useI18n();
-  const { runners, unit, onUnitChange, initial, onRegister, onCancel, onRefreshOdds } = props;
+  const { runners, unit, onUnitChange, initial, onRegister, onCancel } = props;
 
   // De-vig the win market for this race once per runners change. The builder
   // is opened with a fresh snapshot; the parent's existing 45s poll keeps
@@ -369,15 +367,6 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
 
       {/* Actions */}
       <div className="mt-manual-actions">
-        {onRefreshOdds && (
-          <button
-            type="button"
-            className="mt-manual-secondary"
-            onClick={onRefreshOdds}
-          >
-            {t("manual.updateOdds")}
-          </button>
-        )}
         <button
           type="button"
           className="mt-manual-secondary"
