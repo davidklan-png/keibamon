@@ -2194,7 +2194,7 @@ select:focus {
   font-size: 12px;
   cursor: pointer;
   text-align: center;
-  letter-spacing: -0.01em;
+  letter-spacing: 0;
 }
 .mt-manual-type.on {
   border-color: var(--turf);
@@ -2204,6 +2204,27 @@ select:focus {
 .mt-manual-type:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+.mt-manual-modes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.mt-manual-mode {
+  padding: 11px 8px;
+  border-radius: 8px;
+  border: 2px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 12px;
+  cursor: pointer;
+  text-align: center;
+}
+.mt-manual-mode.on {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
 }
 .mt-manual-pickcount {
   margin-left: 8px;
@@ -2241,6 +2262,25 @@ select:focus {
   display: grid;
   grid-template-columns: repeat(6, 1fr);
   gap: 6px;
+}
+.mt-manual-formation {
+  display: grid;
+  gap: 12px;
+}
+.mt-manual-position {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+  background: #fff;
+}
+.mt-manual-position-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 900;
 }
 .mt-manual-cell {
   aspect-ratio: 1;
@@ -4285,5 +4325,3 @@ select:focus {
   font-size: 11px;
   color: var(--muted);
 }
-
-

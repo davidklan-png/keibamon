@@ -140,8 +140,12 @@ export const ja = {
     entryTitle: "自分で組む",
     entryDesc: "式別と馬番を自分で選ぶ",
     betType: "式別",
+    ticketShape: "買い目",
+    formationMode: "フォーメーション",
+    boxMode: "ボックス",
     pickHorses: "馬番を選ぶ",
     pickBrackets: "枠を選ぶ",
+    pickPlacings: "着順ごとに選ぶ",
     noBrackets: "このレースの枠データがありません — 枠連は無効です。",
     cancel: "キャンセル",
     register: "登録",
@@ -151,7 +155,7 @@ export const ja = {
     editAria: "この馬券を編集",
     editConflict: "レースが確定したため編集できませんでした — 元に戻しました。",
     lockedHint:
-      "元の {n} 口をそのまま表示しています。馬番をタップすると、すべての組み合わせのボックスに切り替わります。",
+      "元の {n} 口をそのまま表示しています。馬番をタップすると、表示中の選択から組み直します。",
     boxNote:
       "選んだ馬のボックスを組んでいます — すべての組み合わせです。",
   },

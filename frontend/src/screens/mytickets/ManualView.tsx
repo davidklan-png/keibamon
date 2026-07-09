@@ -31,6 +31,8 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
         type: editTk.ticket.type,
         lines: editTk.ticket.lines.map((l) => l.combo),
         unit: editTk.unit,
+        structure: editTk.ticket.structure,
+        structurePayload: editTk.ticket.structurePayload,
       }
     : undefined;
   // Editing must stay pinned to the ticket's own race. `featRunners` tracks

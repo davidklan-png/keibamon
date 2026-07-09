@@ -42,6 +42,8 @@ import {
 } from "./fairvalue";
 import type { Ticket, TicketLine } from "./types";
 
+export type ManualBuildMode = "box" | "formation";
+
 /** Required picked-set size for each bet type's combos to be valid. */
 export const K_BY_TYPE: Record<BetType, 2 | 3> = {
   quinella: 2,
@@ -159,6 +161,64 @@ export function buildManualTicket(
   const { lines } = priceLines(type, combos, p, allUmas, unit);
   if (lines.length === 0) return null;
   return finalizeTicket(type, lines, unit, p, allUmas);
+}
+
+function cartesianProduct<T>(arrays: T[][]): T[][] {
+  const out: T[][] = [];
+  (function rec(i: number, acc: T[]) {
+    if (i === arrays.length) {
+      out.push(acc.slice());
+      return;
+    }
+    for (const item of arrays[i]) {
+      acc.push(item);
+      rec(i + 1, acc);
+      acc.pop();
+    }
+  })(0, []);
+  return out;
+}
+
+/**
+ * Build an explicit ordered formation from per-place contender sets. This is
+ * the manual equivalent of marking a track ticket by place:
+ *   exacta:   1st / 2nd
+ *   trifecta: 1st / 2nd / 3rd
+ *
+ * The generated `lines` are ordinary exacta/trifecta ordered combos, so the
+ * existing resolver and Worker persistence do not need a separate settlement
+ * branch. `structurePayload.positions` preserves the user's segregated columns
+ * for FillGuide/share/edit round-trips.
+ */
+export function buildManualFormationTicket(
+  type: BetType,
+  positions: string[][],
+  p: Record<string, number>,
+  allUmas: string[],
+  unit: number,
+): Ticket | null {
+  if (type !== "exacta" && type !== "trifecta") return null;
+  const k = K_BY_TYPE[type];
+  if (positions.length !== k) return null;
+
+  const cleanPositions = positions.map((posSet) =>
+    Array.from(new Set(posSet)).sort((a, b) => Number(a) - Number(b)),
+  );
+  if (cleanPositions.some((posSet) => posSet.length === 0)) return null;
+
+  const combos = cartesianProduct(cleanPositions).filter(
+    (combo) => new Set(combo).size === combo.length,
+  );
+  if (combos.length === 0) return null;
+
+  const { lines } = priceLines(type, combos, p, allUmas, unit);
+  if (lines.length === 0) return null;
+  return {
+    ...finalizeTicket(type, lines, unit, p, allUmas),
+    structure: "formation",
+    structurePayload: { positions: cleanPositions },
+    unitStake: unit,
+  };
 }
 
 /**

@@ -147,8 +147,12 @@ export const en = {
     entryTitle: "Build manually",
     entryDesc: "Pick your own bet type and lines",
     betType: "Bet type",
+    ticketShape: "Ticket shape",
+    formationMode: "Formation",
+    boxMode: "Box",
     pickHorses: "Pick horses",
     pickBrackets: "Pick brackets",
+    pickPlacings: "Pick by finish",
     noBrackets: "Bracket data unavailable for this race — 枠連 disabled.",
     cancel: "Cancel",
     register: "Register",
@@ -158,7 +162,7 @@ export const en = {
     editAria: "Edit this ticket",
     editConflict: "Ticket settled during edit — restored.",
     lockedHint:
-      "Showing your original {n} lines as-is. Tap any horse to rebuild as a full box of every combination.",
+      "Showing your original {n} lines as-is. Tap any horse to rebuild from the visible picks.",
     boxNote:
       "Now building a full box from your picks — every combination of the selected horses.",
   },

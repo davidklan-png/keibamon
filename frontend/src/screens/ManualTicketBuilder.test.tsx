@@ -79,6 +79,28 @@ function clickCell(container: HTMLElement, uma: string): void {
   });
 }
 
+function clickType(container: HTMLElement, label: string): void {
+  const btn = Array.from(container.querySelectorAll(".mt-manual-type")).find(
+    (b) => b.textContent === label,
+  );
+  expect(btn, `bet type ${label} should exist`).toBeTruthy();
+  act(() => {
+    (btn as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
+function clickPositionCell(container: HTMLElement, positionIndex: number, uma: string): void {
+  const positions = container.querySelectorAll(".mt-manual-position");
+  expect(positions.length).toBeGreaterThan(positionIndex);
+  const cell = Array.from(positions[positionIndex].querySelectorAll(".mt-manual-cell")).find(
+    (b) => b.textContent === uma,
+  );
+  expect(cell, `position ${positionIndex + 1} uma cell ${uma} should exist`).toBeTruthy();
+  act(() => {
+    (cell as HTMLElement).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+}
+
 /** Click the primary CTA (the Save/Register button). */
 function clickCta(container: HTMLElement): void {
   const cta = container.querySelector(".mt-cta") as HTMLElement | null;
@@ -185,5 +207,72 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     const { container } = mount(); // no initial
     expect(container.querySelector("[data-mt-locked-hint]")).toBeNull();
     expect(container.querySelector("[data-mt-box-note]")).toBeNull();
+  });
+
+  it("builds a manual trifecta formation with separate 1st/2nd/3rd columns", () => {
+    const { container, onRegister } = mount();
+
+    clickType(container, "Trifecta");
+    expect(container.querySelectorAll(".mt-manual-position")).toHaveLength(3);
+
+    clickPositionCell(container, 0, "6");
+    clickPositionCell(container, 1, "3");
+    clickPositionCell(container, 1, "4");
+    clickPositionCell(container, 2, "1");
+    clickPositionCell(container, 2, "3");
+    clickPositionCell(container, 2, "4");
+    clickPositionCell(container, 2, "8");
+
+    clickCta(container);
+
+    expect(onRegister).toHaveBeenCalledTimes(1);
+    const { ticket } = onRegister.mock.calls[0][0] as { ticket: Ticket };
+    expect(ticket.type).toBe("trifecta");
+    expect(ticket.structure).toBe("formation");
+    expect(ticket.structurePayload).toEqual({
+      positions: [["6"], ["3", "4"], ["1", "3", "4", "8"]],
+    });
+    expect(ticket.lines.map((l) => l.combo.join("-")).sort()).toEqual([
+      "6-3-1",
+      "6-3-4",
+      "6-3-8",
+      "6-4-1",
+      "6-4-3",
+      "6-4-8",
+    ]);
+    expect(ticket.cost).toBe(600);
+  });
+
+  it("reopens a saved formation with its position payload intact", () => {
+    const initial: ManualTicketInitial = {
+      id: "kb-formation",
+      type: "trifecta",
+      unit: 100,
+      structure: "formation",
+      structurePayload: {
+        positions: [["6"], ["3", "4"], ["1", "3", "4", "8"]],
+      },
+      lines: [
+        ["6", "3", "1"],
+        ["6", "3", "4"],
+        ["6", "3", "8"],
+        ["6", "4", "1"],
+        ["6", "4", "3"],
+        ["6", "4", "8"],
+      ],
+    };
+    const { container, onRegister } = mount({ initial });
+
+    expect(container.querySelectorAll(".mt-manual-position")).toHaveLength(3);
+    clickCta(container);
+
+    expect(onRegister).toHaveBeenCalledTimes(1);
+    const { ticket, id } = onRegister.mock.calls[0][0] as { ticket: Ticket; id?: string };
+    expect(id).toBe("kb-formation");
+    expect(ticket.structure).toBe("formation");
+    expect(ticket.structurePayload).toEqual(initial.structurePayload);
+    expect(ticket.lines.map((l) => l.combo.join("-")).sort()).toEqual(
+      initial.lines!.map((l) => l.join("-")).sort(),
+    );
   });
 });

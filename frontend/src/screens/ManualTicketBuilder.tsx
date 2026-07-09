@@ -26,21 +26,25 @@ import {
   type Runner,
 } from "../lib/fairvalue";
 import {
+  buildManualFormationTicket,
   buildManualTicket,
   finalizeTicket,
   isFullBox,
   K_BY_TYPE,
   MANUAL_BET_TYPES,
+  type ManualBuildMode,
   priceLines,
   runnersByBracket,
 } from "../lib/manualBuilder";
-import type { Ticket } from "../lib/types";
+import type { FormationPayload, Ticket } from "../lib/types";
 
 export interface ManualTicketInitial {
   id?: string;
   type?: BetType;
   lines?: string[][];
   unit?: number;
+  structure?: Ticket["structure"];
+  structurePayload?: Ticket["structurePayload"];
 }
 
 export interface ManualTicketBuilderProps {
@@ -58,6 +62,28 @@ export interface ManualTicketBuilderProps {
 
 const UNITS = [100, 200, 300];
 
+function isOrderedType(type: BetType): boolean {
+  return type === "exacta" || type === "trifecta";
+}
+
+function emptyPositions(type: BetType): string[][] {
+  const k = isOrderedType(type) ? K_BY_TYPE[type] : 2;
+  return Array.from({ length: k }, () => []);
+}
+
+function initialFormationPositions(initial?: ManualTicketInitial): string[][] | null {
+  if (
+    !initial ||
+    initial.structure !== "formation" ||
+    !initial.structurePayload ||
+    !("positions" in initial.structurePayload)
+  ) {
+    return null;
+  }
+  const positions = (initial.structurePayload as FormationPayload).positions;
+  return positions.map((posSet) => posSet.slice());
+}
+
 export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   const { t, tFmt } = useI18n();
   const { runners, unit, onUnitChange, initial, onRegister, onCancel } = props;
@@ -74,6 +100,9 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
 
   // Bet type — defaults to initial (edit mode) or quinella.
   const [type, setType] = useState<BetType>(initial?.type ?? "quinella");
+  const [mode, setMode] = useState<ManualBuildMode>(() =>
+    initialFormationPositions(initial) ? "formation" : "box",
+  );
 
   // Two distinct pick states (bracket space vs uma space). Reset the inactive
   // one whenever the user switches number spaces so a later switchback starts
@@ -93,6 +122,11 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
         if (Number.isFinite(n)) s.add(n);
       }
     return s;
+  });
+  const [formationPositions, setFormationPositions] = useState<string[][]>(() => {
+    const fromInitial = initialFormationPositions(initial);
+    if (fromInitial) return fromInitial;
+    return emptyPositions(initial?.type ?? "quinella");
   });
 
   // ---- Edit-mode lock (ticket-generation-alignment) -----------------------
@@ -127,6 +161,8 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   const [unlockedFromLock, setUnlockedFromLock] = useState(false);
 
   const isBracket = type === "bracket_quinella";
+  const canUseFormation = isOrderedType(type);
+  const isFormationMode = canUseFormation && mode === "formation";
   const k = K_BY_TYPE[type];
   const hasBrackets = useMemo(() => runnersByBracket(runners) !== null, [runners]);
 
@@ -160,7 +196,19 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
         unit,
       );
       if (lines.length === 0) return null;
-      return finalizeTicket(initial.type, lines, unit, p, allUmas);
+      const priced = finalizeTicket(initial.type, lines, unit, p, allUmas);
+      if (initial.structure === "formation" && initial.structurePayload) {
+        return {
+          ...priced,
+          structure: "formation" as const,
+          structurePayload: initial.structurePayload,
+          unitStake: unit,
+        };
+      }
+      return priced;
+    }
+    if (isFormationMode) {
+      return buildManualFormationTicket(type, formationPositions, p, allUmas, unit);
     }
     return buildManualTicket(
       type,
@@ -171,7 +219,19 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
       allUmas,
       unit,
     );
-  }, [locked, initial, type, pickedUma, pickedBrackets, runners, p, allUmas, unit]);
+  }, [
+    locked,
+    initial,
+    isFormationMode,
+    type,
+    formationPositions,
+    pickedUma,
+    pickedBrackets,
+    runners,
+    p,
+    allUmas,
+    unit,
+  ]);
 
   // Any structural pick change permanently ends locked mode for this session
   // (we don't re-lock if the picks happen to return to the original set —
@@ -200,20 +260,47 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
       return next;
     });
   }
+  function toggleFormationUma(positionIndex: number, u: string) {
+    unlock();
+    setFormationPositions((prev) => {
+      const next = Array.from({ length: k }, (_, i) => (prev[i] ?? []).slice());
+      const posSet = new Set(next[positionIndex] ?? []);
+      if (posSet.has(u)) posSet.delete(u);
+      else posSet.add(u);
+      next[positionIndex] = Array.from(posSet).sort((a, b) => Number(a) - Number(b));
+      return next;
+    });
+  }
   function pickType(next: BetType) {
     if (next === type) return;
     unlock();
     setType(next);
+    const nextMode = isOrderedType(next) ? "formation" : "box";
+    setMode(nextMode);
     // Clear picks so an old selection in the other number space doesn't
     // leak into the new view (a 3-bracket 枠連 selection shouldn't silently
     // become umas "1"/"2"/"3" if the user flips to quinella).
     setPickedUma(new Set());
     setPickedBrackets(new Set());
+    setFormationPositions(emptyPositions(next));
+  }
+  function pickMode(next: ManualBuildMode) {
+    if (next === mode) return;
+    unlock();
+    setMode(next);
+    setPickedUma(new Set());
+    setPickedBrackets(new Set());
+    setFormationPositions(emptyPositions(type));
   }
 
   // Validation gate: the user has picked enough for the bet type's k.
   const pickedCount = isBracket ? pickedBrackets.size : pickedUma.size;
-  const canRegister = ticket !== null && pickedCount >= k;
+  const canRegister =
+    ticket !== null &&
+    (isFormationMode
+      ? formationPositions.length === k &&
+        formationPositions.every((posSet) => posSet.length > 0)
+      : pickedCount >= k);
   // 枠連 is also gated on the field having bracket data at all —
   // the bet-type chip is disabled when it doesn't, but defend here too.
   const bracketDisabled = isBracket && !hasBrackets;
@@ -246,6 +333,30 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
         )}
       </div>
 
+      {canUseFormation && (
+        <div className="mt-manual-section">
+          <div className="mt-vibe-label">{t("manual.ticketShape")}</div>
+          <div className="mt-manual-modes">
+            <button
+              type="button"
+              className={`mt-manual-mode ${mode === "formation" ? "on" : ""}`}
+              onClick={() => pickMode("formation")}
+              aria-pressed={mode === "formation"}
+            >
+              {t("manual.formationMode")}
+            </button>
+            <button
+              type="button"
+              className={`mt-manual-mode ${mode === "box" ? "on" : ""}`}
+              onClick={() => pickMode("box")}
+              aria-pressed={mode === "box"}
+            >
+              {t("manual.boxMode")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Selection grid */}
       <div className="mt-manual-section">
         {locked && initial?.lines && (
@@ -259,14 +370,56 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           </p>
         )}
         <div className="mt-vibe-label">
-          {isBracket ? t("manual.pickBrackets") : t("manual.pickHorses")}
-          {!locked && (
+          {isFormationMode
+            ? t("manual.pickPlacings")
+            : isBracket
+              ? t("manual.pickBrackets")
+              : t("manual.pickHorses")}
+          {!locked && !isFormationMode && (
             <span className="mt-manual-pickcount">
               {pickedCount}/{k}
             </span>
           )}
         </div>
-        {isBracket ? (
+        {isFormationMode ? (
+          <div className="mt-manual-formation">
+            {Array.from({ length: k }, (_, posIndex) => {
+              const selected = new Set(formationPositions[posIndex] ?? []);
+              const posKey =
+                posIndex === 0
+                  ? "fillGuide.pos1"
+                  : posIndex === 1
+                    ? "fillGuide.pos2"
+                    : "fillGuide.pos3";
+              return (
+                <div className="mt-manual-position" key={posIndex}>
+                  <div className="mt-manual-position-head">
+                    <span>{t(posKey)}</span>
+                    <span>{selected.size}</span>
+                  </div>
+                  <div className="mt-manual-grid" role="list">
+                    {umaCells.map((u) => {
+                      const on = selected.has(u);
+                      return (
+                        <button
+                          key={u}
+                          type="button"
+                          role="listitem"
+                          className={`mt-manual-cell${on ? " on" : ""}`}
+                          onClick={() => toggleFormationUma(posIndex, u)}
+                          aria-pressed={on}
+                          aria-label={`${t(posKey)} ${u}${on ? " (selected)" : ""}`}
+                        >
+                          {u}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : isBracket ? (
           <div className="mt-manual-grid" role="list">
             {bracketCells.map((bstr) => {
               const n = Number(bstr);
@@ -329,7 +482,10 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
       {ticket && (
         <div className="mt-manual-preview">
           <div className="mt-manual-preview-head">
-            <span className="mt-manual-preview-type">{t(`betType.${type}`)}</span>
+            <span className="mt-manual-preview-type">
+              {t(`betType.${type}`)}
+              {isFormationMode ? ` · ${t("manual.formationMode")}` : ""}
+            </span>
             <span className="mt-manual-preview-lines">
               {tFmt("manual.linesCount", { n: ticket.lines.length })}
             </span>
@@ -337,7 +493,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           <div className="mt-chips mt-manual-preview-chips">
             {ticket.lines.slice(0, 6).map((ln, j) => (
               <span key={j} className="mt-chip">
-                {ln.combo.join(isBracket ? "-" : isOrdered(type) ? "-" : "-")}
+                {ln.combo.join("-")}
               </span>
             ))}
             {ticket.lines.length > 6 && (
@@ -391,9 +547,4 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
       </div>
     </div>
   );
-}
-
-/** Whether the bet type's combos are ORDERED (1st→2nd→3rd). */
-function isOrdered(type: BetType): boolean {
-  return type === "exacta" || type === "trifecta";
 }

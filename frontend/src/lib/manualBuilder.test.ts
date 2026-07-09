@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  buildManualFormationTicket,
   buildManualTicket,
   finalizeTicket,
   isFullBox,
@@ -187,6 +188,42 @@ describe("manualBuilder — exacta / trifecta (ordered box)", () => {
     // All distinct, ordered triples.
     const set = new Set(t.lines.map((l) => l.combo.join("-")));
     expect(set.size).toBe(6);
+  });
+});
+
+describe("manualBuilder — explicit ordered formations", () => {
+  it("builds a segregated trifecta from 1st/2nd/3rd position sets", () => {
+    const { p, allUmas } = priced();
+    const t = buildManualFormationTicket(
+      "trifecta",
+      [["6"], ["3", "4"], ["1", "3", "4", "8"]],
+      p,
+      allUmas,
+      100,
+    );
+    expect(t).not.toBeNull();
+    if (!t) return;
+    expect(t.structure).toBe("formation");
+    expect(t.structurePayload).toEqual({
+      positions: [["6"], ["3", "4"], ["1", "3", "4", "8"]],
+    });
+    expect(t.lines.map((l) => l.combo.join("-")).sort()).toEqual([
+      "6-3-1",
+      "6-3-4",
+      "6-3-8",
+      "6-4-1",
+      "6-4-3",
+      "6-4-8",
+    ]);
+    expect(t.cost).toBe(600);
+  });
+
+  it("builds an exacta formation and rejects empty/non-ordered formations", () => {
+    const { p, allUmas } = priced();
+    const exacta = buildManualFormationTicket("exacta", [["6"], ["3", "4"]], p, allUmas, 100);
+    expect(exacta?.lines.map((l) => l.combo.join("-")).sort()).toEqual(["6-3", "6-4"]);
+    expect(buildManualFormationTicket("trifecta", [["6"], [], ["3"]], p, allUmas, 100)).toBeNull();
+    expect(buildManualFormationTicket("quinella", [["6"], ["3"]], p, allUmas, 100)).toBeNull();
   });
 });
 
