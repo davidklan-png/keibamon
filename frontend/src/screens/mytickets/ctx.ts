@@ -10,6 +10,7 @@
 // ============================================================================
 import type React from "react";
 import type { useI18n } from "../../i18n";
+import type { LiveRace } from "../../api";
 import type { Runner } from "../../lib/fairvalue";
 import type { CommittedTicket, MoodKey, Ticket } from "../../lib/types";
 import type { FriendsAvatar, PublicProfile } from "../../auth/socialClient";
@@ -35,6 +36,8 @@ export interface MtCtx {
   // live data
   feature: Feature;
   fallbackDate: string | undefined;
+  /** Every live race with a declared runner field; manual tickets may target any of them. */
+  races: LiveRace[];
   featRunners: Runner[];
   options: { mood: MoodKey; ticket: Ticket }[];
 
@@ -101,7 +104,8 @@ export interface MtCtx {
   cheer: (id: string) => void;
   settle: (id: string) => void;
   commit: () => void;
-  commitManual: (ticket: Ticket, existingId?: string) => void;
+  /** New manual tickets save against `race`; edits remain pinned to their original race. */
+  commitManual: (ticket: Ticket, existingId?: string, race?: LiveRace) => void;
   doFollow: (targetUserId: string, targetHandle: string | null) => void;
   doUnfollow: (targetUserId: string, targetHandle: string | null) => void;
   doBlock: (targetUserId: string) => void;

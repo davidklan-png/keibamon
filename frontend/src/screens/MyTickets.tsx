@@ -875,8 +875,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
    *             on OPEN cards; if the ticket settles between open+register,
    *             the 409 is caught below).
    */
-  function commitManual(ticket: Ticket, existingId?: string) {
-    if (!feature) return;
+  function commitManual(ticket: Ticket, existingId?: string, race?: LiveRace) {
     const id = existingId ?? newTicketId();
     const serial =
       existingId && tickets.find((x) => x.id === existingId)
@@ -885,6 +884,10 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     const existingRow = existingId
       ? tickets.find((x) => x.id === existingId)
       : null;
+    // A new manual ticket may target any race declared in the current live
+    // card. Edits deliberately stay pinned to their original frozen race.
+    const ticketRace = existingRow?.race ?? (race ? snapshotRace(race, fallbackDate) : feature ? snapshotRace(feature, fallbackDate) : null);
+    if (!ticketRace) return;
     const tk: CommittedTicket = {
       id,
       serial,
@@ -893,7 +896,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       mood: moodKey(ticket),
       state: "open",
       payoutBase: ticket.avgPayout,
-      race: existingRow?.race ?? snapshotRace(feature, fallbackDate),
+      race: ticketRace,
       owner: "you",
       claps: existingRow?.claps ?? 0,
       createdAt: existingRow?.createdAt ?? Date.now(),
@@ -958,6 +961,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     onToggleLang,
     feature,
     fallbackDate,
+    races: (snap?.races || []).filter((race) => (race.runners || []).length > 0),
     featRunners,
     options,
     tickets,

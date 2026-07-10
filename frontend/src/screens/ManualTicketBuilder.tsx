@@ -185,6 +185,10 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
     () => Array.from({ length: Math.max(maxUma, 1) }, (_, i) => String(i + 1)),
     [maxUma],
   );
+  const runnerByUma = useMemo(
+    () => new Map(runners.map((runner) => [runner.uma, runner])),
+    [runners],
+  );
   const bracketCells = ["1", "2", "3", "4", "5", "6", "7", "8"];
 
   // Build the priced ticket from current picks. While locked (editing a
@@ -311,6 +315,26 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   // the bet-type chip is disabled when it doesn't, but defend here too.
   const bracketDisabled = isBracket && !hasBrackets;
 
+  function horseCell(u: string, on: boolean, onClick: () => void, ariaPrefix = "") {
+    const runner = runnerByUma.get(u);
+    const odds = runner?.odds ?? 0;
+    const oddsLabel = odds > 0 ? `${odds.toFixed(1)}×` : "—";
+    return (
+      <button
+        key={u}
+        type="button"
+        role="listitem"
+        className={`mt-manual-cell mt-manual-horse${on ? " on" : ""}`}
+        onClick={onClick}
+        aria-pressed={on}
+        aria-label={`${ariaPrefix}${u} · ${t("manual.currentOdds")} ${oddsLabel}${on ? " (selected)" : ""}`}
+      >
+        <span className="mt-manual-horse-num">{u}</span>
+        <span className="mt-manual-horse-odds">{oddsLabel}</span>
+      </button>
+    );
+  }
+
   return (
     <div className="mt-manual">
       {/* Bet type picker */}
@@ -404,22 +428,9 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
                     <span>{selected.size}</span>
                   </div>
                   <div className="mt-manual-grid" role="list">
-                    {umaCells.map((u) => {
-                      const on = selected.has(u);
-                      return (
-                        <button
-                          key={u}
-                          type="button"
-                          role="listitem"
-                          className={`mt-manual-cell${on ? " on" : ""}`}
-                          onClick={() => toggleFormationUma(posIndex, u)}
-                          aria-pressed={on}
-                          aria-label={`${t(posKey)} ${u}${on ? " (selected)" : ""}`}
-                        >
-                          {u}
-                        </button>
-                      );
-                    })}
+                    {umaCells.map((u) =>
+                      horseCell(u, selected.has(u), () => toggleFormationUma(posIndex, u), `${t(posKey)} `),
+                    )}
                   </div>
                 </div>
               );
@@ -447,22 +458,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           </div>
         ) : (
           <div className="mt-manual-grid" role="list">
-            {umaCells.map((u) => {
-              const on = pickedUma.has(u);
-              return (
-                <button
-                  key={u}
-                  type="button"
-                  role="listitem"
-                  className={`mt-manual-cell${on ? " on" : ""}`}
-                  onClick={() => toggleUma(u)}
-                  aria-pressed={on}
-                  aria-label={u + (on ? " (selected)" : "")}
-                >
-                  {u}
-                </button>
-              );
-            })}
+            {umaCells.map((u) => horseCell(u, pickedUma.has(u), () => toggleUma(u)))}
           </div>
         )}
       </div>

@@ -68,10 +68,10 @@ function mount(opts: MountOpts = {}): {
   return { container, root, onRegister, unmount: () => act(() => root.unmount()) };
 }
 
-/** Click the uma-grid cell carrying `uma` (a .mt-manual-cell whose text is it). */
+/** Click the uma-grid cell carrying `uma`. Horse cells also show their odds. */
 function clickCell(container: HTMLElement, uma: string): void {
   const cell = Array.from(container.querySelectorAll(".mt-manual-cell")).find(
-    (b) => b.textContent === uma,
+    (b) => b.querySelector(".mt-manual-horse-num")?.textContent === uma,
   );
   expect(cell, `uma cell ${uma} should exist`).toBeTruthy();
   act(() => {
@@ -93,7 +93,7 @@ function clickPositionCell(container: HTMLElement, positionIndex: number, uma: s
   const positions = container.querySelectorAll(".mt-manual-position");
   expect(positions.length).toBeGreaterThan(positionIndex);
   const cell = Array.from(positions[positionIndex].querySelectorAll(".mt-manual-cell")).find(
-    (b) => b.textContent === uma,
+    (b) => b.querySelector(".mt-manual-horse-num")?.textContent === uma,
   );
   expect(cell, `position ${positionIndex + 1} uma cell ${uma} should exist`).toBeTruthy();
   act(() => {
@@ -133,6 +133,19 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     ],
   };
   const curatedSorted = CURATED.lines!.map((c) => c.slice().sort((a, b) => Number(a) - Number(b)).join("-")).sort();
+
+  it("shows the current win odds inside every horse-number selector", () => {
+    const { container, unmount } = mount();
+    const horse1 = Array.from(container.querySelectorAll(".mt-manual-horse")).find(
+      (cell) => cell.querySelector(".mt-manual-horse-num")?.textContent === "1",
+    );
+    expect(horse1?.querySelector(".mt-manual-horse-odds")?.textContent).toBe("2.4×");
+    const horse6 = Array.from(container.querySelectorAll(".mt-manual-horse")).find(
+      (cell) => cell.querySelector(".mt-manual-horse-num")?.textContent === "6",
+    );
+    expect(horse6?.querySelector(".mt-manual-horse-odds")?.textContent).toBe("51.0×");
+    unmount();
+  });
 
   it("scenario 1 — open a curated ticket, change nothing, Save: identical lines", () => {
     const { container, onRegister } = mount({ initial: CURATED });

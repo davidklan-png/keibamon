@@ -1,17 +1,21 @@
 // ====================== MANUAL BUILDER ======================
 // Extracted from MyTickets' inner renderManual (2026-07-08 split — behavior
 // preserving; commitManual stays in the container and arrives through MtCtx).
-import React from "react";
+import React, { useMemo, useState } from "react";
 import { ManualTicketBuilder, type ManualTicketInitial } from "../ManualTicketBuilder";
 import type { MtCtx } from "./ctx";
+import { mtRaceKey, mtRunnersOf, snapshotRace } from "../../lib/mytickets-view";
 
 export function ManualView({ ctx }: { ctx: MtCtx }) {
   const {
     t,
+    tFmt,
     setView,
     manualEditId,
     tickets,
     feature,
+    races,
+    fallbackDate,
     featRunners,
     runnersForTicket,
     unit,
@@ -41,7 +45,25 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
   // truncated the picker to the featured race's (smaller) field instead of
   // the ticket's real one. New tickets have no race of their own yet, so
   // they still build against the featured race.
-  const builderRunners = editTk ? runnersForTicket(editTk) : featRunners;
+  const availableRaces = useMemo(
+    () => races.filter((race) => (race.runners || []).length > 0),
+    [races],
+  );
+  const featuredKey = feature ? mtRaceKey(feature, fallbackDate) : "";
+  const [selectedRaceKey, setSelectedRaceKey] = useState(featuredKey);
+  const selectedRace =
+    availableRaces.find((race) => mtRaceKey(race, fallbackDate) === selectedRaceKey) ??
+    feature ??
+    availableRaces[0] ??
+    null;
+  const builderRunners = editTk
+    ? runnersForTicket(editTk)
+    : selectedRace
+      ? mtRunnersOf(selectedRace)
+      : featRunners;
+  const raceSnapshot = editTk?.race ?? (selectedRace ? snapshotRace(selectedRace, fallbackDate) : null);
+  const builderKey = editTk?.id ?? (selectedRace ? mtRaceKey(selectedRace, fallbackDate) : "manual-no-race");
+
   return (
     <>
       <div className="mt-back-head">
@@ -52,15 +74,50 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
           {editTk ? t("manual.editTitle") : t("manual.title")}
         </div>
       </div>
-      {feature ? (
-        <ManualTicketBuilder
-          runners={builderRunners}
-          unit={unit}
-          onUnitChange={setUnit}
-          initial={initial}
-          onRegister={(built) => commitManual(built.ticket, built.id)}
-          onCancel={() => setView("new")}
-        />
+      {raceSnapshot ? (
+        <>
+          <section className="mt-manual-race" aria-label={t("manual.raceContext")}>
+            <div className="mt-manual-race-topline">
+              <span className="mt-manual-race-kicker">{t("manual.raceContext")}</span>
+              {editTk ? (
+                <span className="mt-manual-race-fixed">{t("manual.raceLocked")}</span>
+              ) : (
+                <label className="mt-manual-race-select">
+                  <span className="sr-only">{t("manual.chooseRace")}</span>
+                  <select
+                    value={selectedRace ? mtRaceKey(selectedRace, fallbackDate) : ""}
+                    onChange={(event) => setSelectedRaceKey(event.target.value)}
+                    aria-label={t("manual.chooseRace")}
+                  >
+                    {availableRaces.map((race) => (
+                      <option key={mtRaceKey(race, fallbackDate)} value={mtRaceKey(race, fallbackDate)}>
+                        {(race.venue || "")} R{race.race_no} · {race.name || t("race.placeholderRace")}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <div className="mt-manual-race-name">
+              {raceSnapshot.venueEn} R{raceSnapshot.raceNo} · {raceSnapshot.nameEn}
+            </div>
+            <div className="mt-manual-race-meta">
+              {raceSnapshot.dateEn && <span>{raceSnapshot.dateEn}</span>}
+              {raceSnapshot.grade && <span>{raceSnapshot.grade}</span>}
+              {raceSnapshot.post && <span>{t("mine.post")} {raceSnapshot.post}</span>}
+              <span>{tFmt("race.runnersCount", { count: raceSnapshot.runners.length })}</span>
+            </div>
+          </section>
+          <ManualTicketBuilder
+            key={builderKey}
+            runners={builderRunners}
+            unit={unit}
+            onUnitChange={setUnit}
+            initial={initial}
+            onRegister={(built) => commitManual(built.ticket, built.id, selectedRace ?? undefined)}
+            onCancel={() => setView("new")}
+          />
+        </>
       ) : (
         <p className="empty">{t("race.noLive")}</p>
       )}

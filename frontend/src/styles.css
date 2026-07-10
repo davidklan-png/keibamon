@@ -2178,6 +2178,59 @@ select:focus {
  * .fillguide-cell) so taps feel like buttons, not labels.
  */
 .mt-manual { padding-bottom: 90px; }
+.mt-manual-race {
+  margin: 0 0 18px;
+  padding: 13px 14px;
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow-card);
+}
+.mt-manual-race-topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 7px;
+}
+.mt-manual-race-kicker {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+}
+.mt-manual-race-select { min-width: 0; }
+.mt-manual-race-select select {
+  max-width: 218px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--tint);
+  color: var(--ink);
+  font: 700 11px var(--font-sans);
+  padding: 6px 25px 6px 8px;
+  cursor: pointer;
+}
+.mt-manual-race-fixed {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+.mt-manual-race-name {
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 900;
+  line-height: 1.25;
+}
+.mt-manual-race-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
 .mt-manual-section { margin-bottom: 18px; }
 .mt-manual-types {
   display: grid;
@@ -2274,7 +2327,7 @@ select:focus {
 }
 .mt-manual-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
   gap: 6px;
 }
 .mt-manual-formation {
@@ -2297,7 +2350,7 @@ select:focus {
   font-weight: 900;
 }
 .mt-manual-cell {
-  aspect-ratio: 1;
+  min-height: 58px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2311,6 +2364,13 @@ select:focus {
   cursor: pointer;
   padding: 0;
 }
+.mt-manual-horse {
+  flex-direction: column;
+  gap: 2px;
+}
+.mt-manual-horse-num { font: 800 15px/1 var(--font-mono); }
+.mt-manual-horse-odds { font: 700 10px/1 var(--font-mono); color: var(--muted); }
+.mt-manual-horse.on .mt-manual-horse-odds { color: rgba(255,255,255,.84); }
 .mt-manual-cell.on {
   border-color: var(--turf);
   background: var(--turf);
