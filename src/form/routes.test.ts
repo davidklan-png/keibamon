@@ -8,7 +8,7 @@
 // Pins: horse (ok + no_history), jockey (ok + no_history), race batch (post_time
 // default + explicit as_of + unknown→404), tolerant as_of parsing.
 
-import { describe, it, expect, beforeAll } from "vitest";
+import { describe, it, expect, beforeAll, vi } from "vitest";
 import Database from "better-sqlite3";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -127,12 +127,21 @@ describe("GET /api/horses/:name/form", () => {
   });
 
   it("Alpha (no as_of) → ok + 2 starts (now = 2026-06-25 excludes R4)", async () => {
-    const r = await callRoute("/api/horses/Alpha/form");
-    expect(r.status).toBe(200);
-    const body = (await r.json()) as any;
-    expect(body.status).toBe("ok");
-    expect(body.career.starts).toBe(2);
-    expect(body.as_of).toBeNull(); // raw param value reflected back
+    // The route defaults as_of to real `now`. Pin the wall-clock so this is
+    // deterministic — Alpha's R4 start is dated 2026-07-10, so once the real
+    // calendar crosses that date R4 enters the PIT window and the start count
+    // drifts from 2 to 3. Pin to 2026-06-25 (between R1 and R4) per the case.
+    vi.useFakeTimers({ now: new Date("2026-06-25T00:00:00Z") });
+    try {
+      const r = await callRoute("/api/horses/Alpha/form");
+      expect(r.status).toBe(200);
+      const body = (await r.json()) as any;
+      expect(body.status).toBe("ok");
+      expect(body.career.starts).toBe(2);
+      expect(body.as_of).toBeNull(); // raw param value reflected back
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("Alpha (compact YYYYMMDD as_of) → tolerant parse", async () => {
