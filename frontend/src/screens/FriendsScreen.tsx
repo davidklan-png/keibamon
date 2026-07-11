@@ -262,8 +262,19 @@ function AddPane({ getToken, myHandle, onChange }: {
 
   const inviteUrl = myHandle ? `${window.location.origin}/?friend=${encodeURIComponent(myHandle)}` : null;
 
-  async function copy() {
+  async function share() {
     if (!inviteUrl) return;
+    // Web Share API where available (mobile → LINE/Messages share sheet, where
+    // race-day friend groups live). On cancel/failure, do nothing (no copy).
+    if (typeof navigator !== "undefined" && typeof navigator.share === "function") {
+      try {
+        await navigator.share({ title: t("invite.shareTitle"), text: t("invite.shareHint"), url: inviteUrl });
+        return;
+      } catch {
+        return; // user dismissed the sheet — don't surprise-copy
+      }
+    }
+    // Clipboard fallback (desktop / no Web Share).
     try {
       await navigator.clipboard.writeText(inviteUrl);
       setCopied(true);
@@ -300,17 +311,24 @@ function AddPane({ getToken, myHandle, onChange }: {
       </section>
 
       <section className="section">
-        <h3 className="section-title">{t("friends.inviteTitle")}</h3>
+        <h3 className="section-title">{t("invite.shareTitle")}</h3>
+        {/* The invite section NEVER renders blank. With a handle → the link +
+            a Share button (navigator.share → clipboard fallback). Without
+            (transitional only — the Phase B gate guarantees a handle for any
+            signed-in session, so this branch is a safe fallback) → the
+            set-handle hint. */}
         {inviteUrl ? (
           <>
-            <p className="hint">{t("friends.inviteHint")}</p>
+            <p className="hint">{t("invite.shareHint")}</p>
             <div className="friends-invite">
               <code className="friends-invite-url">{inviteUrl}</code>
-              <button className="btn ghost" onClick={() => void copy()}>{copied ? t("friends.inviteCopied") : t("friends.inviteCopy")}</button>
+              <button className="btn primary" onClick={() => void share()}>
+                {copied ? t("invite.shareCopied") : t("invite.shareButton")}
+              </button>
             </div>
           </>
         ) : (
-          <p className="hint">{t("friends.inviteNeedHandle")}</p>
+          <p className="hint">{t("invite.needHandle")}</p>
         )}
       </section>
     </div>

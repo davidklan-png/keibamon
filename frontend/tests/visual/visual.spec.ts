@@ -418,6 +418,40 @@ test.describe("visual regression", () => {
       await page.waitForTimeout(500);
       await expect(page.locator(".handle-setup-card")).toHaveScreenshot(`handle-setup.${lang}.png`);
     });
+
+    // ---- Social UX Fixes (Phase C): invite deep-link interstitial ----
+    // Land on /?friend=boss as the signed-in bypass user → useInvite resolves
+    // (friendship none) → the one-tap "Add @boss" interstitial. Pins the new
+    // profile-card screen.
+    test(`invite interstitial (${lang})`, async ({ page }) => {
+      await installApiMocks(page);
+      // The inviter's profile (friendship none → interstitial, not auto-add).
+      await page.route("**/api/social/users/boss", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            id: "u-boss",
+            handle: "boss",
+            display_name: "Boss Player",
+            avatar: null,
+            created_at: 0,
+            friendship: "none",
+          }),
+        }),
+      );
+      await page.addInitScript((l) => {
+        try { window.localStorage.setItem("keibamon.lang", l); } catch { /* ignore */ }
+        const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+        Date.now = () => FROZEN;
+      }, lang);
+      await page.goto("/?friend=boss");
+      await expect(page.locator(".invite-card")).toBeVisible({ timeout: 10_000 });
+      await expect(page.locator(".invite-handle")).toContainText("@boss");
+      await expect(page.locator(".invite-cta")).toContainText(lang === "en" ? "Add" : "追加");
+      await page.waitForTimeout(300);
+      await expect(page.locator(".invite-card")).toHaveScreenshot(`invite-interstitial.${lang}.png`);
+    });
   }
 
   // ---- ADR-0020: focused Japanese EXPANDED-Research snapshot ----

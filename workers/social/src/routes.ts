@@ -23,6 +23,7 @@ import {
   userById,
 } from "./social";
 import {
+  acceptInvite,
   acceptRequest,
   declineRequest,
   friendshipState,
@@ -79,6 +80,9 @@ const REPORT_PATH = "/api/social/report";
 const FRIEND_REQUEST_ACCEPT_PATH = /^\/api\/social\/friends\/request\/([^/]+)\/accept$/;
 const FRIEND_REQUEST_PATH = /^\/api\/social\/friends\/request\/([^/]+)$/;
 const FRIENDS_LIST_PATH = "/api/social/friends";
+// Social UX Fixes (Phase C) — pre-approved invite accept by handle. MUST
+// precede /friends/:id so "invite" isn't captured as an id.
+const FRIEND_INVITE_PATH = /^\/api\/social\/friends\/invite\/([^/]+)$/;
 const FRIEND_PATH = /^\/api\/social\/friends\/([^/]+)$/;
 const USER_SEARCH_PATH = "/api/social/users/search";
 // Social UX Fixes (Phase B) — handle-availability probe for the onboarding
@@ -117,6 +121,12 @@ export async function router(request: Request, env: Env, cors: Record<string, st
   const friendAcceptMatch = FRIEND_REQUEST_ACCEPT_PATH.exec(pathname);
   if (friendAcceptMatch) {
     return handleFriendAccept(request, env, cors, decodeURIComponent(friendAcceptMatch[1]));
+  }
+  // /api/social/friends/invite/:handle — Phase C pre-approved invite accept.
+  // (Tried before /friends/:id so "invite" isn't captured as an id.)
+  const friendInviteMatch = FRIEND_INVITE_PATH.exec(pathname);
+  if (friendInviteMatch) {
+    return handleFriendInvite(request, env, cors, decodeURIComponent(friendInviteMatch[1]));
   }
   // /api/social/friends/request/:id — POST = send request, DELETE = decline.
   const friendReqMatch = FRIEND_REQUEST_PATH.exec(pathname);
@@ -597,6 +607,15 @@ async function handleProfile(
   if (!profileUser || !profileUser.handle) {
     return json({ error: "not_found" }, 404, cors);
   }
+  // Social UX Fixes (Phase C) no-leak: a signed-in viewer in a block
+  // relationship (either direction) with this user gets the SAME 404 as a
+  // missing handle — so the invite interstitial can't surface a blocked
+  // inviter's profile, and blocked users can't view each other. A signed-out
+  // viewer has no block relationship (no account), so the check is scoped to
+  // viewerId.
+  if (viewerId && (await blockExistsEitherDirection(env.DB, viewerId, profileUser.id))) {
+    return json({ error: "not_found" }, 404, cors);
+  }
   const profile = await buildProfile(env.DB, profileUser, viewerId);
   // Friend Interactions: surface the viewer's friendship state so the profile's
   // Add-friend / Accept / Pending button renders the right affordance. A
@@ -746,6 +765,53 @@ async function handleFriendAccept(
     });
   }
   return json({ ok: true, transition: result.transition, now_friends: result.transition === "accepted" }, 200, cors);
+}
+
+/**
+ * POST /api/social/friends/invite/:handle — Social UX Fixes (Phase C).
+ * Pre-approved invite accept: the invitee's single tap forms the mutual
+ * friendship. `handle` resolves to the inviter; a missing handle AND a blocked
+ * pair both return 404 (no-leak — indistinguishable). Your own handle is a
+ * benign idempotent (200 already_friends). Fires friend_request_accepted to the
+ * inviter on a fresh create.
+ */
+async function handleFriendInvite(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  handle: string,
+): Promise<Response> {
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  const inviter = await userByHandle(env.DB, handle);
+  // No-leak: a missing handle and a blocked pair are indistinguishable (404).
+  if (!inviter || !inviter.handle) return json({ error: "not_found" }, 404, cors);
+
+  const result = await acceptInvite(env.DB, caller.id, inviter.id);
+  if (!result.ok) {
+    if (result.code === "blocked") return json({ error: "not_found" }, 404, cors); // no-leak
+    // cannot_friend_self (opened your own link) — benign idempotent.
+    return json({ ok: true, transition: "already_friends", now_friends: false }, 200, cors);
+  }
+  if (result.notify) {
+    await insertNotification(env.DB, {
+      userId: result.notify.recipientId,
+      type: result.notify.type,
+      actorId: caller.id,
+      subjectType: "user",
+      subjectId: caller.id,
+    });
+  }
+  return json(
+    { ok: true, transition: result.transition, now_friends: result.transition === "created" },
+    200,
+    cors,
+  );
 }
 
 /** /api/social/friends — GET friends + pending in/out (+ pending_count badge). */

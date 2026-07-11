@@ -210,6 +210,24 @@ export const ja = {
     feedEmpty: "まだありません — 馬券をシェアするか、友だちを追加してみましょう。",
     feedEmptyNoFriends: "友だちを追加すると、ここにシェアされた馬券が表示されます。",
   },
+  // Social UX Fixes (Phase C) — 招待ディープリンクのインタースティシャル + トースト。
+  invite: {
+    eyebrow: "招待が届いています",
+    addCta: "@{handle} を追加",
+    signInCta: "ログインして @{handle} を追加",
+    notNow: "あとで",
+    notFoundTitle: "招待が見つかりません",
+    notFoundHint: "@{handle} はハンドルを変更した可能性があります。",
+    notFoundDismiss: "OK",
+    toastAdded: "@{handle} を追加しました",
+    toastAlready: "@{handle} とはすでに友だちです",
+    toastSelf: "自分のリンクです",
+    shareTitle: "あなたの招待リンク",
+    shareHint: "友だちに送ると、開くだけで両方とも友だちになります。",
+    shareButton: "シェア",
+    shareCopied: "コピーしました",
+    needHandle: "ハンドルを設定すると招待リンクを取得できます。",
+  },
   // Friend Interactions Phase 4 — notification bell.
   notifications: {
     title: "通知",

@@ -39,6 +39,8 @@ import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
 import { HandleSetup } from "./components/HandleSetup";
+import { InviteInterstitial } from "./components/InviteInterstitial";
+import { useInvite } from "./auth/useInvite";
 import { BottomTabBar } from "./components/BottomTabBar";
 import { AppHeader } from "./components/AppHeader";
 import { RaceContextBar } from "./components/RaceContextBar";
@@ -271,8 +273,23 @@ function App() {
     };
   }, [isSignedIn, getToken]);
 
-  // ADR-0011 Phase 2: persist the funnel lane choice. Same best-effort shell
-  // as the impression store.
+  // Social UX Fixes (Phase C) — invite deep link. hasHandle gates resolution
+  // behind the Phase B gate (a signed-in viewer resolves only once they have a
+  // handle); a signed-out viewer gets the "Sign in to add" interstitial. The
+  // stashed invite survives the OAuth round-trip + handle-setup step.
+  const invite = useInvite({
+    getToken,
+    isSignedIn,
+    hasHandle: typeof viewerHandle === "string",
+  });
+  // A resolved invite (added / already / self) lands on Friends + a toast.
+  useEffect(() => {
+    if (!invite.toast) return;
+    setView("friends");
+    const id = window.setTimeout(() => invite.clearToast(), 2600);
+    return () => window.clearTimeout(id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invite.toast]);
   useEffect(() => {
     if (funnel) saveFunnel(funnel);
   }, [funnel]);
@@ -511,6 +528,41 @@ function App() {
     );
   }
 
+  // ---- Social UX Fixes (Phase C): invite interstitial / not-found ----
+  // Blocking, full-screen. The interstitial (no relationship) shows the
+  // inviter's card + one Add/Sign-in button. The not-found card covers an
+  // unknown handle AND a block (indistinguishable 404 → no leak).
+  if (invite.interstitial) {
+    const it = invite.interstitial;
+    return (
+      <InviteInterstitial
+        profile={it.profile}
+        handle={it.handle}
+        mode={it.mode}
+        busy={it.busy}
+        onAdd={() => void invite.accept()}
+        onSignIn={openSignIn}
+        onDismiss={invite.dismiss}
+      />
+    );
+  }
+  if (invite.notFound) {
+    const handle = invite.notFound.handle;
+    return (
+      <main className="app invite-interstitial">
+        <div className="invite-card">
+          <p className="invite-eyebrow">{t("invite.notFoundTitle")}</p>
+          <p className="invite-notfound-hint">
+            {t("invite.notFoundHint").replace("{handle}", handle)}
+          </p>
+          <button className="btn primary invite-cta" onClick={invite.dismiss}>
+            {t("invite.notFoundDismiss")}
+          </button>
+        </div>
+      </main>
+    );
+  }
+
   // ---- Social UX Fixes (Phase A): unified app shell ----
   // AppHeader + BottomTabBar are mounted ONCE in this return; only `body`
   // swaps per view. Because AppHeader never unmounts on a tab switch, there is
@@ -706,6 +758,15 @@ function App() {
     <>
       <AppHeader view={view} getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
       {body}
+      {invite.toast && (
+        <div className="kbm-toast" role="status">
+          {invite.toast.kind === "added"
+            ? t("invite.toastAdded").replace("{handle}", invite.toast.handle)
+            : invite.toast.kind === "already"
+              ? t("invite.toastAlready").replace("{handle}", invite.toast.handle)
+              : t("invite.toastSelf")}
+        </div>
+      )}
       <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
     </>
   );

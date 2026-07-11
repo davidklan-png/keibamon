@@ -220,6 +220,24 @@ export const en = {
     feedEmpty: "Nothing here yet — share a ticket or add friends to see their picks.",
     feedEmptyNoFriends: "Add friends to see their shared tickets here.",
   },
+  // Social UX Fixes (Phase C) — invite deep link interstitial + toasts.
+  invite: {
+    eyebrow: "You've been invited",
+    addCta: "Add @{handle}",
+    signInCta: "Sign in to add @{handle}",
+    notNow: "Not now",
+    notFoundTitle: "Couldn't find that invite",
+    notFoundHint: "@{handle} may have changed their handle.",
+    notFoundDismiss: "OK",
+    toastAdded: "@{handle} added",
+    toastAlready: "You're already friends with @{handle}",
+    toastSelf: "That's your own link",
+    shareTitle: "Your invite link",
+    shareHint: "Send this to a friend — opening it adds you both in one tap.",
+    shareButton: "Share",
+    shareCopied: "Copied",
+    needHandle: "Set your handle to get an invite link.",
+  },
   // Friend Interactions Phase 4 — notification bell. Copy stays recreational.
   notifications: {
     title: "Notifications",

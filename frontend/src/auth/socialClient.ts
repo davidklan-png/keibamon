@@ -339,6 +339,25 @@ export async function acceptFriendRequest(
   return { ok: true, data: { ok: true } };
 }
 
+/**
+ * POST /api/social/friends/invite/:handle — Social UX Fixes (Phase C).
+ * Pre-approved one-tap friend: the invite link is the inviter's consent, so a
+ * single call forms the mutual friendship. `transition` is "created" (now
+ * friends) or "already_friends"; a 404 covers both unknown handle and a block
+ * (no-leak — indistinguishable).
+ */
+export async function acceptInvite(
+  token: string | null,
+  handle: string,
+): Promise<SocialResult<{ transition: "created" | "already_friends"; now_friends: boolean }>> {
+  const r = await authedFetch(token, `/api/social/friends/invite/${encodeURIComponent(handle)}`, { method: "POST" });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await r.res.json()) as { transition?: "created" | "already_friends"; now_friends?: boolean };
+  return { ok: true, data: { transition: body.transition ?? "created", now_friends: !!body.now_friends } };
+}
+
+
 /** DELETE /api/social/friends/:id — remove a friend (silent, mutual). */
 export async function removeFriend(
   token: string | null,

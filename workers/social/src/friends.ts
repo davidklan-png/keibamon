@@ -164,6 +164,45 @@ export async function acceptRequest(
   return { ok: true, transition: "accepted", notify: { type: "friend_request_accepted", recipientId: requester } };
 }
 
+export type AcceptInviteResult =
+  | {
+      ok: true;
+      transition: "created" | "already_friends";
+      notify?: { type: "friend_request_accepted"; recipientId: string };
+    }
+  | { ok: false; code: "cannot_friend_self" | "blocked" };
+
+/**
+ * Social UX Fixes (Phase C) — pre-approved invite accept. The invite link IS
+ * the inviter's consent, so a single tap from the invitee forms the MUTUAL
+ * friendship in one call: both directed edges written `accepted`, no pending
+ * state, no second approval. Idempotent (already-friends = no-op success).
+ *
+ * Unlike requestFriend (one pending edge, maybe auto-accepts) and acceptRequest
+ * (requires a prior pending edge), this writes both halves unconditionally —
+ * the cold-invite path requestFriend/acceptRequest can't compose into. The
+ * route resolves handle→id and 404s before calling; `blocked` is mapped to a
+ * no-leak 404 by the route (indistinguishable from a missing handle).
+ */
+export async function acceptInvite(
+  db: D1Database,
+  viewer: string,
+  inviter: string,
+): Promise<AcceptInviteResult> {
+  if (viewer === inviter) return { ok: false, code: "cannot_friend_self" };
+  const blocked = await blockExistsEitherDirection(db, viewer, inviter);
+  if (blocked) return { ok: false, code: "blocked" };
+  if (await areFriends(db, viewer, inviter)) {
+    return { ok: true, transition: "already_friends" };
+  }
+  const now = NOW();
+  await Promise.all([
+    setFriendAccepted(db, viewer, inviter, now), // invitee → inviter
+    setFriendAccepted(db, inviter, viewer, now), // inviter → invitee (pre-approved)
+  ]);
+  return { ok: true, transition: "created", notify: { type: "friend_request_accepted", recipientId: inviter } };
+}
+
 /** Decline is SILENT to the sender: just delete the pending edge. Idempotent. */
 export async function declineRequest(db: D1Database, decliner: string, requester: string): Promise<void> {
   await db

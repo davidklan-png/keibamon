@@ -3219,3 +3219,196 @@ describe("social Worker — Friend Interactions Phase 4 (notification bell)", ()
     void aId;
   });
 });
+
+// ===========================================================================
+// Social UX Fixes (Phase C) — invite deep link: pre-approved one-tap friend.
+// ===========================================================================
+describe("social Worker — invite deep link (Phase C)", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  // Seed A (invitee, no handle) + B (inviter with handle "boss"). Returns ids.
+  async function seedInvitePair(db: D1Database): Promise<{ aId: string; bId: string }> {
+    jwtSub("clerk_a");
+    const aRes = await worker.fetch(
+      req("/api/social/me", { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const aId = ((await aRes.json()) as { id: string }).id;
+    jwtSub("clerk_b");
+    const bRes = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "boss" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const bId = ((await bRes.json()) as { id: string }).id;
+    return { aId, bId };
+  }
+
+  it("POST /friends/invite/:handle creates a MUTUAL friendship in one call (pre-approved)", async () => {
+    const { db, socialEdges, notifications } = makeFakeD1();
+    const { aId, bId } = await seedInvitePair(db);
+    // A opens B's invite link → one tap.
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/boss`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ transition: "created", now_friends: true });
+    // Both edges accepted (mutual); no pending half.
+    expect(socialEdges.get(`${aId}|${bId}|friend`)?.state).toBe("accepted");
+    expect(socialEdges.get(`${bId}|${aId}|friend`)?.state).toBe("accepted");
+    // The inviter (B) is notified once.
+    expect(notifications.some((n) => n.user_id === bId && n.type === "friend_request_accepted")).toBe(true);
+  });
+
+  it("invite accept is idempotent: a second tap → already_friends, no duplicate notify", async () => {
+    const { db, notifications } = makeFakeD1();
+    await seedInvitePair(db);
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/friends/invite/boss`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const before = notifications.length;
+    jwtSub("clerk_a"); // jwtVerify is mocked one-shot — re-mock for the second tap.
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/boss`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ transition: "already_friends", now_friends: false });
+    expect(notifications.length).toBe(before);
+  });
+
+  it("invite accept also resolves a prior pending request either direction → mutual", async () => {
+    const { db, socialEdges } = makeFakeD1();
+    const { aId, bId } = await seedInvitePair(db);
+    // B sends A a pending request first.
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req(`/api/social/friends/request/${aId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(socialEdges.get(`${bId}|${aId}|friend`)?.state).toBe("pending");
+    // A opens B's invite link → one tap collapses it to mutual.
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/boss`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(socialEdges.get(`${aId}|${bId}|friend`)?.state).toBe("accepted");
+    expect(socialEdges.get(`${bId}|${aId}|friend`)?.state).toBe("accepted");
+  });
+
+  it("invite accept 404 on unknown handle (no-leak)", async () => {
+    const { db } = makeFakeD1();
+    await seedInvitePair(db);
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/ghost`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+    expect(await res.json()).toMatchObject({ error: "not_found" });
+  });
+
+  it("invite accept is NO-LEAK on block: 404 (same shape as unknown), no edge formed", async () => {
+    const { db, socialEdges } = makeFakeD1();
+    const { aId, bId } = await seedInvitePair(db);
+    // B blocks A.
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req(`/api/social/block/${aId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    // A opens B's invite link → 404 (indistinguishable from unknown), no edge.
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/boss`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+    expect(socialEdges.get(`${aId}|${bId}|friend`)).toBeUndefined();
+    expect(socialEdges.get(`${bId}|${aId}|friend`)).toBeUndefined();
+  });
+
+  it("invite accept on your OWN handle → 200 already_friends (benign, no self-edge)", async () => {
+    const { db, socialEdges } = makeFakeD1();
+    const { aId } = await seedInvitePair(db);
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "alice" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/alice`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(socialEdges.get(`${aId}|${aId}|friend`)).toBeUndefined();
+  });
+
+  it("invite accept requires auth → 401", async () => {
+    const { db } = makeFakeD1();
+    const res = await worker.fetch(
+      req(`/api/social/friends/invite/boss`, { method: "POST" }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it("GET /users/:handle hides a blocked user (404) from a signed-in viewer — invite no-leak", async () => {
+    const { db } = makeFakeD1();
+    const { aId } = await seedInvitePair(db);
+    jwtSub("clerk_b");
+    await worker.fetch(
+      req(`/api/social/block/${aId}`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req(`/api/social/users/boss`, { method: "GET", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("GET /users/:handle still resolves for a signed-OUT viewer (no block relationship)", async () => {
+    const { db } = makeFakeD1();
+    await seedInvitePair(db);
+    const res = await worker.fetch(
+      req(`/api/social/users/boss`, { method: "GET" }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ handle: "boss" });
+  });
+});
