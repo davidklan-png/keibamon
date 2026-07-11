@@ -441,6 +441,17 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       }
       return null;
     }
+    // tickets: SOFT delete (deleteTicket) — UPDATE state='deleted' WHERE id+user.
+    m = /^UPDATE tickets\s+SET state = \?\s+WHERE id = \? AND user_id = \?/i.exec(s);
+    if (m) {
+      const [newState, id, userId] = b as [string, string, string];
+      const existing = tickets.get(id);
+      if (existing && existing.user_id === userId) {
+        tickets.set(id, { ...existing, state: newState });
+        return { meta: { changes: 1 } };
+      }
+      return { meta: { changes: 0 } };
+    }
 
     // ---- FOLLOWS ----
     m = /^INSERT INTO follows[\s\S]*ON CONFLICT\(follower_id, followee_id\) DO NOTHING/i.exec(s);
@@ -841,12 +852,13 @@ function makeFakeD1(opts: FakeD1Options = {}) {
   async function runAll<T>(sql: string, b: unknown[]): Promise<T[] | null> {
     const s = sql.trim();
 
-    // tickets: list by user_id (legacy Phase 2 path)
+    // tickets: list by user_id (legacy Phase 2 path). Excludes soft-deleted
+    // (state='deleted') to mirror listTickets' filter.
     const legacyTickets = /^SELECT [\s\S]*FROM tickets[\s\S]*WHERE user_id = \?[\s\S]*ORDER BY created_at DESC/i.exec(s);
     if (legacyTickets && !/JOIN users u/i.test(s)) {
       const userId = b[0] as string;
       return [...tickets.values()]
-        .filter((t) => t.user_id === userId)
+        .filter((t) => t.user_id === userId && t.state !== "deleted")
         .sort((a, c) => c.created_at - a.created_at) as unknown as T[];
     }
 
@@ -3410,5 +3422,169 @@ describe("social Worker — invite deep link (Phase C)", () => {
     );
     expect(res.status).toBe(200);
     expect(await res.json()).toMatchObject({ handle: "boss" });
+  });
+});
+
+// ===========================================================================
+// Social UX Fixes — ticket delete (soft) + retract-cascade + dead-subject
+// feed resilience.
+// ===========================================================================
+describe("social Worker — ticket delete + retract-cascade", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  async function ensureUser(db: D1Database, sub: string, handle?: string): Promise<string> {
+    jwtSub(sub);
+    const body = handle ? JSON.stringify({ handle }) : "{}";
+    const res = await worker.fetch(
+      req("/api/social/me", { method: "POST", headers: { ...authed(), "Content-Type": "application/json" }, body }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    return ((await res.json()) as { id: string }).id;
+  }
+
+  async function createTicket(db: D1Database, sub: string, id: string): Promise<void> {
+    jwtSub(sub);
+    await worker.fetch(
+      req("/api/social/tickets", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify(sampleTicketBody({ id })),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+  }
+
+  async function listTicketsFor(db: D1Database, sub: string): Promise<{ id: string }[]> {
+    jwtSub(sub);
+    const r = await worker.fetch(req("/api/social/tickets", { method: "GET", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    return ((await r.json()) as { tickets: { id: string }[] }).tickets;
+  }
+
+  async function feedFor(db: D1Database, sub: string): Promise<{ id: string; ticket: { id?: string } | null }[]> {
+    jwtSub(sub);
+    const r = await worker.fetch(req("/api/social/feed", { method: "GET", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    return ((await r.json()) as { items: { id: string; ticket: { id?: string } | null }[] }).items;
+  }
+
+  it("DELETE /tickets/:id soft-deletes; the ticket is excluded from GET /tickets", async () => {
+    const { db } = makeFakeD1();
+    await ensureUser(db, "clerk_a");
+    await createTicket(db, "clerk_a", "kb-del-1");
+    expect((await listTicketsFor(db, "clerk_a")).length).toBe(1);
+
+    jwtSub("clerk_a");
+    const del = await worker.fetch(
+      req(`/api/social/tickets/kb-del-1`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(del.status).toBe(200);
+    expect(await del.json()).toMatchObject({ ok: true, retracted_share: false });
+
+    expect((await listTicketsFor(db, "clerk_a")).length).toBe(0);
+  });
+
+  it("DELETE retracts an active share as a cascade → retracted_share:true", async () => {
+    const { db, shares } = makeFakeD1();
+    await ensureUser(db, "clerk_a");
+    await createTicket(db, "clerk_a", "kb-del-2");
+    // Share it (all_friends).
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/shares", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket: sampleTicketBody({ id: "kb-del-2" }), mode: "all_friends" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    const shareBefore = [...shares.values()].find((s) => s.ticket_id === "kb-del-2");
+    expect(shareBefore).toBeTruthy();
+    expect(shareBefore!.retracted_at).toBeNull();
+
+    jwtSub("clerk_a");
+    const del = await worker.fetch(
+      req(`/api/social/tickets/kb-del-2`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(del.status).toBe(200);
+    expect(await del.json()).toMatchObject({ ok: true, retracted_share: true });
+
+    const shareAfter = [...shares.values()].find((s) => s.ticket_id === "kb-del-2");
+    expect(shareAfter!.retracted_at).not.toBeNull();
+  });
+
+  it("DELETE /tickets/:id is 404 for unknown, 403 for non-owner (anti-oracle shape)", async () => {
+    const { db } = makeFakeD1();
+    await ensureUser(db, "clerk_a");
+    await createTicket(db, "clerk_a", "kb-del-3");
+    await ensureUser(db, "clerk_b");
+
+    jwtSub("clerk_b"); // B tries to delete A's ticket
+    const forbidden = await worker.fetch(
+      req(`/api/social/tickets/kb-del-3`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(forbidden.status).toBe(403);
+
+    jwtSub("clerk_a");
+    const missing = await worker.fetch(
+      req(`/api/social/tickets/no-such-ticket`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(missing.status).toBe(404);
+  });
+
+  it("a deleted shared ticket vanishes from the friend's feed (dead-subject resilience)", async () => {
+    const { db } = makeFakeD1();
+    await ensureUser(db, "clerk_a", "ala");
+    await ensureUser(db, "clerk_b", "bea");
+    // A invites B → mutual (Phase C invite endpoint).
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/friends/invite/bea`, { method: "POST", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    // A creates + shares; B sees it in the feed.
+    await createTicket(db, "clerk_a", "kb-feed-1");
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/shares", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ ticket: sampleTicketBody({ id: "kb-feed-1" }), mode: "all_friends" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect((await feedFor(db, "clerk_b")).some((it) => it.ticket?.id === "kb-feed-1")).toBe(true);
+
+    // A deletes the ticket → cascade retract → B's feed drops it (graceful).
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req(`/api/social/tickets/kb-feed-1`, { method: "DELETE", headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect((await feedFor(db, "clerk_b")).some((it) => it.ticket?.id === "kb-feed-1")).toBe(false);
+  });
+
+  it("DELETE requires auth → 401", async () => {
+    const { db } = makeFakeD1();
+    const res = await worker.fetch(
+      req(`/api/social/tickets/whatever`, { method: "DELETE" }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(401);
   });
 });

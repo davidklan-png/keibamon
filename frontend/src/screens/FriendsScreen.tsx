@@ -80,14 +80,20 @@ export function FriendsScreen({ getToken, onPendingChange }: FriendsScreenProps)
     if (sub === "feed") void refreshFeed();
   }, [sub, refreshFeed]);
 
+  const [detailMissing, setDetailMissing] = useState(false);
   async function openDetail(shareId: string) {
     setDetailId(shareId);
     setDetail(null);
+    setDetailMissing(false);
     setSub("detail");
     const token = await getToken();
     if (!token) return;
     const r = await getShare(token, shareId);
-    setDetail(r.ok ? r.data : null);
+    // Dead-subject resilience (Social UX Fixes): a share whose ticket was
+    // deleted/retracted 404s → show "no longer available" instead of hanging
+    // on the loading "…". The bell deep-links here from a stale notification.
+    if (r.ok) setDetail(r.data);
+    else setDetailMissing(true);
   }
 
   const hasFriends = (fr?.friends.length ?? 0) > 0 || (fr?.pending_incoming.length ?? 0) > 0;
@@ -123,6 +129,7 @@ export function FriendsScreen({ getToken, onPendingChange }: FriendsScreenProps)
       {sub === "detail" && detailId && (
         <DetailPane
           detail={detail}
+          missing={detailMissing}
           getToken={getToken}
           onBack={() => {
             setSub("feed");
@@ -337,13 +344,24 @@ function AddPane({ getToken, myHandle, onChange }: {
 
 // ---- Share detail pane (viewer) ------------------------------------------
 
-function DetailPane({ detail, getToken, onBack }: {
+function DetailPane({ detail, missing, getToken, onBack }: {
   detail: FeedItem | null;
+  /** True when the share 404'd (deleted/retracted) — show a graceful "gone"
+   *  state instead of hanging on the loading "…". */
+  missing: boolean;
   getToken: () => Promise<string | null>;
   onBack: () => void;
 }) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
+  if (missing) return (
+    <div className="friends-detail">
+      <div className="mt-back-head">
+        <button className="mt-back" onClick={onBack}>‹</button>
+      </div>
+      <p className="empty">{t("friends.shareGone")}</p>
+    </div>
+  );
   if (!detail) return (
     <div className="friends-detail">
       <button className="mt-back" onClick={onBack}>‹</button>

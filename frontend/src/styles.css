@@ -2326,10 +2326,16 @@ select:focus {
 /* Edit pencil on OPEN ticket cards (manual edit-in-place entry point).
  * Defends against click-bubbling: the card itself is a button (openDetail),
  * so this is positioned absolutely with a hit-target that stops propagation. */
+/* [pill][edit][delete] — a single flex cluster at the right of the card top,
+   so the actions never overlap the mood pill (the old .mt-card-edit was
+   absolutely positioned and collided with it). */
+.mt-card-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
 .mt-card-edit {
-  position: absolute;
-  top: 10px;
-  right: 10px;
   width: 28px;
   height: 28px;
   border-radius: 50%;
@@ -2346,6 +2352,24 @@ select:focus {
   background: var(--turf);
   color: #fff;
   border-color: var(--turf);
+}
+.mt-card-delete {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink-2);
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+.mt-card-delete:hover {
+  background: #c0392b;
+  color: #fff;
+  border-color: #c0392b;
 }
 
 /* ---- ManualTicketBuilder ----
@@ -4670,6 +4694,55 @@ select:focus {
 /* ---- misc social chrome ---- */
 .mt-bell-bar { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
 .kbm-toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; padding: 11px 18px; border-radius: 999px; background: #1a1a1a; color: #fff; font-weight: 700; font-size: 13px; }
+
+/* MyTickets modals (ReportModal + DeleteTicketModal). These classes were
+   referenced but unstyled — added with the delete-confirm work. */
+.mt-modal-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+.mt-modal {
+  width: 100%;
+  max-width: 360px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 22px 20px 18px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.2);
+}
+.mt-modal-title { font-weight: 800; font-size: 17px; margin-bottom: 8px; }
+.mt-modal-hint { margin: 0 0 14px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.mt-modal-error { color: #c0392b; font-size: 12px; font-weight: 700; margin: 6px 0 0; }
+.mt-modal-input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font: 600 14px/1.4 inherit;
+  color: var(--ink);
+  background: var(--panel);
+  resize: vertical;
+}
+.mt-modal-row { display: flex; gap: 10px; }
+.mt-modal-cta {
+  flex: 1;
+  min-height: 44px;
+  border-radius: 10px;
+  border: 0;
+  background: var(--turf);
+  color: #fff;
+  font-weight: 800;
+  font-size: 14px;
+  cursor: pointer;
+}
+.mt-modal-cta:disabled { opacity: 0.5; cursor: default; }
+.mt-modal-cta-ghost { background: var(--panel); color: var(--ink-2); border: 1px solid var(--line); }
+.mt-modal-cta-danger { background: #c0392b; }
 .mt-owner-engagement { margin-top: 12px; }
 .mt-owner-congrats { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; background: #FFF7E6; color: #B9780C; font-weight: 800; margin-bottom: 8px; }
 .mt-share-friend { flex: none; padding: 9px 14px; border-radius: 10px; font-weight: 700; font-size: 13px; background: #16AC66; color: #fff; border: 0; }

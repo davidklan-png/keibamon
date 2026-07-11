@@ -451,6 +451,25 @@ export async function retractShare(
   return { ok: true, data: { ok: true } };
 }
 
+/**
+ * DELETE /api/social/tickets/:id — Social UX Fixes. Soft-deletes the ticket
+ * (server-side) and retracts its active share as a cascade so it vanishes from
+ * friends' feeds. `retracted_share` reports whether the cascade fired (drives
+ * the toast copy). 404 = unknown; 403 = not owner.
+ */
+export async function deleteTicket(
+  token: string | null,
+  ticketId: string,
+): Promise<SocialResult<{ ok: true; retracted_share: boolean }>> {
+  const r = await authedFetch(token, `/api/social/tickets/${encodeURIComponent(ticketId)}`, {
+    method: "DELETE",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await r.res.json()) as { retracted_share?: boolean };
+  return { ok: true, data: { ok: true, retracted_share: !!body.retracted_share } };
+}
+
 /** GET /api/social/shares/:id — share detail (audience-gated). */
 export async function getShare(token: string | null, shareId: string): Promise<SocialResult<FeedItem>> {
   const r = await authedFetch(token, `/api/social/shares/${encodeURIComponent(shareId)}`, { method: "GET" });

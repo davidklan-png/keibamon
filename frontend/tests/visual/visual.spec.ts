@@ -200,6 +200,19 @@ test.describe("visual regression", () => {
       await expect(page).toHaveScreenshot(`mytickets-detail-open.${lang}.png`);
     });
 
+    // ---- Ticket delete confirm (Social UX Fixes) ----
+    // The [pill][edit][delete] cluster is pixel-pinned by mytickets-feed above;
+    // this captures the confirm modal that opens on delete (also pins the
+    // previously-unstyled .mt-modal* CSS). The first card is the open one.
+    test(`ticket delete confirm (${lang})`, async ({ page }) => {
+      await landOnFeed(page, lang);
+      await page.locator(".mt-card").first().locator(".mt-card-delete").click();
+      await expect(page.locator(".mt-modal")).toBeVisible();
+      await expect(page.locator(".mt-modal-cta-danger")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-modal")).toHaveScreenshot(`ticket-delete-confirm.${lang}.png`);
+    });
+
     // ---- Race step (collapsed-builder landing) ----
     // Stepper is now [race(0), tickets(1)] (ADR-0014 collapsed the 4-step spine
     // to race → tickets; the standalone Style + Explain steps are gone). The race

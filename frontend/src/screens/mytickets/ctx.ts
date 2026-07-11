@@ -98,6 +98,11 @@ export interface MtCtx {
   commitManual: (ticket: Ticket, existingId?: string, race?: LiveRace) => void;
   doBlock: (targetUserId: string) => void;
   sendReport: () => void;
+  // Social UX Fixes — ticket delete (soft) with retract-cascade.
+  deleteTarget: CommittedTicket | null;
+  requestDelete: (tk: CommittedTicket) => void;
+  cancelDelete: () => void;
+  confirmDelete: () => Promise<void>;
   doShare: () => Promise<void>;
   // Friend Interactions Phase 2 — share-later / retract on the owner's detail
   // view (the owner engagement surface; structured for Phase 3 congratulate +

@@ -21,6 +21,7 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
     openDetail,
     setManualEditId,
     setView,
+    requestDelete,
     burstId,
     burstSpans,
   } = ctx;
@@ -67,28 +68,46 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
             </div>
             <div className="mt-card-race">{runnerRaceName(tk)}</div>
           </div>
-          <span
-            className="mt-mood-pill"
-            style={{ background: MT_MOOD_COLOR[tk.mood] }}
-          >
-            {t(`mood.${tk.mood}`)}
-          </span>
-          {open && (
-            <button
-              type="button"
-              className="mt-card-edit"
-              aria-label={t("manual.editAria")}
-              onClick={(e) => {
-                // Stop propagation so the card's openDetail(id) doesn't fire
-                // and double-route (card→detail + edit→manual at once).
-                e.stopPropagation();
-                setManualEditId(tk.id);
-                setView("manual");
-              }}
+          {/* [pill][edit][delete] — a single flex cluster so the actions never
+              overlap the mood pill (the old .mt-card-edit was absolutely
+              positioned and collided with it). Edit is open-only; delete is
+              available on any ticket you own. Both stopPropagation so tapping
+              them doesn't also open the detail. */}
+          <div className="mt-card-actions">
+            <span
+              className="mt-mood-pill"
+              style={{ background: MT_MOOD_COLOR[tk.mood] }}
             >
-              ✎
-            </button>
-          )}
+              {t(`mood.${tk.mood}`)}
+            </span>
+            {open && (
+              <button
+                type="button"
+                className="mt-card-edit"
+                aria-label={t("manual.editAria")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setManualEditId(tk.id);
+                  setView("manual");
+                }}
+              >
+                ✎
+              </button>
+            )}
+            {ownerYou && (
+              <button
+                type="button"
+                className="mt-card-delete"
+                aria-label={t("mine.deleteAria")}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  requestDelete(tk);
+                }}
+              >
+                ✕
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="mt-betline">

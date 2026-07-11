@@ -38,6 +38,7 @@ import {
   getFriendsOnCard,
   getMyShareForTicket,
   retractShare,
+  deleteTicket,
   type PublicProfile,
   type FriendsAvatar,
 } from "../auth/socialClient";
@@ -71,7 +72,7 @@ import { NewView } from "./mytickets/NewView";
 import { ManualView } from "./mytickets/ManualView";
 import { DetailView } from "./mytickets/DetailView";
 import { ProfileView } from "./mytickets/ProfileView";
-import { ReportModal } from "./mytickets/Modals";
+import { ReportModal, DeleteTicketModal } from "./mytickets/Modals";
 
 // ============================================================================
 // ADR-0007 — "My Tickets" surface (Phase 0)
@@ -155,6 +156,9 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
   const [reportTarget, setReportTarget] = useState<{ type: "ticket" | "user"; id: string } | null>(null);
   const [reportReason, setReportReason] = useState("");
   const [reportSending, setReportSending] = useState(false);
+  // Social UX Fixes — ticket-delete confirm. The ticket pending deletion
+  // (null when the confirm modal is closed).
+  const [deleteTarget, setDeleteTarget] = useState<CommittedTicket | null>(null);
   // Ref to the detail-card root so the share button can raster it.
   const detailCardRef = useRef<HTMLDivElement | null>(null);
   // Initial state is the localStorage CACHE so the feed renders instantly on
@@ -713,6 +717,35 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
   }
 
   /**
+   * Social UX Fixes — ticket delete (soft on the server) with retract-cascade.
+   * The confirm modal sets `deleteTarget`; this performs the delete:
+   * optimistic remove from the list, then DELETE. The cascade (share retract)
+   * is server-side; the toast reflects whether a share was retracted. On
+   * failure the ticket is restored so the user isn't left missing a row.
+   */
+  function requestDelete(tk: CommittedTicket) {
+    setDeleteTarget(tk);
+  }
+  function cancelDelete() {
+    setDeleteTarget(null);
+  }
+  async function confirmDelete() {
+    const tk = deleteTarget;
+    if (!tk) return;
+    setDeleteTarget(null);
+    setTickets((prev) => prev.filter((x) => x.id !== tk.id));
+    const token = await getToken();
+    const r = await deleteTicket(token, tk.id);
+    if (r.ok) {
+      flash(r.data.retracted_share ? t("mine.deletedShared") : t("mine.deleted"));
+    } else {
+      // Restore the row (still server-side); surface the failure.
+      setTickets((prev) => (prev.some((x) => x.id === tk.id) ? prev : [tk, ...prev]));
+      flash(t("mine.deleteFailed"));
+    }
+  }
+
+  /**
    * Friend Interactions Phase 2 — Share the currently-selected New-bet option.
    * Builds the same CommittedTicket as commit(), then opens the FriendPicker;
    * save-if-needed + publish happens on confirm. Share is deliberate (picker).
@@ -916,6 +949,10 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     reportReason,
     setReportReason,
     reportSending,
+    deleteTarget,
+    requestDelete,
+    cancelDelete,
+    confirmDelete,
     liveOdds,
     runnersForTicket,
     driftView,
@@ -945,6 +982,7 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
       {view === "detail" && <DetailView ctx={ctx} />}
       {view === "profile" && <ProfileView ctx={ctx} />}
       <ReportModal ctx={ctx} />
+      <DeleteTicketModal ctx={ctx} />
       {shareNode}
       {toast && <div className="mt-toast">{toast}</div>}
     </div>

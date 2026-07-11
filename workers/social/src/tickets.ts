@@ -429,7 +429,7 @@ export async function listTickets(db: D1Database, userId: string): Promise<Recor
     .prepare(
       `SELECT id, user_id, serial, race_key, payload, state, payout_base, returned, created_at, placings
          FROM tickets
-        WHERE user_id = ?
+        WHERE user_id = ? AND state <> 'deleted'
         ORDER BY created_at DESC`,
     )
     .bind(userId)
@@ -451,6 +451,35 @@ export async function findTicket(db: D1Database, id: string): Promise<TicketRow 
     )
     .bind(id)
     .first<TicketRow>();
+}
+
+/**
+ * Owner-checked SOFT delete. The row is kept (state = 'deleted') and excluded
+ * from listTickets, NOT hard-deleted — the `shares→tickets` FOREIGN KEY
+ * (migration 0012, ON DELETE NO ACTION) would otherwise reject a delete while a
+ * share row references the ticket, and a hard cascade through shares → comments
+ * → congrats → share_audience is out of scope. Keeping the row also means a
+ * notification whose subject is this ticket degrades gracefully (the row still
+ * exists) rather than pointing at nothing. No new column / migration: `state`
+ * has no CHECK constraint (0010 deliberately omitted one), so 'deleted' is a
+ * safe sentinel. The route retracts the ticket's active share as a cascade so
+ * the ticket vanishes from friends' feeds.
+ *
+ * Returns 404 (missing), 403 (not owner), or 200.
+ */
+export async function deleteTicket(
+  db: D1Database,
+  id: string,
+  userId: string,
+): Promise<{ status: 200 } | { status: 404 } | { status: 403 }> {
+  const row = await findTicket(db, id);
+  if (!row) return { status: 404 };
+  if (row.user_id !== userId) return { status: 403 };
+  await db
+    .prepare(`UPDATE tickets SET state = ? WHERE id = ? AND user_id = ?`)
+    .bind("deleted", id, userId)
+    .run();
+  return { status: 200 };
 }
 
 /**

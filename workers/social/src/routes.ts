@@ -55,6 +55,7 @@ import { addComment, deleteComment, getComment, listComments, priorCommenters } 
 import {
   PatchBody,
   decodeTicket,
+  deleteTicket,
   findTicket,
   insertTicket,
   listTickets,
@@ -443,6 +444,26 @@ async function handleTickets(
       status,
       cors,
     );
+  }
+  if (request.method === "DELETE") {
+    // Social UX Fixes — ticket delete with retract-cascade. Soft-deletes the
+    // ticket (state='deleted') and retracts its active share so it vanishes
+    // from friends' feeds. Retract BEFORE the soft-delete is unnecessary (the
+    // row is kept), but ordering it first means a feed read mid-delete already
+    // excludes the share. retracted_share tells the client whether the cascade
+    // fired (for the toast copy).
+    const share = await activeShareForTicket(env.DB, id, userId);
+    const retractedShare = !!share;
+    if (share) await retractShare(env.DB, share.id, userId);
+    const result = await deleteTicket(env.DB, id, userId);
+    if (result.status !== 200) {
+      return json(
+        { error: result.status === 404 ? "not_found" : "forbidden" },
+        result.status,
+        cors,
+      );
+    }
+    return json({ ok: true, retracted_share: retractedShare }, 200, cors);
   }
   return json({ error: "method_not_allowed" }, 405, cors);
 }

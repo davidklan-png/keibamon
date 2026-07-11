@@ -287,6 +287,7 @@ export const en = {
     congratulated: "Congratulated",
     winBadge: "WIN",
     winMultiplier: "{n}×",
+    shareGone: "This share is no longer available.",
     shareWinTitle: "You hit it! Share your win?",
     shareWinHint: "Friends only see it if you share. Dismiss to keep it private.",
     shareWinCta: "Share win",
@@ -352,6 +353,15 @@ export const en = {
     setHandleErrCharset: "Only a–z, 0–9, and _ allowed",
     setHandleContinue: "Continue",
     setHandleFailed: "Couldn't save — try again",
+    // Social UX Fixes — ticket delete (soft) + retract-cascade.
+    deleteAria: "Delete ticket",
+    deleteTitle: "Delete this ticket?",
+    deleteHint: "This removes it from your tickets. If you shared it, the share is also removed from friends' feeds.",
+    deleteConfirm: "Delete",
+    deleteCancel: "Cancel",
+    deleted: "Ticket deleted",
+    deletedShared: "Deleted — removed from friends' feeds",
+    deleteFailed: "Couldn't delete — try again",
     // ADR-0007 Phase 2 — server-first persistence + auto-settle strings.
     estimate: "estimate",
     empty: "No tickets yet — pick New bet to commit one.",

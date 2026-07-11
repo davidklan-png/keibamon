@@ -276,6 +276,7 @@ export const ja = {
     congratulated: "おめでとう済み",
     winBadge: "的中",
     winMultiplier: "{n}×",
+    shareGone: "このシェアは表示できなくなりました。",
     shareWinTitle: "的中！この勝利をシェアしますか？",
     shareWinHint: "友だちに見えるのはシェアしたときだけ。非公開のままもできます。",
     shareWinCta: "勝利をシェア",
@@ -340,6 +341,15 @@ export const ja = {
     setHandleErrCharset: "a〜z・0〜9・_ のみ使えます",
     setHandleContinue: "次へ",
     setHandleFailed: "保存できませんでした — もう一度お試しください",
+    // Social UX Fixes — 馬券削除（論理削除）+ シェア巻き込み削除。
+    deleteAria: "馬券を削除",
+    deleteTitle: "この馬券を削除しますか？",
+    deleteHint: "あなたの馬券から削除します。シェア済みの場合、友だちのフィードからも削除されます。",
+    deleteConfirm: "削除",
+    deleteCancel: "キャンセル",
+    deleted: "馬券を削除しました",
+    deletedShared: "削除 — 友だちのフィードからも削除しました",
+    deleteFailed: "削除できませんでした — もう一度お試しください",
     // ADR-0007 Phase 2 — サーバ優先の永続化 + 自動精算。
     estimate: "見積もり",
     empty: "まだ馬券がありません。「新規」から登録できます。",
