@@ -16,20 +16,24 @@
 // ============================================================================
 import { useI18n } from "../i18n";
 
-export type TabView = "browse" | "mine" | "reference";
+export type TabView = "browse" | "mine" | "friends" | "reference";
 
 const TABS: { id: TabView; labelKey: string }[] = [
   { id: "browse", labelKey: "tabs.races" },
   { id: "mine", labelKey: "tabs.tickets" },
+  { id: "friends", labelKey: "tabs.friends" },
   { id: "reference", labelKey: "tabs.reference" },
 ];
 
 export function BottomTabBar({
   view,
   onNavigate,
+  friendsBadge = 0,
 }: {
   view: TabView;
   onNavigate: (v: TabView) => void;
+  /** Pending friend-request count for the Friends tab badge (0 = no badge). */
+  friendsBadge?: number;
 }) {
   const { t } = useI18n();
   return (
@@ -46,6 +50,9 @@ export function BottomTabBar({
             onClick={() => onNavigate(tab.id)}
           >
             {t(tab.labelKey)}
+            {tab.id === "friends" && friendsBadge > 0 && (
+              <span className="tab-badge">{friendsBadge}</span>
+            )}
           </button>
         );
       })}

@@ -146,3 +146,73 @@ describe("RoundupPanel — published vs empty state (ADR-0015)", () => {
     expect(container.querySelector(".edition-select")).toBeNull();
   });
 });
+
+// ---------------------------------------------------------------------------
+// ADR-0020 — locale switching. The panel generates the report in the selected
+// locale and re-renders the ALREADY-LOADED content on a language toggle (no
+// refetch, no reload). Expanding a deep dive shows JA pace/reason/trend/
+// ticket-note output; toggling back to EN restores the English report.
+// ---------------------------------------------------------------------------
+
+describe("RoundupPanel — locale switching (ADR-0020)", () => {
+  beforeEach(() => {
+    setLang("en");
+    weeklyMock.mockReset();
+    liveMock.mockReset();
+    weeklyMock.mockResolvedValue(publishedResponse());
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+    setLang("en");
+  });
+
+  it("regenerates the report in JA on language switch with NO refetch", async () => {
+    const { container } = render(
+      <RoundupPanel
+        impressions={{}}
+        onSetImpressions={() => {}}
+        oddsSnapshotAt={null}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+    // One fetch on mount — the source of truth is the raw WeekendInput; the
+    // locale is a client-side generation parameter, never a refetch trigger.
+    expect(weeklyMock).toHaveBeenCalledTimes(1);
+
+    // EN: headline (always visible) is English.
+    expect(container.textContent).toContain("graded-stakes weekend");
+
+    // Expand the deep dive to expose pace / reason / trend / ticket-note.
+    const toggle = container.querySelector(
+      "button.deepdive-toggle",
+    ) as HTMLButtonElement;
+    act(() => toggle.click());
+    expect(container.textContent).toContain("Running styles not yet declared");
+    expect(container.textContent).toContain("No notable trend tags this round");
+
+    // Switch to JA — already-loaded report re-renders in JA, still expanded.
+    await act(async () => {
+      setLang("ja");
+    });
+    expect(weeklyMock).toHaveBeenCalledTimes(1); // still no refetch
+    expect(container.textContent).toContain("重賞ウィークエンド");
+    // Generated deep-dive prose is now Japanese.
+    expect(container.textContent).toContain("脚質はまだ確定");
+    expect(container.textContent).toContain("約3.2倍"); // contender reason, JA odds
+    expect(container.textContent).toContain("目立った傾向タグなし"); // trend
+    expect(container.textContent).toContain("馬連"); // ticket-note shape
+    // And the English generated prose is gone.
+    expect(container.textContent).not.toContain("Running styles not yet declared");
+    expect(container.textContent).not.toContain("graded-stakes weekend");
+
+    // Toggle back to EN — the English report returns, still without a refetch.
+    await act(async () => {
+      setLang("en");
+    });
+    expect(weeklyMock).toHaveBeenCalledTimes(1);
+    expect(container.textContent).toContain("graded-stakes weekend");
+    expect(container.textContent).toContain("Running styles not yet declared");
+  });
+});

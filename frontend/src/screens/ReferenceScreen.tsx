@@ -11,13 +11,17 @@
 import { useI18n } from "../i18n";
 import { GlossaryView } from "./GlossaryView";
 import { Footer } from "../components/Footer";
+import { NotificationBell } from "../components/NotificationBell";
+import type { NotificationView } from "../auth/socialClient";
 
 export interface ReferenceScreenProps {
   onBack: () => void;
+  getToken: () => Promise<string | null>;
+  onDeepLink: (n: NotificationView) => void;
 }
 
 export function ReferenceScreen(props: ReferenceScreenProps) {
-  const { onBack } = props;
+  const { onBack, getToken, onDeepLink } = props;
   const { t, lang, setLang } = useI18n();
 
   return (
@@ -43,6 +47,7 @@ export function ReferenceScreen(props: ReferenceScreenProps) {
         >
           {t("app.langToggle")}
         </button>
+        <NotificationBell getToken={getToken} onDeepLink={onDeepLink} />
         <button
           className="lang-toggle"
           onClick={onBack}

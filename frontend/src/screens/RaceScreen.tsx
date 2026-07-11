@@ -6,6 +6,7 @@
 import { useMemo, useState } from "react";
 import { useI18n } from "../i18n";
 import { winProbs, type Runner } from "../lib/fairvalue";
+import type { Ticket } from "../lib/types";
 import type { ImpressionMap } from "../lib/impressions";
 import { impressionsByRace } from "../lib/impressions";
 import { normalizeName } from "../lib/normalizeName";
@@ -69,6 +70,10 @@ export interface RaceScreenProps {
    * to 100 when absent (no stake-chooser UI in 3a). App passes style.unit.
    */
   unitStake?: number;
+  /** Friend Interactions Phase 3 — Save/Share a structural ticket from the
+   *  TicketStudio/FillGuide (threaded from App, which owns the race context). */
+  onSaveTicket?: (ticket: Ticket) => void;
+  onShareTicket?: (ticket: Ticket) => void;
 }
 
 export function RaceScreen(props: RaceScreenProps) {
@@ -91,6 +96,8 @@ export function RaceScreen(props: RaceScreenProps) {
     oddsSnapshotAt,
     onSetImpressions,
     unitStake,
+    onSaveTicket,
+    onShareTicket,
   } = props;
 
   // Milestone 4: which runner's form panel is open. null = closed.
@@ -501,6 +508,8 @@ export function RaceScreen(props: RaceScreenProps) {
           unitStake={stake}
           title={tFmt("setFamily.boxThese", { n: markedSet.length })}
           onClose={() => setBoxOpen(false)}
+          onSave={onSaveTicket}
+          onShare={onShareTicket}
         />
       )}
     </>

@@ -57,6 +57,8 @@ export interface ManualTicketBuilderProps {
   initial?: ManualTicketInitial;
   /** Built-ticket callback. Parent decides POST vs PATCH path. */
   onRegister: (built: { ticket: Ticket; id?: string }) => void;
+  /** Friend Interactions Phase 3 — Share (opens FriendPicker). Optional. */
+  onShare?: (built: { ticket: Ticket; id?: string }) => void;
   onCancel: () => void;
 }
 
@@ -92,7 +94,7 @@ function initialFormationPositions(initial?: ManualTicketInitial): string[][] | 
 
 export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   const { t, tFmt } = useI18n();
-  const { runners, unit, onUnitChange, initial, onRegister, onCancel } = props;
+  const { runners, unit, onUnitChange, initial, onRegister, onCancel, onShare } = props;
 
   // De-vig the win market for this race once per runners change. The builder
   // is opened with a fresh snapshot; the parent's existing 45s poll keeps
@@ -554,6 +556,19 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           {initial?.id ? t("manual.save") : t("manual.register")}
           {ticket ? ` · ${yen(ticket.cost)}` : ""}
         </button>
+        {onShare && (
+          <button
+            type="button"
+            className="btn ghost mt-cta-share"
+            disabled={!canRegister || bracketDisabled}
+            onClick={() => {
+              if (!ticket) return;
+              onShare({ ticket, id: initial?.id });
+            }}
+          >
+            {t("share.share")}
+          </button>
+        )}
       </div>
     </div>
   );

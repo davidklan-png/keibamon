@@ -19,7 +19,6 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
     countdownText,
     runnerRaceName,
     openDetail,
-    cheer,
     setManualEditId,
     setView,
     burstId,
@@ -166,18 +165,8 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
                   : t("mine.settled")
                 : `${ja ? (tk.owner as { ja: string }).ja : (tk.owner as { en: string }).en} · ${t("mine.hit")}`}
             </span>
-            {tk.state === "won" && (
-              <button
-                className="mt-cheer"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  cheer(tk.id);
-                }}
-              >
-                <span style={{ fontSize: 13 }}>👏</span>
-                {tk.cheers ?? tk.claps}
-                {burstId === tk.id && burstSpans}
-              </button>
+            {tk.state === "won" && burstId === tk.id && (
+              <span className="mt-burst-host" aria-hidden="true">{burstSpans}</span>
             )}
           </div>
         )}

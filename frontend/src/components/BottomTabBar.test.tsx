@@ -45,14 +45,14 @@ describe("BottomTabBar", () => {
     document.body.innerHTML = "";
   });
 
-  it("renders exactly three destination tabs", () => {
+  it("renders exactly four destination tabs", () => {
     const { container, unmount } = render(
       <BottomTabBar view="browse" onNavigate={() => {}} />,
     );
     const buttons = container.querySelectorAll(".bottom-tabbar button");
-    expect(buttons.length).toBe(3);
+    expect(buttons.length).toBe(4);
     const labels = Array.from(buttons).map((b) => b.textContent);
-    expect(labels).toEqual(["Races", "Tickets", "Reference"]);
+    expect(labels).toEqual(["Races", "Tickets", "Friends", "Reference"]);
     unmount();
   });
 
@@ -78,12 +78,13 @@ describe("BottomTabBar", () => {
     const buttons = Array.from(
       container.querySelectorAll(".bottom-tabbar button"),
     ) as HTMLButtonElement[];
-    // Tap Tickets (mine), then Reference, then Races (browse).
+    // Tap Tickets (mine), Friends, Reference, then Races (browse).
     act(() => buttons[1].click());
     act(() => buttons[2].click());
+    act(() => buttons[3].click());
     act(() => buttons[0].click());
     const calls = onNavigate.mock.calls.map((c) => c[0] as TabView);
-    expect(calls).toEqual(["mine", "reference", "browse"]);
+    expect(calls).toEqual(["mine", "friends", "reference", "browse"]);
     unmount();
   });
 
@@ -94,12 +95,13 @@ describe("BottomTabBar", () => {
     );
     expect(html).toContain(ja.tabs.races);
     expect(html).toContain(ja.tabs.tickets);
+    expect(html).toContain(ja.tabs.friends);
     expect(html).toContain(ja.tabs.reference);
   });
 
   it("tab labels exist and are non-empty in both EN and JA", () => {
     for (const dict of [en, ja]) {
-      for (const k of ["races", "tickets", "reference"] as const) {
+      for (const k of ["races", "tickets", "friends", "reference"] as const) {
         expect(typeof dict.tabs[k]).toBe("string");
         expect(dict.tabs[k].length).toBeGreaterThan(0);
       }

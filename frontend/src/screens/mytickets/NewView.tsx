@@ -20,6 +20,7 @@ export function NewView({ ctx }: { ctx: MtCtx }) {
     setUnit,
     setManualEditId,
     commit,
+    shareSelected,
   } = ctx;
   const selCost = options[selIdx]?.ticket.cost ?? 0;
   return (
@@ -143,6 +144,9 @@ export function NewView({ ctx }: { ctx: MtCtx }) {
         <div className="mt-cta-wrap">
           <button className="mt-cta" onClick={commit}>
             {t("mine.confirm")} · {yen(selCost)}
+          </button>
+          <button className="btn ghost mt-cta-share" onClick={shareSelected}>
+            {t("share.share")}
           </button>
         </div>
       )}

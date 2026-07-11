@@ -11,23 +11,46 @@ import {
   replaceImpressions,
 } from "./impressions";
 import {
-  addCheer,
   addReport,
   blockExistsEitherDirection,
   blockUser,
-  buildFeed,
   buildProfile,
-  cheerCount,
-  followUser,
   friendsOnCard,
   friendsOnRace,
   rateLimitCheck,
-  removeCheer,
   unblockUser,
-  unfollowUser,
   userByHandle,
   userById,
 } from "./social";
+import {
+  acceptRequest,
+  declineRequest,
+  friendshipState,
+  listFriends,
+  listPendingIncoming,
+  listPendingOutgoing,
+  removeFriend,
+  requestFriend,
+  searchUsers,
+  severEdgesBothDirections,
+} from "./friends";
+import { insertNotification, listNotifications, markAllRead, markRead, unreadCount } from "./notifications";
+import {
+  activeShareForTicket,
+  buildShareFeed,
+  congratsCount,
+  congratulate,
+  createShare,
+  getShare,
+  getShareForViewer,
+  parseAudience,
+  promoteShareWin,
+  retractShare,
+  shareVisibleTo,
+  unCongratulate,
+  widenShare,
+} from "./shares";
+import { addComment, deleteComment, getComment, listComments, priorCommenters } from "./comments";
 import {
   PatchBody,
   decodeTicket,
@@ -39,14 +62,33 @@ import {
 } from "./tickets";
 
 const TICKET_PATH = /^\/api\/social\/tickets(\/([^/]+))?$/;
-const TICKET_CHEER_PATH = /^\/api\/social\/tickets\/([^/]+)\/cheer$/;
-const FOLLOW_PATH = /^\/api\/social\/follow\/([^/]+)$/;
+const TICKET_SHARE_PATH = /^\/api\/social\/tickets\/([^/]+)\/share$/;
 const BLOCK_PATH = /^\/api\/social\/block\/([^/]+)$/;
 const PROFILE_PATH = /^\/api\/social\/users\/([^/]+)$/;
 const RACE_FRIENDS_PATH = /^\/api\/social\/races\/([^/]+)\/friends$/;
 const FEED_PATH = "/api/social/feed";
+// Friend Interactions Phase 4 — notification bell (read side).
+const NOTIFICATIONS_PATH = "/api/social/notifications";
+const NOTIFICATIONS_READ_PATH = "/api/social/notifications/read";
+const NOTIFICATIONS_UNREAD_PATH = "/api/social/notifications/unread-count";
 const FRIENDS_ON_CARD_PATH = "/api/social/friends/on-card";
 const REPORT_PATH = "/api/social/report";
+// Friend Interactions Phase 1 — friend graph + handle search. ORDER MATTERS in
+// the router: the more-specific accept path and the bare list path must be
+// tried before the parameterized /friends/:id and /users/:handle patterns.
+const FRIEND_REQUEST_ACCEPT_PATH = /^\/api\/social\/friends\/request\/([^/]+)\/accept$/;
+const FRIEND_REQUEST_PATH = /^\/api\/social\/friends\/request\/([^/]+)$/;
+const FRIENDS_LIST_PATH = "/api/social/friends";
+const FRIEND_PATH = /^\/api\/social\/friends\/([^/]+)$/;
+const USER_SEARCH_PATH = "/api/social/users/search";
+// Friend Interactions Phase 2 — shared tickets. retract before /:id; the bare
+// /shares path only matches POST (create-or-widen).
+const SHARES_PATH = "/api/social/shares";
+const SHARE_RETRACT_PATH = /^\/api\/social\/shares\/([^/]+)\/retract$/;
+const SHARE_COMMENTS_PATH = /^\/api\/social\/shares\/([^/]+)\/comments$/;
+const SHARE_CONGRATS_PATH = /^\/api\/social\/shares\/([^/]+)\/congratulate$/;
+const SHARE_PATH = /^\/api\/social\/shares\/([^/]+)$/;
+const COMMENT_PATH = /^\/api\/social\/comments\/([^/]+)$/;
 // ADR-0018: account-backed impression marks. GET = the caller's full map;
 // PUT = transactional full-replace. Lives under /me/ because impressions are
 // strictly per-user and never public.
@@ -67,10 +109,60 @@ export async function router(request: Request, env: Env, cors: Record<string, st
     return handleImpressions(request, env, cors);
   }
 
-  // /api/social/follow/:userId — Phase 3 follow graph.
-  const followMatch = FOLLOW_PATH.exec(pathname);
-  if (followMatch) {
-    return handleFollow(request, env, cors, decodeURIComponent(followMatch[1]));
+  // /api/social/friends/request/:id/accept — Friend Interactions: accept a
+  // friend request. (Tried before /friends/request/:id and /friends/:id.)
+  const friendAcceptMatch = FRIEND_REQUEST_ACCEPT_PATH.exec(pathname);
+  if (friendAcceptMatch) {
+    return handleFriendAccept(request, env, cors, decodeURIComponent(friendAcceptMatch[1]));
+  }
+  // /api/social/friends/request/:id — POST = send request, DELETE = decline.
+  const friendReqMatch = FRIEND_REQUEST_PATH.exec(pathname);
+  if (friendReqMatch) {
+    return handleFriendRequest(request, env, cors, decodeURIComponent(friendReqMatch[1]));
+  }
+  // /api/social/friends — GET = friends list + pending in/out (badged count).
+  if (pathname === FRIENDS_LIST_PATH) {
+    return handleFriendsList(request, env, cors);
+  }
+  // /api/social/friends/on-card — Phase 3 today's-card strip. MUST precede the
+  // parameterized /friends/:id below or "on-card" would be captured as an id.
+  if (pathname === FRIENDS_ON_CARD_PATH) {
+    return handleFriendsOnCard(request, env, cors, url);
+  }
+  // /api/social/friends/:id — DELETE = remove friend (silent, mutual).
+  const friendMatch = FRIEND_PATH.exec(pathname);
+  if (friendMatch) {
+    return handleFriendRemove(request, env, cors, decodeURIComponent(friendMatch[1]));
+  }
+
+  // /api/social/shares — POST = share a ticket (create-or-widen; idempotent).
+  if (pathname === SHARES_PATH && request.method === "POST") {
+    return handleShare(request, env, cors);
+  }
+  // /api/social/shares/:id/retract — POST = retract (silent). Before /:id.
+  const shareRetractMatch = SHARE_RETRACT_PATH.exec(pathname);
+  if (shareRetractMatch) {
+    return handleShareRetract(request, env, cors, decodeURIComponent(shareRetractMatch[1]));
+  }
+  // /api/social/shares/:id/comments — GET list (audience) / POST add (audience).
+  const shareCommentsMatch = SHARE_COMMENTS_PATH.exec(pathname);
+  if (shareCommentsMatch) {
+    return handleShareComments(request, env, cors, decodeURIComponent(shareCommentsMatch[1]));
+  }
+  // /api/social/shares/:id/congratulate — POST = congratulate / DELETE = undo.
+  const shareCongratsMatch = SHARE_CONGRATS_PATH.exec(pathname);
+  if (shareCongratsMatch) {
+    return handleShareCongrats(request, env, cors, decodeURIComponent(shareCongratsMatch[1]));
+  }
+  // /api/social/shares/:id — PATCH = widen audience, GET = detail.
+  const shareMatch = SHARE_PATH.exec(pathname);
+  if (shareMatch) {
+    return handleShareMod(request, env, cors, decodeURIComponent(shareMatch[1]));
+  }
+  // /api/social/comments/:id — DELETE = owner-or-author delete.
+  const commentMatch = COMMENT_PATH.exec(pathname);
+  if (commentMatch) {
+    return handleCommentDelete(request, env, cors, decodeURIComponent(commentMatch[1]));
   }
 
   // /api/social/block/:userId — Phase 4 block graph (POST = block, DELETE = unblock).
@@ -84,15 +176,18 @@ export async function router(request: Request, env: Env, cors: Record<string, st
     return handleReport(request, env, cors);
   }
 
-  // /api/social/tickets/:id/cheer — Phase 3 cheers.
-  const cheerMatch = TICKET_CHEER_PATH.exec(pathname);
-  if (cheerMatch) {
-    return handleCheer(request, env, cors, decodeURIComponent(cheerMatch[1]));
+  // /api/social/tickets/:id/share — Friend Interactions: owner's active share
+  // (drives the My Tickets detail share-later/retract affordance).
+  const ticketShareMatch = TICKET_SHARE_PATH.exec(pathname);
+  if (ticketShareMatch) {
+    return handleTicketShare(request, env, cors, decodeURIComponent(ticketShareMatch[1]));
   }
 
   // /api/social/tickets and /api/social/tickets/:id — Phase 2 persistence.
+  // (/tickets/:id/cheer was removed with the cheer system; /tickets/:id/share is
+  // matched above, so the bare /:id here is unambiguous.)
   const ticketMatch = TICKET_PATH.exec(pathname);
-  if (ticketMatch && !TICKET_CHEER_PATH.exec(pathname)) {
+  if (ticketMatch) {
     return handleTickets(request, env, cors, ticketMatch[2] ?? null);
   }
 
@@ -101,15 +196,27 @@ export async function router(request: Request, env: Env, cors: Record<string, st
     return handleFeed(request, env, cors);
   }
 
-  // /api/social/friends/on-card — Phase 3 today's-card strip.
-  if (pathname === FRIENDS_ON_CARD_PATH) {
-    return handleFriendsOnCard(request, env, cors, url);
+  // Friend Interactions Phase 4 — notification bell (read side).
+  if (pathname === NOTIFICATIONS_PATH && request.method === "GET") {
+    return handleNotifications(request, env, cors);
+  }
+  if (pathname === NOTIFICATIONS_UNREAD_PATH && request.method === "GET") {
+    return handleNotificationsUnread(request, env, cors);
+  }
+  if (pathname === NOTIFICATIONS_READ_PATH && request.method === "POST") {
+    return handleNotificationsRead(request, env, cors);
   }
 
   // /api/social/races/:raceKey/friends — Phase 3 friends-on-race.
   const raceFriendsMatch = RACE_FRIENDS_PATH.exec(pathname);
   if (raceFriendsMatch) {
     return handleRaceFriends(request, env, cors, decodeURIComponent(raceFriendsMatch[1]));
+  }
+
+  // /api/social/users/search — Friend Interactions: handle search. MUST precede
+  // /users/:handle or "search" would be captured as a handle.
+  if (pathname === USER_SEARCH_PATH) {
+    return handleUserSearch(request, env, cors, url);
   }
 
   // /api/social/users/:handle — Phase 3 public profile.
@@ -298,6 +405,12 @@ async function handleTickets(
       body && typeof body === "object" ? (body as PatchBody) : {};
     const result = await patchTicket(env.DB, id, userId, patch);
     if (result.status === 200) {
+      // Friend Interactions Phase 3: a settle reaching the client fast-path
+      // promotes an active share. The sweep also promotes, but it idempotent-
+      // skips an already-settled row — so without this call, a client-settled
+      // shared win would never flip is_win / notify the audience. Fire-and-
+      // forget: a notify failure must not fail the settle response.
+      await promoteShareWin(env.DB, id, (result.row as { state?: string }).state === "won").catch(() => {});
       return json(result.row, 200, cors);
     }
     const status = result.status;
@@ -308,60 +421,6 @@ async function handleTickets(
     );
   }
   return json({ error: "method_not_allowed" }, 405, cors);
-}
-
-async function handleFollow(
-  request: Request,
-  env: Env,
-  cors: Record<string, string>,
-  targetId: string,
-): Promise<Response> {
-  const verified = await verifyToken(env, request.headers.get("Authorization"));
-  if (!verified) return json({ error: "unauthorized" }, 401, cors);
-  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
-  if (request.method !== "POST" && request.method !== "DELETE") {
-    return json({ error: "method_not_allowed" }, 405, cors);
-  }
-  if (targetId === caller.id) {
-    return json({ error: "cannot_follow_self" }, 403, cors);
-  }
-  // 404 if the target user doesn't exist (don't leak existence via 200).
-  const target = await userById(env.DB, targetId);
-  if (!target) return json({ error: "not_found" }, 404, cors);
-
-  // Phase 4: a block in EITHER direction forbids follow. The block check
-  // happens after the 404 so a missing user still surfaces as not_found,
-  // not as a leaky 403.
-  const blocked = await blockExistsEitherDirection(env.DB, caller.id, targetId);
-  if (blocked) {
-    return json({ error: "blocked" }, 403, cors);
-  }
-
-  if (request.method === "POST") {
-    const allowed = await rateLimitCheck(env.DB, caller.id, "follow");
-    if (!allowed) {
-      return json(
-        { error: "rate_limited" },
-        429,
-        cors,
-        { "Retry-After": String(RATE_WINDOW) },
-      );
-    }
-    await followUser(env.DB, caller.id, targetId);
-    return json({ ok: true }, 200, cors);
-  }
-  // DELETE
-  const allowed = await rateLimitCheck(env.DB, caller.id, "follow");
-  if (!allowed) {
-    return json(
-      { error: "rate_limited" },
-      429,
-      cors,
-      { "Retry-After": String(RATE_WINDOW) },
-    );
-  }
-  await unfollowUser(env.DB, caller.id, targetId);
-  return json({ ok: true }, 200, cors);
 }
 
 /**
@@ -409,6 +468,11 @@ async function handleBlock(
 
   if (request.method === "POST") {
     await blockUser(env.DB, caller.id, targetId);
+    // Friend Interactions: a block also removes any friendship / pending
+    // request between the pair (severEdgesBothDirections). Done at the route
+    // layer (not inside social.ts blockUser) to keep the friends→social import
+    // one-way and acyclic.
+    await severEdgesBothDirections(env.DB, caller.id, targetId);
   } else {
     await unblockUser(env.DB, caller.id, targetId);
   }
@@ -479,63 +543,6 @@ async function handleReport(
   return json({ ok: true }, 200, cors);
 }
 
-async function handleCheer(
-  request: Request,
-  env: Env,
-  cors: Record<string, string>,
-  ticketId: string,
-): Promise<Response> {
-  const verified = await verifyToken(env, request.headers.get("Authorization"));
-  if (!verified) return json({ error: "unauthorized" }, 401, cors);
-  if (request.method !== "POST" && request.method !== "DELETE") {
-    return json({ error: "method_not_allowed" }, 405, cors);
-  }
-  const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
-
-  const ticket = await findTicket(env.DB, ticketId);
-  if (!ticket) return json({ error: "not_found" }, 404, cors);
-
-  // Won-only (Decision table): cheering is a celebration, not pre-race hype.
-  if (ticket.state !== "won") {
-    return json({ error: "not_won" }, 409, cors);
-  }
-  // Self-cheer forbidden (Decision 2).
-  if (ticket.user_id === caller.id) {
-    return json({ error: "cannot_cheer_own_ticket" }, 409, cors);
-  }
-  // Phase 4: a block in EITHER direction forbids cheer (same rule as follow).
-  const blocked = await blockExistsEitherDirection(env.DB, caller.id, ticket.user_id);
-  if (blocked) {
-    return json({ error: "blocked" }, 403, cors);
-  }
-
-  const allowed = await rateLimitCheck(env.DB, caller.id, "cheer");
-  if (!allowed) {
-    return json(
-      { error: "rate_limited" },
-      429,
-      cors,
-      { "Retry-After": String(RATE_WINDOW) },
-    );
-  }
-
-  if (request.method === "POST") {
-    await addCheer(env.DB, ticketId, caller.id);
-  } else {
-    await removeCheer(env.DB, ticketId, caller.id);
-  }
-  const [count, byMe] = await Promise.all([
-    cheerCount(env.DB, ticketId),
-    request.method === "POST"
-      ? Promise.resolve(true)
-      : Promise.resolve(false),
-  ]);
-  // For POST, the PK dedupe guarantees the row exists, so cheeredByMe=true
-  // is correct without a re-read. For DELETE, even if the row didn't exist
-  // (idempotent uncheer), the user is not cheering now.
-  return json({ count, cheeredByMe: byMe }, 200, cors);
-}
-
 async function handleFeed(
   request: Request,
   env: Env,
@@ -547,8 +554,11 @@ async function handleFeed(
   const verified = await verifyToken(env, request.headers.get("Authorization"));
   if (!verified) return json({ error: "unauthorized" }, 401, cors);
   const callerR = await ensureCaller(env, cors, verified.sub); if ("res" in callerR) return callerR.res; const caller = callerR.user;
-  const tickets = await buildFeed(env.DB, caller.id);
-  return json({ tickets }, 200, cors);
+  // Friend Interactions Phase 2 — CLEAN CUT: the feed is now share-gated. Only
+  // friends' explicitly-shared tickets appear (buildShareFeed). The legacy
+  // auto-feed (own + followees' committed tickets) is gone and NOT migrated.
+  const items = await buildShareFeed(env.DB, caller.id);
+  return json({ items }, 200, cors);
 }
 
 async function handleProfile(
@@ -574,6 +584,12 @@ async function handleProfile(
     return json({ error: "not_found" }, 404, cors);
   }
   const profile = await buildProfile(env.DB, profileUser, viewerId);
+  // Friend Interactions: surface the viewer's friendship state so the profile's
+  // Add-friend / Accept / Pending button renders the right affordance. A
+  // logged-out viewer sees "none".
+  (profile as Record<string, unknown>).friendship = viewerId
+    ? await friendshipState(env.DB, viewerId, profileUser.id)
+    : "none";
   return json(profile, 200, cors);
 }
 
@@ -612,4 +628,532 @@ async function handleFriendsOnCard(
   // params (?race=k1&race=k2...). Empty list = empty result.
   const raceKeys = url.searchParams.getAll("race").filter(Boolean);
   return json(await friendsOnCard(env.DB, caller.id, raceKeys), 200, cors);
+}
+
+// ---------------------------------------------------------------------------
+// Friend Interactions Phase 1 — friend graph handlers.
+// ---------------------------------------------------------------------------
+
+/**
+ * /api/social/friends/request/:id
+ *   POST   = send a friend request (idempotent; auto-accepts on mutual)
+ *   DELETE = decline the request FROM :id (silent to the sender)
+ *
+ * Age-gated. The notification this transition implies is fanned out here (not
+ * in friends.ts) so the state machine stays notification-agnostic + unit-testable.
+ */
+async function handleFriendRequest(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  targetId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  if (request.method !== "POST" && request.method !== "DELETE") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  if (targetId === caller.id) return json({ error: "cannot_friend_self" }, 403, cors);
+  // 404 (not "leaky 200") when the target doesn't exist.
+  const target = await userById(env.DB, targetId);
+  if (!target) return json({ error: "not_found" }, 404, cors);
+
+  if (request.method === "POST") {
+    const allowed = await rateLimitCheck(env.DB, caller.id, "friend_request");
+    if (!allowed) {
+      return json({ error: "rate_limited" }, 429, cors, { "Retry-After": String(RATE_WINDOW) });
+    }
+    const result = await requestFriend(env.DB, caller.id, targetId);
+    if (!result.ok) {
+      // blocked (cannot_friend_self already short-circuited above)
+      return json({ error: result.code }, 403, cors);
+    }
+    // Fan out the notification the transition implies. created_pending always
+    // notifies: it only fires when no prior edge existed, so a duplicate-while-
+    // pending (which returns already_pending, no notify) can't reach here, and a
+    // re-request after a decline/remove is a genuinely new request that deserves
+    // a fresh bell entry. (The friend_request rate limit bounds abuse.)
+    if (result.notify) {
+      const { type, recipientId } = result.notify;
+      await insertNotification(env.DB, {
+        userId: recipientId,
+        type,
+        actorId: caller.id,
+        subjectType: "user",
+        subjectId: caller.id,
+      });
+    }
+    return json(
+      { ok: true, transition: result.transition, now_friends: result.transition === "auto_accepted" },
+      200,
+      cors,
+    );
+  }
+
+  // DELETE = decline (silent, idempotent).
+  await declineRequest(env.DB, caller.id, targetId);
+  return json({ ok: true }, 200, cors);
+}
+
+/** /api/social/friends/request/:id/accept — accept a pending request. Age-gated. */
+async function handleFriendAccept(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  requesterId: string,
+): Promise<Response> {
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  if (requesterId === caller.id) return json({ error: "cannot_friend_self" }, 403, cors);
+  const requester = await userById(env.DB, requesterId);
+  if (!requester) return json({ error: "not_found" }, 404, cors);
+
+  const result = await acceptRequest(env.DB, caller.id, requesterId);
+  if (!result.ok) {
+    if (result.code === "no_pending_request") return json({ error: "not_found" }, 404, cors);
+    return json({ error: result.code }, 403, cors); // blocked
+  }
+  if (result.notify) {
+    await insertNotification(env.DB, {
+      userId: result.notify.recipientId,
+      type: result.notify.type,
+      actorId: caller.id,
+      subjectType: "user",
+      subjectId: caller.id,
+    });
+  }
+  return json({ ok: true, transition: result.transition, now_friends: result.transition === "accepted" }, 200, cors);
+}
+
+/** /api/social/friends — GET friends + pending in/out (+ pending_count badge). */
+async function handleFriendsList(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  const [friends, pendingIncoming, pendingOutgoing] = await Promise.all([
+    listFriends(env.DB, caller.id),
+    listPendingIncoming(env.DB, caller.id),
+    listPendingOutgoing(env.DB, caller.id),
+  ]);
+  return json(
+    {
+      friends,
+      pending_incoming: pendingIncoming,
+      pending_outgoing: pendingOutgoing,
+      pending_count: pendingIncoming.length,
+    },
+    200,
+    cors,
+  );
+}
+
+/** /api/social/friends/:id — DELETE = remove friend (silent, mutual, idempotent). */
+async function handleFriendRemove(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  userId: string,
+): Promise<Response> {
+  if (request.method !== "DELETE") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  if (userId === caller.id) return json({ error: "cannot_remove_self" }, 403, cors);
+  await removeFriend(env.DB, caller.id, userId);
+  return json({ ok: true }, 200, cors);
+}
+
+/** /api/social/users/search?q= — exact/prefix handle search (typeahead). */
+async function handleUserSearch(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  const results = await searchUsers(env.DB, url.searchParams.get("q") ?? "", caller.id);
+  return json({ results }, 200, cors);
+}
+
+// ---------------------------------------------------------------------------
+// Friend Interactions Phase 2 — shared tickets.
+// ---------------------------------------------------------------------------
+
+/**
+ * POST /api/social/shares — share a ticket (create-or-widen; idempotent with
+ * save). Body: { ticket: CommittedTicket, mode, selected? }. Saves the ticket
+ * if not already saved, then publishes it to the chosen friend audience, creates
+ * the feed entry, and notifies each recipient in-app. Re-sharing widens.
+ */
+async function handleShare(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  let body: unknown;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: "bad_body" }, 400, cors);
+  }
+  const audience = parseAudience(body);
+  if (!audience) return json({ error: "bad_audience" }, 400, cors);
+  const parsed = parseTicketBody((body as { ticket?: unknown }).ticket);
+  if (!parsed.ok) return json({ error: parsed.code }, 400, cors);
+
+  const allowed = await rateLimitCheck(env.DB, caller.id, "share");
+  if (!allowed) {
+    return json({ error: "rate_limited" }, 429, cors, { "Retry-After": String(RATE_WINDOW) });
+  }
+
+  // (a) save the ticket if not already saved (idempotent edit-in-place when open).
+  const save = await insertTicket(env.DB, caller.id, parsed.ticket);
+  if (!save.ok) {
+    if (save.code === "not_found") return json({ error: "not_found" }, 404, cors);
+    if (save.code === "server_error") return json({ error: "server_error" }, 500, cors);
+    return json({ error: save.code }, 409, cors);
+  }
+  // (b)(c)(d) publish with an immutable snapshot + feed entry + notify audience.
+  // createShare widens (notifies only NEW recipients) if an active share exists.
+  const result = await createShare(
+    env.DB,
+    caller.id,
+    parsed.ticket.id,
+    parsed.ticket.payload,
+    audience.mode,
+    audience.selected,
+  );
+  return json(
+    {
+      id: result.share.id,
+      audience_mode: result.share.audience_mode,
+      notified_count: result.notified.length,
+      created_at: result.share.created_at,
+    },
+    200,
+    cors,
+  );
+}
+
+/**
+ * /api/social/shares/:id — PATCH = widen audience (owner-only); GET = detail
+ * (audience-gated; non-audience viewers get 404, never a leak).
+ */
+async function handleShareMod(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  shareId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+
+  if (request.method === "GET") {
+    const share = await getShare(env.DB, shareId);
+    if (!share || share.retracted_at !== null || !(await shareVisibleTo(env.DB, share, caller.id))) {
+      return json({ error: "not_found" }, 404, cors);
+    }
+    const item = await getShareForViewer(env.DB, shareId, caller.id);
+    return json(item ?? { error: "not_found" }, item ? 200 : 404, cors);
+  }
+
+  if (request.method === "PATCH") {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "bad_body" }, 400, cors);
+    }
+    const audience = parseAudience(body);
+    if (!audience) return json({ error: "bad_audience" }, 400, cors);
+    const share = await getShare(env.DB, shareId);
+    // 404 (not 403) for missing / retracted / non-owner so the endpoint can't be
+    // probed for which share ids exist.
+    if (!share || share.retracted_at !== null || share.owner_id !== caller.id) {
+      return json({ error: "not_found" }, 404, cors);
+    }
+    const result = await widenShare(env.DB, share, audience.mode, audience.selected);
+    return json(
+      { id: result.share.id, audience_mode: result.share.audience_mode, notified_count: result.notified.length },
+      200,
+      cors,
+    );
+  }
+  return json({ error: "method_not_allowed" }, 405, cors);
+}
+
+/** POST /api/social/shares/:id/retract — owner-only, silent. Idempotent. */
+async function handleShareRetract(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  shareId: string,
+): Promise<Response> {
+  if (request.method !== "POST") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  const share = await getShare(env.DB, shareId);
+  if (!share || share.owner_id !== caller.id) return json({ error: "not_found" }, 404, cors);
+  await retractShare(env.DB, shareId, caller.id);
+  return json({ ok: true }, 200, cors);
+}
+
+/**
+ * GET /api/social/tickets/:id/share — the owner's ACTIVE share for a ticket
+ * ({shared:true,id,audience_mode} | {shared:false}). Owner-only: a non-owner
+ * gets 404 (anti-oracle) so the endpoint can't probe others' share state. Drives
+ * the My Tickets detail share-later/retract affordance.
+ */
+async function handleTicketShare(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  ticketId: string,
+): Promise<Response> {
+  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  const ticket = await findTicket(env.DB, ticketId);
+  if (!ticket || ticket.user_id !== caller.id) return json({ error: "not_found" }, 404, cors);
+  const share = await activeShareForTicket(env.DB, ticketId, caller.id);
+  if (!share) return json({ shared: false }, 200, cors);
+  return json({ shared: true, id: share.id, audience_mode: share.audience_mode }, 200, cors);
+}
+
+// ---------------------------------------------------------------------------
+// Friend Interactions Phase 3 — comments + congratulate.
+// ---------------------------------------------------------------------------
+
+/**
+ * /api/social/shares/:id/comments — GET = list (audience), POST = add (audience).
+ * Commenting notifies the share owner (comment_on_your_ticket) + prior
+ * commenters (comment_on_ticket_you_commented), excluding the author.
+ */
+async function handleShareComments(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  shareId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  const share = await getShare(env.DB, shareId);
+  if (!share || share.retracted_at !== null || !(await shareVisibleTo(env.DB, share, caller.id))) {
+    return json({ error: "not_found" }, 404, cors);
+  }
+
+  if (request.method === "GET") {
+    const comments = await listComments(env.DB, shareId, caller.id);
+    return json({ comments }, 200, cors);
+  }
+  if (request.method === "POST") {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return json({ error: "bad_body" }, 400, cors);
+    }
+    const text = (body as { body?: unknown } | null)?.body;
+    if (typeof text !== "string") return json({ error: "bad_body" }, 400, cors);
+    const trimmed = text.trim();
+    if (trimmed.length === 0 || trimmed.length > 500) return json({ error: "bad_body" }, 400, cors);
+
+    const allowed = await rateLimitCheck(env.DB, caller.id, "comment");
+    if (!allowed) {
+      return json({ error: "rate_limited" }, 429, cors, { "Retry-After": String(RATE_WINDOW) });
+    }
+    const comment = await addComment(env.DB, shareId, caller.id, trimmed);
+    if (!comment) return json({ error: "server_error" }, 500, cors);
+
+    // Notify owner (if not self) + prior commenters (excluding self + owner, who
+    // is notified above). Fire-and-forget intent; insertNotification swallows.
+    if (share.owner_id !== caller.id) {
+      await insertNotification(env.DB, {
+        userId: share.owner_id, type: "comment_on_your_ticket", actorId: caller.id,
+        subjectType: "share", subjectId: shareId,
+      });
+    }
+    const others = await priorCommenters(env.DB, shareId, caller.id);
+    for (const uid of others) {
+      if (uid === share.owner_id) continue;
+      await insertNotification(env.DB, {
+        userId: uid, type: "comment_on_ticket_you_commented", actorId: caller.id,
+        subjectType: "share", subjectId: shareId,
+      });
+    }
+    const view = (await listComments(env.DB, shareId, caller.id)).find((c) => c.id === comment.id);
+    return json(view ?? { id: comment.id }, 200, cors);
+  }
+  return json({ error: "method_not_allowed" }, 405, cors);
+}
+
+/** DELETE /api/social/comments/:id — share-owner deletes any; author deletes own. */
+async function handleCommentDelete(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  commentId: string,
+): Promise<Response> {
+  if (request.method !== "DELETE") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  const comment = await getComment(env.DB, commentId);
+  if (!comment) return json({ error: "not_found" }, 404, cors);
+  const share = await getShare(env.DB, comment.share_id);
+  if (!share) return json({ error: "not_found" }, 404, cors);
+  const ok = await deleteComment(env.DB, commentId, caller.id, share.owner_id);
+  return json(ok ? { ok: true } : { error: "forbidden" }, ok ? 200 : 403, cors);
+}
+
+/**
+ * /api/social/shares/:id/congratulate — POST = congratulate / DELETE = undo.
+ * Win-only (congratulate is a win celebration, not pre-result hype); one per
+ * user per win (PK); self-congrats forbidden; audience-members only.
+ */
+async function handleShareCongrats(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  shareId: string,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  if (request.method !== "POST" && request.method !== "DELETE") {
+    return json({ error: "method_not_allowed" }, 405, cors);
+  }
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  const share = await getShare(env.DB, shareId);
+  if (!share || share.retracted_at !== null || !(await shareVisibleTo(env.DB, share, caller.id))) {
+    return json({ error: "not_found" }, 404, cors);
+  }
+  if (!share.is_win) return json({ error: "not_won" }, 409, cors);
+  if (share.owner_id === caller.id) return json({ error: "cannot_congratulate_own" }, 409, cors);
+
+  if (request.method === "POST") {
+    const allowed = await rateLimitCheck(env.DB, caller.id, "congratulate");
+    if (!allowed) {
+      return json({ error: "rate_limited" }, 429, cors, { "Retry-After": String(RATE_WINDOW) });
+    }
+    // Only notify the owner on a NEW congratulate — a duplicate (PK no-op)
+    // must not re-notify. Cheap: compare count before/after the insert.
+    const before = await congratsCount(env.DB, shareId);
+    await congratulate(env.DB, shareId, caller.id);
+    const after = await congratsCount(env.DB, shareId);
+    if (after > before) {
+      await insertNotification(env.DB, {
+        userId: share.owner_id, type: "congratulation_received", actorId: caller.id,
+        subjectType: "share", subjectId: shareId,
+      });
+    }
+    return json({ count: after, congratulatedByMe: true }, 200, cors);
+  }
+  // DELETE — undo (idempotent). No notification on undo.
+  await unCongratulate(env.DB, shareId, caller.id);
+  const count = await congratsCount(env.DB, shareId);
+  return json({ count, congratulatedByMe: false }, 200, cors);
+}
+
+// ---------------------------------------------------------------------------
+// Friend Interactions Phase 4 — notification bell (read side).
+// ---------------------------------------------------------------------------
+
+/** GET /api/social/notifications — the bell list (newest-first, cap 50). */
+async function handleNotifications(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const notifications = await listNotifications(env.DB, callerR.user.id);
+  return json({ notifications }, 200, cors);
+}
+
+/** GET /api/social/notifications/unread-count — the bell badge. */
+async function handleNotificationsUnread(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const count = await unreadCount(env.DB, callerR.user.id);
+  return json({ count }, 200, cors);
+}
+
+/** POST /api/social/notifications/read — mark one ({id}) or all read. */
+async function handleNotificationsRead(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  let id: string | undefined;
+  try {
+    const body = (await request.json()) as { id?: unknown } | null;
+    id = typeof body?.id === "string" ? body.id : undefined;
+  } catch {
+    /* empty / non-JSON body → mark all read */
+  }
+  if (id) await markRead(env.DB, caller.id, id);
+  else await markAllRead(env.DB, caller.id);
+  return json({ ok: true }, 200, cors);
 }

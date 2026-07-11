@@ -30,6 +30,8 @@ export interface MtCtx {
 
   // container props threaded through
   userId: string | null;
+  /** Clerk JWT getter — for the DetailView CommentThread (share-scoped). */
+  getToken: () => Promise<string | null>;
   onClassic: () => void;
   onToggleLang: () => void;
 
@@ -101,15 +103,23 @@ export interface MtCtx {
   // actions
   openDetail: (id: string) => void;
   openProfile: (handle: string) => void;
-  cheer: (id: string) => void;
   settle: (id: string) => void;
   commit: () => void;
   /** New manual tickets save against `race`; edits remain pinned to their original race. */
   commitManual: (ticket: Ticket, existingId?: string, race?: LiveRace) => void;
-  doFollow: (targetUserId: string, targetHandle: string | null) => void;
-  doUnfollow: (targetUserId: string, targetHandle: string | null) => void;
   doBlock: (targetUserId: string) => void;
   sendReport: () => void;
   saveHandle: () => Promise<void>;
   doShare: () => Promise<void>;
+  // Friend Interactions Phase 2 — share-later / retract on the owner's detail
+  // view (the owner engagement surface; structured for Phase 3 congratulate +
+  // comment counts + the comment thread to land here without rework).
+  requestShare: (ticket: CommittedTicket) => void;
+  /** Active share for the open detail ticket (null = unknown/loading). */
+  detailShare: { shared: boolean; id?: string; audience_mode?: string } | null;
+  retractDetail: () => void;
+  /** Share the currently-selected New-bet option (opens FriendPicker). */
+  shareSelected: () => void;
+  /** Share the manual builder's ticket (opens FriendPicker). */
+  shareManual: (ticket: Ticket, race?: LiveRace) => void;
 }

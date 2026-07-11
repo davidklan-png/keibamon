@@ -270,10 +270,6 @@ export interface CommittedTicket {
   race: RaceSnapshot;
   owner: "you" | TicketOwner;
   claps: number;
-  /** Phase 3: server-side cheers count (authoritative when present). */
-  cheers?: number;
-  /** Phase 3: did the signed-in viewer cheer this ticket? */
-  cheeredByMe?: boolean;
   /** Phase 3: flat owner object from the social Worker (feed/profile path). */
   ownerUser?: PublicUser;
   createdAt: number;

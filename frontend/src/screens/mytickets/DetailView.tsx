@@ -2,9 +2,11 @@
 // Extracted from MyTickets' inner renderDetail (2026-07-08 split — behavior
 // preserving; all state/actions come through MtCtx, including detailCardRef
 // which the share exporter rasters).
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { MT_MOOD_COLOR, avatarColor, mtSep } from "../../lib/mytickets-view";
 import { yen } from "../../lib/format";
+import { CommentThread } from "../../components/CommentThread";
+import { getShare, type FeedItem } from "../../auth/socialClient";
 import type { MtCtx } from "./ctx";
 
 export function DetailView({ ctx }: { ctx: MtCtx }) {
@@ -23,15 +25,53 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
     runnerName,
     settle,
     doShare,
-    cheer,
     burstId,
     burstSpans,
     setReportTarget,
     friendsOnRace,
     openProfile,
+    requestShare,
+    detailShare,
+    retractDetail,
+    getToken,
   } = ctx;
   const tk = detailTk;
+  const [confirmRetract, setConfirmRetract] = useState(false);
+  const [dismissedWin, setDismissedWin] = useState(false);
+  // Friend Interactions Phase 3: when this ticket is shared, fetch the share
+  // detail to surface the congratulate count + mount the comment thread (the
+  // owner engagement surface, alongside share-later/retract).
+  const [ownerShare, setOwnerShare] = useState<FeedItem | null>(null);
+  useEffect(() => {
+    const s = detailShare;
+    if (!s?.shared || !s.id) {
+      setOwnerShare(null);
+      return;
+    }
+    const sid = s.id;
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      const r = await getShare(token, sid);
+      setOwnerShare(r.ok ? r.data : null);
+    })();
+  }, [detailShare, getToken]);
   if (!tk) return null;
+  // Friend Interactions Phase 3 — "Share your win?" prompt: a private winning
+  // ticket (not shared) shows a NON-blocking banner, once per ticket (dismiss is
+  // sticky in localStorage → stays private forever unless shared manually later).
+  const winKey = `kbm.winPromptDismissed.${tk.id}`;
+  const winAlreadyDismissed =
+    typeof localStorage !== "undefined" && localStorage.getItem(winKey) === "1";
+  const showWinPrompt = tk.state === "won" && !detailShare?.shared && !dismissedWin && !winAlreadyDismissed;
+  function dismissWin() {
+    try {
+      localStorage.setItem(winKey, "1");
+    } catch {
+      /* localStorage unavailable — in-memory dismiss only */
+    }
+    setDismissedWin(true);
+  }
   const open = tk.state === "open";
   const sep = mtSep(tk.ticket.type);
   const ribbon =
@@ -60,6 +100,19 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
         </button>
         <div className="mt-back-title">{t("mine.ticketTitle")}</div>
       </div>
+
+      {showWinPrompt && (
+        <div className="mt-win-prompt" role="status">
+          <div className="mt-win-prompt-text">
+            <strong>{t("friends.shareWinTitle")}</strong>
+            <p className="hint">{t("friends.shareWinHint")}</p>
+          </div>
+          <div className="mt-win-prompt-actions">
+            <button className="btn primary" onClick={() => requestShare(tk)}>{t("friends.shareWinCta")}</button>
+            <button className="btn ghost" onClick={dismissWin}>{t("friends.dismissWin")}</button>
+          </div>
+        </div>
+      )}
 
       <div className="mt-detail">
         <div className="mt-ticket" ref={detailCardRef}>
@@ -305,13 +358,6 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
             <span style={{ fontSize: 16 }}>⇪</span>
             {t("mine.tapShare")}
           </button>
-          {tk.state === "won" && (
-            <button className="mt-cheer-lg" onClick={() => cheer(tk.id)}>
-              <span style={{ fontSize: 16 }}>👏</span>
-              {tk.cheers ?? tk.claps}
-              {burstId === tk.id && burstSpans}
-            </button>
-          )}
           {/* Phase 4 — ticket report. Anyone can report any ticket
               (including their own — the moderation queue decides). */}
           <button
@@ -322,7 +368,32 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
           >
             {t("profile.report")}
           </button>
+          {/* Friend Interactions Phase 2 — share-later / retract. The owner
+              engagement surface; Phase 3 adds congratulate + comment counts +
+              the comment thread alongside these. Share opens the FriendPicker
+              (deliberate); retract asks once, then is silent. */}
+          {requestShare && !detailShare?.shared && (
+            <button className="mt-share-friend" onClick={() => requestShare(tk)}>
+              {t("share.shareLater")}
+            </button>
+          )}
+          {detailShare?.shared && (
+            <button className="mt-retract-btn" onClick={() => setConfirmRetract(true)}>
+              {t("share.retract")}
+            </button>
+          )}
         </div>
+
+        {detailShare?.shared && detailShare.id && (
+          <div className="mt-owner-engagement">
+            {ownerShare?.is_win && (
+              <div className="mt-owner-congrats" aria-label={t("friends.congratulate")}>
+                <span aria-hidden="true">👏</span> {ownerShare.congrats_count}
+              </div>
+            )}
+            <CommentThread shareId={detailShare.id} getToken={getToken} viewerIsOwner />
+          </div>
+        )}
 
         <div className="mt-friends">
           <div className="mt-avatars">
@@ -353,6 +424,33 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
           </div>
         </div>
       </div>
+
+      {confirmRetract && (
+        <div className="kbm-modal" role="dialog" aria-modal="true">
+          <div className="kbm-modal-card">
+            <header className="kbm-modal-head">
+              <strong>{t("share.retractTitle")}</strong>
+            </header>
+            <div className="kbm-modal-body">
+              <p className="hint">{t("share.retractBody")}</p>
+            </div>
+            <div className="fp-foot">
+              <button className="btn ghost" onClick={() => setConfirmRetract(false)}>
+                {t("share.cancel")}
+              </button>
+              <button
+                className="btn primary"
+                onClick={() => {
+                  retractDetail();
+                  setConfirmRetract(false);
+                }}
+              >
+                {t("share.retractCta")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

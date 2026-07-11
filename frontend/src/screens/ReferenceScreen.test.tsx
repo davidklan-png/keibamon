@@ -23,28 +23,31 @@ describe("ReferenceScreen — glossary-only (ADR-0015)", () => {
     setLang("en");
   });
 
+  // Friend Interactions Phase 4: ReferenceScreen now also takes getToken +
+  // onDeepLink (for the bell). Pass no-op stubs — the glossary assertions below
+  // don't depend on the bell.
+  const props = {
+    onBack: () => {},
+    getToken: () => Promise.resolve(null),
+    onDeepLink: () => {},
+  };
+
   it("renders the glossary search input + title", () => {
-    const html = renderToStaticMarkup(
-      <ReferenceScreen onBack={() => {}} />,
-    );
+    const html = renderToStaticMarkup(<ReferenceScreen {...props} />);
     // Glossary search input + title render.
     expect(html).toContain("glossary-search");
     expect(html).toContain("Racing glossary");
   });
 
   it("does NOT render the old glossary|roundup tab nav", () => {
-    const html = renderToStaticMarkup(
-      <ReferenceScreen onBack={() => {}} />,
-    );
+    const html = renderToStaticMarkup(<ReferenceScreen {...props} />);
     // The tab nav was <nav className="stepper" aria-label="reference tabs">.
     // Removed by ADR-0015.
     expect(html).not.toMatch(/aria-label="reference tabs"/);
   });
 
   it("does NOT render roundup content (now lives in RoundupPanel)", () => {
-    const html = renderToStaticMarkup(
-      <ReferenceScreen onBack={() => {}} />,
-    );
+    const html = renderToStaticMarkup(<ReferenceScreen {...props} />);
     expect(html).not.toContain("roundup-tab");
     expect(html).not.toContain("roundup-empty");
   });
