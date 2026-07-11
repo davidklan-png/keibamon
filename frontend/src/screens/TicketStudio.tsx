@@ -39,11 +39,15 @@ export interface TicketStudioProps {
   title: string;
   /** Close handler — caller unmounts the studio. */
   onClose: () => void;
+  /** Friend Interactions Phase 3 — Save/Share the structured ticket (threaded
+   *  from the race-context-bearing mount). Optional; absent = image-export only. */
+  onSave?: (ticket: Ticket) => void;
+  onShare?: (ticket: Ticket) => void;
 }
 
 export function TicketStudio(props: TicketStudioProps) {
   const { t } = useI18n();
-  const { markedSet, anchorUma, runners, p, allUmas, unitStake, title, onClose } = props;
+  const { markedSet, anchorUma, runners, p, allUmas, unitStake, title, onClose, onSave, onShare } = props;
   // FillGuide second layer: null = list view; a Ticket = fill card for that ticket.
   const [fillTicket, setFillTicket] = useState<Ticket | null>(null);
 
@@ -72,6 +76,8 @@ export function TicketStudio(props: TicketStudioProps) {
             ticket={fillTicket}
             runners={runners}
             unitStake={unitStake}
+            onSave={onSave}
+            onShare={onShare}
           />
         ) : (
           <div className="kbm-modal-body">

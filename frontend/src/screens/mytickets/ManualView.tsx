@@ -21,6 +21,7 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
     unit,
     setUnit,
     commitManual,
+    shareManual,
   } = ctx;
   // Edit-in-place: when manualEditId is set, prefill the builder from that
   // existing OPEN ticket and reuse its id on Register (POST upserts on
@@ -115,6 +116,7 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
             onUnitChange={setUnit}
             initial={initial}
             onRegister={(built) => commitManual(built.ticket, built.id, selectedRace ?? undefined)}
+            onShare={(built) => shareManual(built.ticket, selectedRace ?? undefined)}
             onCancel={() => setView("new")}
           />
         </>

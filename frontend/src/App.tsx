@@ -701,6 +701,8 @@ function App() {
           }
           onSetImpressions={setImpressions}
           unitStake={style.unit}
+          onSaveTicket={placeTicket}
+          onShareTicket={shareTicket}
         />
       )}
 

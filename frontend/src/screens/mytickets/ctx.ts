@@ -120,4 +120,6 @@ export interface MtCtx {
   retractDetail: () => void;
   /** Share the currently-selected New-bet option (opens FriendPicker). */
   shareSelected: () => void;
+  /** Share the manual builder's ticket (opens FriendPicker). */
+  shareManual: (ticket: Ticket, race?: LiveRace) => void;
 }

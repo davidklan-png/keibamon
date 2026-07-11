@@ -847,6 +847,31 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
    *             on OPEN cards; if the ticket settles between open+register,
    *             the 409 is caught below).
    */
+  /**
+   * Friend Interactions Phase 3 — Share the manual builder's ticket. Builds a
+   * CommittedTicket with the same race resolution as commitManual(), then opens
+   * the FriendPicker; requestShare saves-if-needed + publishes on confirm. Share
+   * is deliberate (the picker is the confirmation step).
+   */
+  function shareManual(ticket: Ticket, race?: LiveRace) {
+    const ticketRace = race ? snapshotRace(race, fallbackDate) : feature ? snapshotRace(feature, fallbackDate) : null;
+    if (!ticketRace) return;
+    const tk: CommittedTicket = {
+      id: newTicketId(),
+      serial: "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase(),
+      ticket,
+      unit,
+      mood: moodKey(ticket),
+      state: "open",
+      payoutBase: ticket.avgPayout,
+      race: ticketRace,
+      owner: "you",
+      claps: 0,
+      createdAt: Date.now(),
+    };
+    requestShare(tk);
+  }
+
   function commitManual(ticket: Ticket, existingId?: string, race?: LiveRace) {
     const id = existingId ?? newTicketId();
     const serial =
@@ -988,6 +1013,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     detailShare,
     retractDetail,
     shareSelected,
+    shareManual,
   };
 
   return (

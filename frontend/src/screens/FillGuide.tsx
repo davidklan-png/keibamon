@@ -32,11 +32,20 @@ export interface FillGuideProps {
   runners: Runner[];
   /** Per-point stake (display only). */
   unitStake: number;
+  /**
+   * Friend Interactions Phase 3 rewire: Save (persist privately) + Share
+   * (FriendPicker → publish). When BOTH are provided (the live-card mount),
+   * FillGuide shows the real Save/Share pair (identical semantics to the
+   * TicketsScreen split); when absent (e.g. the roundup mount, which lacks a
+   * CommittedTicket race context), it falls back to the image-export Share.
+   */
+  onSave?: (ticket: Ticket) => void;
+  onShare?: (ticket: Ticket) => void;
 }
 
 export function FillGuide(props: FillGuideProps) {
   const { t } = useI18n();
-  const { ticket, runners, unitStake } = props;
+  const { ticket, runners, unitStake, onSave, onShare } = props;
   const rootRef = useRef<HTMLElement | null>(null);
 
   const isBox = ticket.structure === "box";
@@ -161,9 +170,20 @@ export function FillGuide(props: FillGuideProps) {
         <span className="fillguide-micro" data-not-advice="">
           {t("auth.disclaimer")}
         </span>
-        <button type="button" className="fillguide-share" onClick={doShare}>
-          {t("fillGuide.share")}
-        </button>
+        {onSave && onShare ? (
+          <div className="fillguide-actions">
+            <button type="button" className="btn" onClick={() => onSave(ticket)}>
+              {t("share.save")}
+            </button>
+            <button type="button" className="btn primary" onClick={() => onShare(ticket)}>
+              {t("share.share")}
+            </button>
+          </div>
+        ) : (
+          <button type="button" className="fillguide-share" onClick={doShare}>
+            {t("fillGuide.share")}
+          </button>
+        )}
       </div>
     </section>
   );
