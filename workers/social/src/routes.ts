@@ -34,7 +34,7 @@ import {
   searchUsers,
   severEdgesBothDirections,
 } from "./friends";
-import { insertNotification } from "./notifications";
+import { insertNotification, listNotifications, markAllRead, markRead, unreadCount } from "./notifications";
 import {
   activeShareForTicket,
   buildShareFeed,
@@ -67,6 +67,10 @@ const BLOCK_PATH = /^\/api\/social\/block\/([^/]+)$/;
 const PROFILE_PATH = /^\/api\/social\/users\/([^/]+)$/;
 const RACE_FRIENDS_PATH = /^\/api\/social\/races\/([^/]+)\/friends$/;
 const FEED_PATH = "/api/social/feed";
+// Friend Interactions Phase 4 — notification bell (read side).
+const NOTIFICATIONS_PATH = "/api/social/notifications";
+const NOTIFICATIONS_READ_PATH = "/api/social/notifications/read";
+const NOTIFICATIONS_UNREAD_PATH = "/api/social/notifications/unread-count";
 const FRIENDS_ON_CARD_PATH = "/api/social/friends/on-card";
 const REPORT_PATH = "/api/social/report";
 // Friend Interactions Phase 1 — friend graph + handle search. ORDER MATTERS in
@@ -190,6 +194,17 @@ export async function router(request: Request, env: Env, cors: Record<string, st
   // /api/social/feed — Phase 3 feed.
   if (pathname === FEED_PATH) {
     return handleFeed(request, env, cors);
+  }
+
+  // Friend Interactions Phase 4 — notification bell (read side).
+  if (pathname === NOTIFICATIONS_PATH && request.method === "GET") {
+    return handleNotifications(request, env, cors);
+  }
+  if (pathname === NOTIFICATIONS_UNREAD_PATH && request.method === "GET") {
+    return handleNotificationsUnread(request, env, cors);
+  }
+  if (pathname === NOTIFICATIONS_READ_PATH && request.method === "POST") {
+    return handleNotificationsRead(request, env, cors);
   }
 
   // /api/social/races/:raceKey/friends — Phase 3 friends-on-race.
@@ -1086,4 +1101,59 @@ async function handleShareCongrats(
   await unCongratulate(env.DB, shareId, caller.id);
   const count = await congratsCount(env.DB, shareId);
   return json({ count, congratulatedByMe: false }, 200, cors);
+}
+
+// ---------------------------------------------------------------------------
+// Friend Interactions Phase 4 — notification bell (read side).
+// ---------------------------------------------------------------------------
+
+/** GET /api/social/notifications — the bell list (newest-first, cap 50). */
+async function handleNotifications(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const notifications = await listNotifications(env.DB, callerR.user.id);
+  return json({ notifications }, 200, cors);
+}
+
+/** GET /api/social/notifications/unread-count — the bell badge. */
+async function handleNotificationsUnread(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const count = await unreadCount(env.DB, callerR.user.id);
+  return json({ count }, 200, cors);
+}
+
+/** POST /api/social/notifications/read — mark one ({id}) or all read. */
+async function handleNotificationsRead(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+): Promise<Response> {
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const callerR = await ensureCaller(env, cors, verified.sub);
+  if ("res" in callerR) return callerR.res;
+  const caller = callerR.user;
+  let id: string | undefined;
+  try {
+    const body = (await request.json()) as { id?: unknown } | null;
+    id = typeof body?.id === "string" ? body.id : undefined;
+  } catch {
+    /* empty / non-JSON body → mark all read */
+  }
+  if (id) await markRead(env.DB, caller.id, id);
+  else await markAllRead(env.DB, caller.id);
+  return json({ ok: true }, 200, cors);
 }

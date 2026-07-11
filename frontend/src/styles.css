@@ -4381,3 +4381,106 @@ select:focus {
   font-size: 11px;
   color: var(--muted);
 }
+
+/* ===========================================================================
+   Friend Interactions (Phases 2-4) — Friends tab, share cards, comments,
+   friend picker, notification bell. Mobile-first; reuses keibamon vars
+   (--turf / --gold / --ink / --line / --tint-3). Recreational, no currency.
+   =========================================================================== */
+
+/* ---- notification bell (Phase 4) ---- */
+.notif-bell { position: relative; display: inline-flex; }
+.notif-bell-btn { position: relative; font-size: 18px; line-height: 1; }
+.notif-badge {
+  position: absolute; top: -6px; right: -8px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; background: #FF6A6A; color: #fff;
+  font-size: 10px; font-weight: 800; line-height: 16px; text-align: center;
+}
+.notif-panel {
+  position: absolute; right: 0; top: 32px; z-index: 60;
+  width: min(86vw, 340px); max-height: 70vh; overflow-y: auto;
+  background: #fff; border: 1px solid var(--line);
+  border-radius: 14px; box-shadow: 0 8px 30px rgba(0,0,0,.16); padding: 6px 4px;
+}
+.notif-panel-head { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; }
+.notif-mark-all { font-size: 12px; font-weight: 700; color: #16AC66; }
+.notif-row { display: block; width: 100%; text-align: left; padding: 9px 12px; border: 0; background: transparent; border-radius: 10px; font-size: 13px; color: #555; }
+.notif-row.unread { background: #FFF7E6; color: #1a1a1a; font-weight: 600; }
+.notif-panel .empty { padding: 16px; text-align: center; }
+
+/* ---- Friends tab ---- */
+.friends-seg { display: flex; gap: 6px; padding: 8px 12px; position: sticky; top: 0; background: #fff; z-index: 20; border-bottom: 1px solid var(--line); }
+.friends-seg button { flex: 1; padding: 9px 6px; border-radius: 10px; border: 1px solid var(--line); background: transparent; font-weight: 700; font-size: 13px; color: #555; }
+.friends-seg button.on { background: #16AC66; color: #fff; border-color: transparent; }
+.friends-badge, .tab-badge { display: inline-block; margin-left: 4px; min-width: 15px; padding: 0 4px; border-radius: 8px; background: #FF6A6A; color: #fff; font-size: 10px; line-height: 15px; }
+.friends-feed, .friends-list .section, .friends-add .section { padding: 10px 12px; display: flex; flex-direction: column; gap: 10px; }
+.friends-empty { align-items: center; text-align: center; gap: 12px; }
+.friends-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.friends-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 13px; flex: none; }
+.friends-name { font-weight: 700; font-size: 14px; flex: 1; }
+.friends-act { flex: none; }
+.friends-search { width: 100%; padding: 11px 14px; border-radius: 12px; border: 1px solid var(--line); font-size: 14px; }
+.friends-invite { display: flex; align-items: center; gap: 8px; }
+.friends-invite-url { flex: 1; font-size: 12px; padding: 8px; border-radius: 8px; background: #f3f4f2; overflow-x: auto; white-space: nowrap; }
+
+/* ---- share card (feed + detail) ---- */
+.sc-card { background: #fff; border: 1px solid var(--line); border-radius: 16px; padding: 12px 13px; cursor: pointer; }
+.sc-card.is-win { border-color: #E59A14; }
+.sc-card.is-detail { cursor: default; }
+.sc-head { display: flex; align-items: center; gap: 8px; margin-bottom: 9px; }
+.sc-avatar { width: 28px; height: 28px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 12px; }
+.sc-owner { font-weight: 800; font-size: 14px; }
+.sc-win-badge { margin-left: auto; padding: 3px 9px; border-radius: 999px; background: #FFF7E6; color: #B9780C; border: 1px solid #E59A14; font-weight: 900; font-size: 11px; }
+.sc-bethead { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.sc-bettype { font-weight: 800; font-size: 13px; }
+.sc-mood { padding: 2px 9px; border-radius: 999px; color: #fff; font-size: 11px; font-weight: 700; }
+.sc-race { font-size: 12px; color: #888; margin-bottom: 7px; }
+.sc-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 9px; }
+.sc-chip { padding: 3px 8px; border-radius: 8px; background: #f3f4f2; font-size: 12px; font-weight: 700; }
+.sc-foot { display: flex; justify-content: space-between; align-items: center; }
+.sc-cost { font-size: 12px; color: #555; }
+.sc-mult { font-weight: 900; font-size: 16px; color: #B9780C; }
+.sc-actions { display: flex; gap: 14px; padding-top: 9px; margin-top: 9px; border-top: 1px solid var(--line); }
+.sc-congrats, .sc-comments { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 0; font-weight: 800; font-size: 14px; color: #555; }
+.sc-congrats.on { color: #B9780C; }
+.sc-congrats-label { font-size: 11px; font-weight: 600; }
+
+/* ---- comment thread ---- */
+.ct-thread { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }
+.ct-head { font-weight: 800; font-size: 13px; margin-bottom: 8px; }
+.ct-list { list-style: none; padding: 0; margin: 0 0 10px; display: flex; flex-direction: column; gap: 9px; }
+.ct-row { display: flex; gap: 8px; align-items: flex-start; }
+.ct-avatar { width: 26px; height: 26px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 11px; flex: none; }
+.ct-body { flex: 1; }
+.ct-author { font-weight: 700; font-size: 12px; }
+.ct-text { font-size: 13px; color: #1a1a1a; }
+.ct-deleted { color: #888; font-style: italic; }
+.ct-del { font-size: 11px; color: #888; }
+.ct-compose { display: flex; gap: 7px; }
+.ct-input { flex: 1; padding: 9px 12px; border-radius: 11px; border: 1px solid var(--line); font-size: 13px; }
+.ct-send { flex: none; }
+.ct-err { color: #FF6A6A; font-size: 11px; }
+
+/* ---- friend picker (share modal) ---- */
+.fp-empty { text-align: center; padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.fp-all { display: flex; align-items: center; gap: 9px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 12px; font-weight: 700; }
+.fp-all.on { background: #EAF7F0; border-color: #16AC66; }
+.fp-select-hint { margin: 9px 0 4px; }
+.fp-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 4px; }
+.fp-row { display: flex; align-items: center; gap: 9px; padding: 9px 10px; border-radius: 10px; }
+.fp-row.on { background: #EAF7F0; }
+.fp-avatar { width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 800; font-size: 12px; }
+.fp-name { flex: 1; font-weight: 700; font-size: 14px; }
+.fp-check { font-weight: 900; color: #16AC66; }
+.fp-foot { display: flex; gap: 9px; padding: 11px 13px; border-top: 1px solid var(--line); }
+.fp-foot .btn { flex: 1; }
+
+/* ---- misc social chrome ---- */
+.mt-bell-bar { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
+.kbm-toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; padding: 11px 18px; border-radius: 999px; background: #1a1a1a; color: #fff; font-weight: 700; font-size: 13px; }
+.mt-owner-engagement { margin-top: 12px; }
+.mt-owner-congrats { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 999px; background: #FFF7E6; color: #B9780C; font-weight: 800; margin-bottom: 8px; }
+.mt-share-friend { flex: none; padding: 9px 14px; border-radius: 10px; font-weight: 700; font-size: 13px; background: #16AC66; color: #fff; border: 0; }
+.mt-retract-btn { flex: none; padding: 9px 14px; border-radius: 10px; font-weight: 700; font-size: 13px; background: transparent; border: 1px solid var(--line); color: #555; }
+

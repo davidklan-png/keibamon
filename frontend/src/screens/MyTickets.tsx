@@ -41,8 +41,10 @@ import {
   retractShare,
   type PublicProfile,
   type FriendsAvatar,
+  type NotificationView,
 } from "../auth/socialClient";
 import { useShareTicket } from "../auth/useShareTicket";
+import { NotificationBell } from "../components/NotificationBell";
 import {
   loadPending,
   pushPending,
@@ -107,9 +109,12 @@ interface MyTicketsHomeProps {
    * re-reading localStorage itself.
    */
   impressions: ImpressionMap;
+  /** Friend Interactions Phase 4 — bell deep-link (My Tickets has no global .head,
+   *  so the bell mounts in a thin top bar here). */
+  onDeepLink: (n: NotificationView) => void;
 }
 
-export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions }: MyTicketsHomeProps) {
+export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions, onDeepLink }: MyTicketsHomeProps) {
   const { isSignedIn, userId, ageVerified, getToken } = useAuth();
 
   useEffect(() => {
@@ -136,6 +141,9 @@ export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions }: My
 
   return ageVerified ? (
     <main className="app">
+      <div className="mt-bell-bar">
+        <NotificationBell getToken={getToken} onDeepLink={onDeepLink} />
+      </div>
       <MyTickets
         snap={snap}
         onClassic={onClassic}

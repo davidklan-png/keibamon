@@ -40,7 +40,9 @@ import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
 import { BottomTabBar } from "./components/BottomTabBar";
+import { NotificationBell } from "./components/NotificationBell";
 import { RaceContextBar } from "./components/RaceContextBar";
+import type { NotificationView } from "./auth/socialClient";
 
 type Step = "race" | "tickets";
 type View = "browse" | "mine" | "friends" | "reference";
@@ -62,6 +64,12 @@ function App() {
   // Friend Interactions Phase 3: pending friend-request count for the Friends
   // tab badge (the Phase 4 bell later takes over notification duty).
   const [pendingFriends, setPendingFriends] = useState(0);
+
+  /** Friend Interactions Phase 4 — map a notification to the screen it deep-links
+   *  to. Most land on Friends; a congratulation lands the owner on My Tickets. */
+  function deepLinkNotif(n: NotificationView): View {
+    return n.type === "congratulation_received" ? "mine" : "friends";
+  }
   const [step, setStep] = useState<Step>("race");
   const [runners, setRunners] = useState<Runner[]>([]);
   const [raceLabel, setRaceLabel] = useState<string>("");
@@ -466,6 +474,7 @@ function App() {
           onClassic={() => setView("browse")}
           onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
           impressions={impressions}
+          onDeepLink={(n) => setView(deepLinkNotif(n))}
         />
         <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
       </>
@@ -478,7 +487,7 @@ function App() {
   if (view === "friends") {
     return (
       <>
-        <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} />
+        <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} onDeepLink={(n) => setView(deepLinkNotif(n))} />
         <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
       </>
     );
@@ -491,7 +500,7 @@ function App() {
   if (view === "reference") {
     return (
       <>
-        <ReferenceScreen onBack={() => setView("browse")} />
+        <ReferenceScreen onBack={() => setView("browse")} getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
         <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
       </>
     );
@@ -518,6 +527,9 @@ function App() {
             Reference) moved to the persistent <BottomTabBar />; the two-lane
             funnel moved to an in-view segmented control on the Races view. */}
         <div className="head-actions">
+          {isSignedIn && (
+            <NotificationBell getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
+          )}
           <button
             className="lang-toggle"
             onClick={() => setLang(lang === "ja" ? "en" : "ja")}

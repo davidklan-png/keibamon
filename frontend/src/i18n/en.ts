@@ -220,6 +220,19 @@ export const en = {
     feedEmpty: "Nothing here yet — share a ticket or add friends to see their picks.",
     feedEmptyNoFriends: "Add friends to see their shared tickets here.",
   },
+  // Friend Interactions Phase 4 — notification bell. Copy stays recreational.
+  notifications: {
+    title: "Notifications",
+    markAllRead: "Mark all read",
+    empty: "No notifications",
+    friend_request_received: "{who} sent you a friend request",
+    friend_request_accepted: "{who} accepted your friend request",
+    ticket_shared_with_you: "{who} shared a ticket with you",
+    comment_on_your_ticket: "{who} commented on your ticket",
+    comment_on_ticket_you_commented: "{who} replied in a thread you're in",
+    congratulation_received: "{who} congratulated your win 🎉",
+    friends_ticket_won: "{who}'s ticket hit 🎉",
+  },
   // Friend Interactions Phase 3 — Friends tab (feed / list / add-friend) +
   // comments + congratulate + win prompt. Recreational framing; no currency.
   friends: {

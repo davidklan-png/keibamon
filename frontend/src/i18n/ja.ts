@@ -210,6 +210,19 @@ export const ja = {
     feedEmpty: "まだありません — 馬券をシェアするか、友だちを追加してみましょう。",
     feedEmptyNoFriends: "友だちを追加すると、ここにシェアされた馬券が表示されます。",
   },
+  // Friend Interactions Phase 4 — notification bell.
+  notifications: {
+    title: "通知",
+    markAllRead: "すべて既読",
+    empty: "通知はありません",
+    friend_request_received: "{who}さんから友だち申請が届きました",
+    friend_request_accepted: "{who}さんが友だち申請を承認しました",
+    ticket_shared_with_you: "{who}さんが馬券をシェアしました",
+    comment_on_your_ticket: "{who}さんがあなたの馬券にコメントしました",
+    comment_on_ticket_you_commented: "{who}さんがあなたのコメントしたスレッドに返信しました",
+    congratulation_received: "{who}さんがあなたの勝利におめでとうと言いました 🎉",
+    friends_ticket_won: "{who}さんの馬券が的中しました 🎉",
+  },
   // Friend Interactions Phase 3 — Friends tab + comments + congratulate + win.
   friends: {
     feedTitle: "フィード",

@@ -628,6 +628,37 @@ function makeFakeD1(opts: FakeD1Options = {}) {
       });
       return null;
     }
+    // Phase 4 read-side: unreadCount
+    m = /^SELECT COUNT\(\*\) AS n FROM notifications WHERE user_id = \? AND read_at IS NULL/i.exec(s);
+    if (m) {
+      const uid = b[0] as string;
+      return { n: notifications.filter((x) => x.user_id === uid && x.read_at == null).length };
+    }
+    // markRead (one): UPDATE ... WHERE id=? AND user_id=? AND read_at IS NULL
+    m = /^UPDATE notifications SET read_at = \? WHERE id = \? AND user_id = \? AND read_at IS NULL/i.exec(s);
+    if (m) {
+      const [at, id, uid] = b as [number, string, string];
+      const n = notifications.find((x) => x.id === id && x.user_id === uid && x.read_at == null);
+      if (n) n.read_at = at;
+      return null;
+    }
+    // markAllRead: UPDATE ... WHERE user_id=? AND read_at IS NULL
+    m = /^UPDATE notifications SET read_at = \? WHERE user_id = \? AND read_at IS NULL/i.exec(s);
+    if (m) {
+      const [at, uid] = b as [number, string];
+      for (const n of notifications) if (n.user_id === uid && n.read_at == null) n.read_at = at;
+      return null;
+    }
+    // pruneOld: DELETE FROM notifications WHERE created_at < ?
+    m = /^DELETE FROM notifications WHERE created_at < \?/i.exec(s);
+    if (m) {
+      const cutoff = b[0] as number;
+      const before = notifications.length;
+      for (let i = notifications.length - 1; i >= 0; i--) {
+        if (notifications[i].created_at < cutoff) notifications.splice(i, 1);
+      }
+      return { meta: { changes: before - notifications.length } };
+    }
 
     // ---- SHARES (Friend Interactions Phase 2) ----
     // getShare / activeShareForTicket / promoteShareWin-lookup: SELECT * FROM shares WHERE ...
@@ -1037,6 +1068,23 @@ function makeFakeD1(opts: FakeD1Options = {}) {
           .map((c) => c.author_id),
       )].map((author_id) => ({ author_id }));
       return out as unknown as T[];
+    }
+    // listNotifications (Phase 4): FROM notifications n LEFT JOIN users u ... WHERE n.user_id=?
+    if (/FROM notifications n\s+LEFT JOIN users u ON u\.id = n\.actor_id/i.test(s)) {
+      const uid = b[0] as string;
+      return notifications
+        .filter((n) => n.user_id === uid)
+        .sort((a, c) => c.created_at - a.created_at)
+        .slice(0, 50)
+        .map((n) => {
+          const u = usersById.get(n.actor_id ?? "");
+          return {
+            ...n,
+            actor_handle: u?.handle ?? null,
+            actor_display_name: u?.display_name ?? null,
+            actor_avatar: u?.avatar ?? null,
+          };
+        }) as unknown as T[];
     }
 
     return [];
@@ -2960,5 +3008,70 @@ describe("social Worker — Friend Interactions Phase 3 (wins, congratulate, com
     jwtSub("clerk_b");
     const del = await worker.fetch(req(`/api/social/comments/${commentId}`, { method: "DELETE", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
     expect(del.status).toBe(200);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Friend Interactions Phase 4 — notification bell (read side).
+// ---------------------------------------------------------------------------
+
+describe("social Worker — Friend Interactions Phase 4 (notification bell)", () => {
+  beforeEach(() => vi.resetAllMocks());
+
+  async function seedH(db: D1Database, sub: string, handle: string): Promise<string> {
+    jwtSub(sub);
+    const r = await worker.fetch(
+      req("/api/social/me", { method: "POST", headers: { ...authed(), "Content-Type": "application/json" }, body: JSON.stringify({ handle }) }),
+      { ...BASE_ENV, DB: db }, {} as ExecutionContext,
+    );
+    return ((await r.json()) as { id: string }).id;
+  }
+
+  it("returns 401 on notification routes without a token", async () => {
+    const { db } = makeFakeD1();
+    for (const c of [
+      { method: "GET", path: "/api/social/notifications" },
+      { method: "GET", path: "/api/social/notifications/unread-count" },
+      { method: "POST", path: "/api/social/notifications/read" },
+    ]) {
+      const res = await worker.fetch(req(c.path, { method: c.method }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+      expect(res.status).toBe(401);
+    }
+  });
+
+  it("list + unread-count reflect an unread notification; mark-one + mark-all clear it", async () => {
+    const { db, notifications } = makeFakeD1();
+    const aId = await seedH(db, "clerk_a", "u_a");
+    const bId = await seedH(db, "clerk_b", "u_b");
+    // A requests B → B gets a friend_request_received notification.
+    jwtSub("clerk_a");
+    await worker.fetch(req(`/api/social/friends/request/${bId}`, { method: "POST", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    expect(notifications.some((n) => n.user_id === bId && n.type === "friend_request_received")).toBe(true);
+
+    // B's unread count = 1.
+    jwtSub("clerk_b");
+    const uc = await worker.fetch(req("/api/social/notifications/unread-count", { method: "GET", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    expect(((await uc.json()) as { count: number }).count).toBe(1);
+
+    // B's list has it, unread.
+    jwtSub("clerk_b");
+    const list = await worker.fetch(req("/api/social/notifications", { method: "GET", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    const items = ((await list.json()) as { notifications: { id: string; read_at: number | null }[] }).notifications;
+    expect(items).toHaveLength(1);
+    expect(items[0].read_at).toBeNull();
+    const notifId = items[0].id;
+
+    // Mark one read → unread drops to 0.
+    jwtSub("clerk_b");
+    await worker.fetch(req("/api/social/notifications/read", { method: "POST", headers: { ...authed(), "Content-Type": "application/json" }, body: JSON.stringify({ id: notifId }) }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    jwtSub("clerk_b");
+    const uc2 = await worker.fetch(req("/api/social/notifications/unread-count", { method: "GET", headers: authed() }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    expect(((await uc2.json()) as { count: number }).count).toBe(0);
+
+    // Mark-all on an empty unread set is a no-op success.
+    jwtSub("clerk_b");
+    const allRes = await worker.fetch(req("/api/social/notifications/read", { method: "POST", headers: { ...authed(), "Content-Type": "application/json" }, body: "{}" }), { ...BASE_ENV, DB: db }, {} as ExecutionContext);
+    expect(allRes.status).toBe(200);
+    void aId;
   });
 });

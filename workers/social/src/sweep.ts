@@ -39,6 +39,7 @@
 // stranding the cron).
 
 import { NOW, RATE_WINDOW } from "./core";
+import { pruneOldNotifications } from "./notifications";
 import { promoteShareWin } from "./shares";
 import {
   resolveTicket,
@@ -330,7 +331,23 @@ export async function settleSweep(
 }> {
   if (!env.LIVE_BASE) {
     console.warn("settleSweep: LIVE_BASE not set; sweep is a no-op");
+    // Housekeeping still runs on the cron even when settlement can't: the 90-day
+    // notification retention prune must not depend on the racing Worker being up.
+    try {
+      const pruned = await pruneOldNotifications(env.DB);
+      if (pruned > 0) console.log(`settleSweep: pruned ${pruned} notifications older than 90d`);
+    } catch (e) {
+      console.warn(`settleSweep: notification prune failed: ${(e as Error).message}`);
+    }
     return { scanned: 0, settled: 0, reSettled: 0, archived: 0, deferred: false };
+  }
+
+  // Notification retention prune (best-effort, never blocks settlement).
+  try {
+    const pruned = await pruneOldNotifications(env.DB);
+    if (pruned > 0) console.log(`settleSweep: pruned ${pruned} notifications older than 90d`);
+  } catch (e) {
+    console.warn(`settleSweep: notification prune failed: ${(e as Error).message}`);
   }
 
   // rate_limits TTL: rows are bucketed per RATE_WINDOW (60s). Prune every

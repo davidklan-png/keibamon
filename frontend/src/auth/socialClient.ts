@@ -469,6 +469,50 @@ export async function unCongratulate(
   return { ok: true, data: { count: body?.count ?? 0, congratulatedByMe: false } };
 }
 
+// ---- Friend Interactions Phase 4 — notification bell ---------------------
+
+export interface NotificationView {
+  id: string;
+  type: string;
+  actor_id: string | null;
+  actor_handle: string | null;
+  actor_display_name: string | null;
+  actor_avatar: string | null;
+  subject_type: string; // 'user' | 'share' | 'ticket' | 'comment' | 'friend_request'
+  subject_id: string;
+  created_at: number;
+  read_at: number | null;
+}
+
+/** GET /api/social/notifications — the bell list (newest-first, cap 50). */
+export async function getNotifications(token: string | null): Promise<SocialResult<NotificationView[]>> {
+  const r = await authedFetch(token, "/api/social/notifications", { method: "GET" });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { notifications?: NotificationView[] } | null;
+  return { ok: true, data: Array.isArray(body?.notifications) ? body!.notifications : [] };
+}
+
+/** GET /api/social/notifications/unread-count — the bell badge. */
+export async function getUnreadCount(token: string | null): Promise<SocialResult<{ count: number }>> {
+  const r = await authedFetch(token, "/api/social/notifications/unread-count", { method: "GET" });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await readJson(r.res)) as { count?: number } | null;
+  return { ok: true, data: { count: body?.count ?? 0 } };
+}
+
+/** POST /api/social/notifications/read — mark one ({id}) or all read. */
+export async function markNotificationsRead(token: string | null, id?: string): Promise<SocialResult<{ ok: true }>> {
+  const r = await authedFetch(token, "/api/social/notifications/read", {
+    method: "POST",
+    body: id ? JSON.stringify({ id }) : "{}",
+  });
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  return { ok: true, data: { ok: true } };
+}
+
 /** Phase 3: GET /api/social/races/:raceKey/friends — count + cap-8 avatars. */
 export async function getFriendsOnRace(
   token: string | null,
