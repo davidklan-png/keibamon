@@ -196,6 +196,20 @@ a {
   gap: 8px;
 }
 
+/* AppHeader (Social UX Fixes, Phase A): the ONE shared header, mounted once
+   in the App shell above the per-view body (it never unmounts on a tab
+   switch, so the bell's 60s poller runs exactly once per session).
+   Self-centers to the same 720px column as .app so the brand row aligns
+   with the screen content below; the inner .head supplies the flex row. */
+.app-header {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 14px 14px 0;
+}
+.app-header .head {
+  padding: 0 0 10px;
+}
+
 .head .avatar {
   width: 44px;
   height: 44px;
@@ -1421,7 +1435,12 @@ select:focus {
   bottom: 0;
   z-index: 50;
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* Social UX Fixes, Phase A audit: there are FOUR tabs
+     (Races / Tickets / Friends / Reference). This was repeat(3, 1fr) —
+     left over from the 3-destination era — so the 4th tab (Reference)
+     wrapped onto a second row. Fixed to 4 equal columns; the labels are
+     short enough (レース / マイ / 友だち / 用語) to fit a 390px viewport. */
+  grid-template-columns: repeat(4, 1fr);
   gap: 0;
   padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
   background: rgba(255, 255, 255, 0.96);

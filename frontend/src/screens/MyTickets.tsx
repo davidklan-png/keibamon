@@ -41,10 +41,8 @@ import {
   retractShare,
   type PublicProfile,
   type FriendsAvatar,
-  type NotificationView,
 } from "../auth/socialClient";
 import { useShareTicket } from "../auth/useShareTicket";
-import { NotificationBell } from "../components/NotificationBell";
 import {
   loadPending,
   pushPending,
@@ -86,8 +84,6 @@ import { HandlePromptModal, ReportModal } from "./mytickets/Modals";
 
 interface MyTicketsProps {
   snap: LiveSnapshot | null;
-  onClassic: () => void;
-  onToggleLang: () => void;
   /** Clerk user id; null only in transition states once MyTickets is rendered. */
   userId: string | null;
   /** Resolves a fresh Clerk JWT; null when signed out / Clerk unavailable. */
@@ -101,20 +97,15 @@ interface MyTicketsProps {
 // runs on sign-in (offline-first; postMe swallows its errors).
 interface MyTicketsHomeProps {
   snap: LiveSnapshot | null;
-  onClassic: () => void;
-  onToggleLang: () => void;
   /**
    * Local impression store (localStorage mirror), threaded from App so the
    * signed-out empty state can tease the user's locally-made marks without
    * re-reading localStorage itself.
    */
   impressions: ImpressionMap;
-  /** Friend Interactions Phase 4 — bell deep-link (My Tickets has no global .head,
-   *  so the bell mounts in a thin top bar here). */
-  onDeepLink: (n: NotificationView) => void;
 }
 
-export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions, onDeepLink }: MyTicketsHomeProps) {
+export function MyTicketsHome({ snap, impressions }: MyTicketsHomeProps) {
   const { isSignedIn, userId, ageVerified, getToken } = useAuth();
 
   useEffect(() => {
@@ -141,16 +132,7 @@ export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions, onDe
 
   return ageVerified ? (
     <main className="app">
-      <div className="mt-bell-bar">
-        <NotificationBell getToken={getToken} onDeepLink={onDeepLink} />
-      </div>
-      <MyTickets
-        snap={snap}
-        onClassic={onClassic}
-        onToggleLang={onToggleLang}
-        userId={userId}
-        getToken={getToken}
-      />
+      <MyTickets snap={snap} userId={userId} getToken={getToken} />
       <Footer />
     </main>
   ) : (
@@ -158,7 +140,7 @@ export function MyTicketsHome({ snap, onClassic, onToggleLang, impressions, onDe
   );
 }
 
-function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicketsProps) {
+function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
 
@@ -955,8 +937,6 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     ja,
     userId,
     getToken,
-    onClassic,
-    onToggleLang,
     feature,
     fallbackDate,
     races: (snap?.races || []).filter((race) => (race.runners || []).length > 0),

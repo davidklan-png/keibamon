@@ -18,9 +18,6 @@ export function FeedView({ ctx }: { ctx: MtCtx }) {
     t,
     tFmt,
     lang,
-    ja,
-    onClassic,
-    onToggleLang,
     friendsOnCard,
     openProfile,
     feature,
@@ -33,33 +30,11 @@ export function FeedView({ ctx }: { ctx: MtCtx }) {
   } = ctx;
   return (
     <>
-      <header className="mt-head">
-        <div className="mt-brand">競</div>
-        <div className="mt-brand-text">
-          <div className="mt-brand-name">{t("app.title")}</div>
-          <div className="mt-brand-eyebrow">KEIBAMON · 競馬モン</div>
-        </div>
-        {/* "Browse races" — promoted out of the new-bet header so the loop
-            between the race browser and My Tickets is closed in both
-            directions (no dead-end either way). */}
-        <button
-          className="lang-toggle mine-tab"
-          onClick={onClassic}
-          aria-label={t("mine.browseRaces")}
-        >
-          {t("mine.browseRaces")}
-        </button>
-        <button
-          className="lang-toggle"
-          onClick={onToggleLang}
-          aria-label="toggle language"
-          style={{ marginRight: 8 }}
-        >
-          {t("app.langToggle")}
-        </button>
-        <div className="mt-me">{ja ? "私" : "You"}</div>
-      </header>
-
+      {/* Social UX Fixes (Phase A): the brand + lang-toggle + "Browse races"
+          row that lived here in .mt-head is gone. The shared <AppHeader /> in
+          the App shell carries the brand + EN/JP toggle on every screen, and
+          the always-present <BottomTabBar /> (Races tab) replaces the old
+          "Browse races" button. This view is now just the feed body. */}
       <div className="mt-feed">
         {friendsOnCard.count > 0 && (
           <div className="mt-community">

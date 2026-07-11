@@ -40,9 +40,11 @@ test.describe("visual regression", () => {
     }, lang);
     await page.goto("/");
     // Race-first UX (ADR-0012): `/` lands on the Races (browse) view. MyTickets
-    // is now a top-level tab — click it before asserting the feed's header.
+    // is now a top-level tab — click it before asserting the feed. (Social UX
+    // Fixes Phase A: the old .mt-brand-name header row is gone — the shared
+    // <AppHeader /> carries the brand now; wait for the feed container.)
     await page.getByTestId("tab-mine").click();
-    await expect(page.locator(".mt-brand-name")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
     // Let the auto-settle / drift effects fire once.
     await page.waitForTimeout(600);
   }
@@ -109,6 +111,31 @@ test.describe("visual regression", () => {
     await expect(page.locator(".mt-empty")).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(600);
     return { socialHits };
+  }
+
+  /**
+   * Social UX Fixes (Phase A) — land on a non-default top-level tab for the
+   * header/footer consistency snapshots. Same lang + frozen-clock setup as the
+   * other landers; waits for each destination's anchor element so the capture
+   * is deterministic. (Browse is the landing — use landOnLegacyRace for it.)
+   */
+  async function landOnTab(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+    tab: "tab-friends" | "tab-reference",
+    anchor: string,
+  ): Promise<void> {
+    await page.addInitScript((l) => {
+      try { window.localStorage.setItem("keibamon.lang", l); } catch { /* ignore */ }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, lang);
+    await page.goto("/");
+    await page.getByTestId(tab).click();
+    await expect(page.locator(anchor)).toBeVisible({ timeout: 10_000 });
+    // Let each screen's mount effects (postMe / listFriends / feed) settle so
+    // the snapshot isn't mid-loading.
+    await page.waitForTimeout(600);
   }
 
   for (const lang of LANGS) {
@@ -295,6 +322,62 @@ test.describe("visual regression", () => {
       await expect(page.getByTestId("tab-mine")).toBeVisible();
       expect(socialHits).toBe(0);
       await expect(page).toHaveScreenshot(`signed-out-empty-marks.${lang}.png`);
+    });
+
+    // ---- Social UX Fixes (Phase A): header + bottom-tabbar per main screen ----
+    // The shared <AppHeader /> + <BottomTabBar /> are mounted ONCE in the App
+    // shell and are present on every screen, in one fixed layout. These region
+    // snapshots pin both so future drift — a re-added per-screen bell, a moved
+    // EN/JP toggle, a tab-order/badging change, a title regression — fails CI
+    // instead of reaching production. The header capture varies by screen
+    // (title); the tabbar capture varies by the active tab. EN + JA both.
+    //
+    // Each pair also carries a durable text assertion on the header's <h1>
+    // title so a formatter/i18n regression can't pass by pixel-matching a stale
+    // baseline (#14 pattern).
+    test(`app-header+footer browse (${lang})`, async ({ page }) => {
+      await landOnLegacyRace(page, lang);
+      await expect(page.locator(".app-header")).toBeVisible();
+      await expect(page.locator(".bottom-tabbar")).toBeVisible();
+      // Browse keeps the bilingual brand title (app.title + the 競馬モン glyph).
+      await expect(page.locator(".app-header h1")).toContainText(
+        lang === "en" ? "Keibamon" : "ケイバモン",
+      );
+      await expect(page.locator(".app-header")).toHaveScreenshot(`app-header.browse.${lang}.png`);
+      await expect(page.locator(".bottom-tabbar")).toHaveScreenshot(`bottom-tabbar.browse.${lang}.png`);
+    });
+
+    test(`app-header+footer mine (${lang})`, async ({ page }) => {
+      await landOnFeed(page, lang);
+      await expect(page.locator(".app-header")).toBeVisible();
+      await expect(page.locator(".bottom-tabbar")).toBeVisible();
+      await expect(page.locator(".app-header h1")).toContainText(
+        lang === "en" ? "Tickets" : "マイ",
+      );
+      await expect(page.locator(".app-header")).toHaveScreenshot(`app-header.mine.${lang}.png`);
+      await expect(page.locator(".bottom-tabbar")).toHaveScreenshot(`bottom-tabbar.mine.${lang}.png`);
+    });
+
+    test(`app-header+footer friends (${lang})`, async ({ page }) => {
+      await landOnTab(page, lang, "tab-friends", ".friends-screen");
+      await expect(page.locator(".app-header")).toBeVisible();
+      await expect(page.locator(".bottom-tabbar")).toBeVisible();
+      await expect(page.locator(".app-header h1")).toContainText(
+        lang === "en" ? "Friends" : "友だち",
+      );
+      await expect(page.locator(".app-header")).toHaveScreenshot(`app-header.friends.${lang}.png`);
+      await expect(page.locator(".bottom-tabbar")).toHaveScreenshot(`bottom-tabbar.friends.${lang}.png`);
+    });
+
+    test(`app-header+footer reference (${lang})`, async ({ page }) => {
+      await landOnTab(page, lang, "tab-reference", ".glossary-search");
+      await expect(page.locator(".app-header")).toBeVisible();
+      await expect(page.locator(".bottom-tabbar")).toBeVisible();
+      await expect(page.locator(".app-header h1")).toContainText(
+        lang === "en" ? "Reference" : "用語",
+      );
+      await expect(page.locator(".app-header")).toHaveScreenshot(`app-header.reference.${lang}.png`);
+      await expect(page.locator(".bottom-tabbar")).toHaveScreenshot(`bottom-tabbar.reference.${lang}.png`);
     });
   }
 

@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { UserButton } from "@clerk/clerk-react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useI18n } from "./i18n";
 import { winProbs, type Runner } from "./lib/fairvalue";
 import { recommend, recommendDiverse } from "./lib/recommender";
@@ -40,7 +39,7 @@ import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
 import { BottomTabBar } from "./components/BottomTabBar";
-import { NotificationBell } from "./components/NotificationBell";
+import { AppHeader } from "./components/AppHeader";
 import { RaceContextBar } from "./components/RaceContextBar";
 import type { NotificationView } from "./auth/socialClient";
 
@@ -49,11 +48,12 @@ type View = "browse" | "mine" | "friends" | "reference";
 
 function App() {
   const i18n = useI18n();
-  const { t, tFmt, lang, setLang } = i18n;
-  // Lift auth into App so the header's "My Tickets" tab can trigger Clerk's
-  // sign-in modal directly, and so placeTicket() can commit on the signed-in
-  // user without re-reading the context inside the handler.
-  const { isSignedIn, userId, getToken, openSignIn, clerkMounted } = useAuth();
+  const { t, tFmt } = i18n;
+  // Lift auth into App so placeTicket() can commit on the signed-in user
+  // without re-reading the context inside the handler, and so the signed-out
+  // CTA can open Clerk's sign-in modal. The shared <AppHeader /> reads its own
+  // auth slice via useAuth() — it does not need these passed in.
+  const { isSignedIn, userId, getToken, openSignIn } = useAuth();
 
   // Race-first UX: the race browser is the landing. "My Tickets" is a separate
   // top-level view toggled from the header (auth-gated). Session 3a collapsed
@@ -463,279 +463,203 @@ function App() {
     },
   ];
 
-  // ADR-0007: My Tickets is its own full-screen home (own header). "Browse
-  // races" (onClassic) returns here. AuthGate + AgeGate stay wrapped inside
-  // MyTicketsHome as defense-in-depth (harmless when already authed).
+  // ---- Social UX Fixes (Phase A): unified app shell ----
+  // AppHeader + BottomTabBar are mounted ONCE in this return; only `body`
+  // swaps per view. Because AppHeader never unmounts on a tab switch, there is
+  // exactly one NotificationBell — and therefore one 60s unread-count poller —
+  // for the whole session. The screens no longer render their own headers,
+  // bells, or lang-toggles; AppHeader owns all of that. Auth/age gating for a
+  // destination still lives inside its screen (e.g. MyTicketsHome).
+  let body: ReactNode;
   if (view === "mine") {
-    return (
-      <>
-        <MyTicketsHome
-          snap={snap}
-          onClassic={() => setView("browse")}
-          onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
-          impressions={impressions}
-          onDeepLink={(n) => setView(deepLinkNotif(n))}
-        />
-        <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
-      </>
-    );
-  }
+    body = <MyTicketsHome snap={snap} impressions={impressions} />;
+  } else if (view === "friends") {
+    body = <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} />;
+  } else if (view === "reference") {
+    body = <ReferenceScreen />;
+  } else {
+    body = (
+      <main className="app">
 
-  // Friend Interactions Phase 3 — Friends tab (feed + friends list + add friend
-  // + share detail). The ONLY social entry point alongside the two re-pointed
-  // surfaces; the solo flow stays social-free.
-  if (view === "friends") {
-    return (
-      <>
-        <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} onDeepLink={(n) => setView(deepLinkNotif(n))} />
-        <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
-      </>
-    );
-  }
+        {/* Session 5a (ADR-0017): persistent race-context bar — "what race am I
+            on and what's its status?" Visible on the Races destination whenever
+            the funnel is Quick (not research — the roundup carries its own
+            context) AND a race is applied (selectedRace or the manual sample
+            card). Fed from the FROZEN selectedRace + raceStatus, not the live
+            snap — the 45s snap rotation (refreshSnap replaces the snapshot,
+            race may rotate off / name may drift) would silently blank a snap-
+            re-lookup. Persists across BOTH steps (race → tickets). */}
+        {view === "browse" &&
+          funnel !== "research" &&
+          (selectedRace || raceLabel) && (
+            <RaceContextBar
+              race={selectedRace}
+              raceLabel={raceLabel}
+              raceStatus={raceStatus}
+            />
+          )}
 
-  // Reference destination (ADR-0015): glossary-only. The weekend roundup
-  // moved into the Races "Research" segment (RoundupPanel below) so the
-  // two-lane funnel converges on a single destination. Full-screen, non-
-  // auth-gated reference material. "Back to race builder" returns here.
-  if (view === "reference") {
-    return (
-      <>
-        <ReferenceScreen onBack={() => setView("browse")} getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
-        <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
-      </>
+        {/* Session 3b (ADR-0015): the race→tickets stepper hides in research mode —
+            Research renders RoundupPanel below, not the ticket-builder spine. The
+            lane segmented control still shows so the user can flip back to Quick. */}
+        {funnel !== "research" && (
+          <nav className="stepper" aria-label="steps">
+            {steps.map((s) => (
+              <button
+                key={s.id}
+                className={step === s.id ? "on" : ""}
+                disabled={!s.enabled}
+                aria-current={step === s.id ? "step" : undefined}
+                onClick={() => setStep(s.id)}
+              >
+                {s.label}
+              </button>
+            ))}
+          </nav>
+        )}
+
+        {/* Session 3b (ADR-0015): two-lane funnel rendered as an in-view
+            segmented control near the top of the Races view. Quick keeps you on
+            the live card ticket-builder; Research swaps in RoundupPanel inline —
+            the two lanes now converge on a single destination (Races), sharing
+            the App header + bottom tab bar + impression spine. The lane choice
+            persists via saveFunnel (the [funnel] effect). Shown on the race
+            picker step (and in research mode, so the user can flip back). */}
+        {step === "race" && (
+          <div
+            className="lane-segmented"
+            role="group"
+            aria-label={t("lane.pickLane")}
+          >
+            <button
+              type="button"
+              className={funnel === "quick" ? "on" : ""}
+              aria-pressed={funnel === "quick"}
+              onClick={() => {
+                setFunnel("quick");
+                setView("browse");
+                setStep("race");
+              }}
+            >
+              {t("lane.quick")}
+            </button>
+            <button
+              type="button"
+              className={funnel === "research" ? "on" : ""}
+              aria-pressed={funnel === "research"}
+              onClick={() => {
+                setFunnel("research");
+                setView("browse");
+                setStep("race");
+              }}
+            >
+              {t("lane.research")}
+            </button>
+          </div>
+        )}
+
+        {/* ADR-0011 Phase 2: first-launch intro card. Shown only when the user
+            hasn't picked a lane yet AND is still on the race picker (no race in
+            flight). One short paragraph per lane, single-disclaimer posture.
+            Dismissed on first selection (the segmented control sets `funnel`). */}
+        {funnel === null && step === "race" && (
+          <section className="section lane-intro">
+            <h2>{t("lane.introTitle")}</h2>
+            <div className="lane-introw-cols">
+              <div className="lane-introw-col">
+                <strong>{t("lane.quick")}</strong>
+                <p className="hint">{t("lane.quickHint")}</p>
+              </div>
+              <div className="lane-introw-col">
+                <strong>{t("lane.research")}</strong>
+                <p className="hint">{t("lane.researchHint")}</p>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Session 3b (ADR-0015): Research lane renders RoundupPanel inline —
+            shares the App header + bottom tab bar + impression spine with the
+            live-card builder. Marks made in the roundup drill-down land on the
+            same store as marks made on the Quick ticket-builder. */}
+        {funnel === "research" && step === "race" && (
+          <RoundupPanel
+            impressions={impressions}
+            onSetImpressions={setImpressions}
+            oddsSnapshotAt={
+              snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+            }
+          />
+        )}
+
+        {funnel !== "research" && step === "race" && (
+          <RaceScreen
+            runners={runners}
+            raceLabel={raceLabel}
+            snap={snap}
+            snapLoading={snapLoading}
+            snapError={snapError}
+            selectedRaceDate={selectedRaceDate}
+            selectedRaceKey={selectedRaceKey}
+            onReload={() => loadLive(false)}
+            onSeedManual={() => seedManual()}
+            onApplyRace={applyRace}
+            onStandard={standardTickets}
+            raceStatus={raceStatus}
+            raceId={raceId}
+            impressions={impressions}
+            // Snapshot heartbeat — stamped into each mark so a future reader
+            // can tell whether the mark was made against the live odds or a
+            // stale snapshot. Falls back to updated_at when the producer hasn't
+            // set published_at.
+            oddsSnapshotAt={
+              snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
+            }
+            onSetImpressions={setImpressions}
+            unitStake={style.unit}
+            onSaveTicket={placeTicket}
+            onShareTicket={shareTicket}
+          />
+        )}
+
+        {funnel !== "research" && step === "tickets" && (
+          <TicketsScreen
+            tickets={tickets}
+            onRemix={goToTickets}
+            onReset={resetToStandard}
+            style={style}
+            onStyleChange={setStyle}
+            onPlace={placeTicket}
+            placeLabel={isSignedIn ? t("tickets.placeCta") : t("tickets.placeSignIn")}
+            onShare={shareTicket}
+            shareLabel={t("share.share")}
+            toast={toast}
+            runners={runners}
+            raceId={raceId}
+            impressions={impressions}
+          />
+        )}
+
+        {shareNode}
+        {shareToast && (
+          <div className="kbm-toast" role="status">
+            {shareToast.kind === "shared"
+              ? tFmt("share.sharedToast", { n: shareToast.n })
+              : t("share.shareFailed")}
+          </div>
+        )}
+
+        <Footer />
+      </main>
     );
   }
 
   return (
-    <main className="app">
-      <header className="head">
-        <img
-          className="avatar"
-          src="/keibamon.png"
-          width={44}
-          height={44}
-          alt="Keibamon"
-        />
-        <div>
-          <p className="eyebrow">keibamon · 競馬モン</p>
-          <h1>
-            {t("app.title")} <span className="ja">競馬モン</span>
-          </h1>
-        </div>
-        {/* Session 1 UX refactor: the top row holds only brand, language
-            toggle, and ONE account slot. Destinations (Races / My Tickets /
-            Reference) moved to the persistent <BottomTabBar />; the two-lane
-            funnel moved to an in-view segmented control on the Races view. */}
-        <div className="head-actions">
-          {isSignedIn && (
-            <NotificationBell getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
-          )}
-          <button
-            className="lang-toggle"
-            onClick={() => setLang(lang === "ja" ? "en" : "ja")}
-            aria-label="toggle language"
-          >
-            {t("app.langToggle")}
-          </button>
-          {/* Single account slot. Signed-out → one "Sign in" affordance that
-              opens Clerk's sign-in modal. Signed-in → Clerk's hosted
-              <UserButton /> (avatar + menu). The UserButton is gated on BOTH
-              isSignedIn and clerkMounted because the Playwright bypass branch
-              fakes a session WITHOUT mounting <ClerkProvider>, and
-              <UserButton /> throws without that ancestor. */}
-          {isSignedIn && clerkMounted ? (
-            <UserButton
-              appearance={{
-                elements: {
-                  avatarBox: "kbm-userbtn-avatar",
-                  userButtonTrigger: "kbm-userbtn",
-                },
-              }}
-              afterSignOutUrl="/"
-            />
-          ) : (
-            <button
-              className="lang-toggle account-signin"
-              onClick={() => openSignIn()}
-              aria-label={t("account.signIn")}
-            >
-              {t("account.signIn")}
-            </button>
-          )}
-        </div>
-      </header>
-
-      {/* Session 5a (ADR-0017): persistent race-context bar — "what race am I
-          on and what's its status?" Visible on the Races destination whenever
-          the funnel is Quick (not research — the roundup carries its own
-          context) AND a race is applied (selectedRace or the manual sample
-          card). Fed from the FROZEN selectedRace + raceStatus, not the live
-          snap — the 45s snap rotation (refreshSnap replaces the snapshot,
-          race may rotate off / name may drift) would silently blank a snap-
-          re-lookup. Persists across BOTH steps (race → tickets). */}
-      {view === "browse" &&
-        funnel !== "research" &&
-        (selectedRace || raceLabel) && (
-          <RaceContextBar
-            race={selectedRace}
-            raceLabel={raceLabel}
-            raceStatus={raceStatus}
-          />
-        )}
-
-      {/* Session 3b (ADR-0015): the race→tickets stepper hides in research mode —
-          Research renders RoundupPanel below, not the ticket-builder spine. The
-          lane segmented control still shows so the user can flip back to Quick. */}
-      {funnel !== "research" && (
-        <nav className="stepper" aria-label="steps">
-          {steps.map((s) => (
-            <button
-              key={s.id}
-              className={step === s.id ? "on" : ""}
-              disabled={!s.enabled}
-              aria-current={step === s.id ? "step" : undefined}
-              onClick={() => setStep(s.id)}
-            >
-              {s.label}
-            </button>
-          ))}
-        </nav>
-      )}
-
-      {/* Session 3b (ADR-0015): two-lane funnel rendered as an in-view
-          segmented control near the top of the Races view. Quick keeps you on
-          the live card ticket-builder; Research swaps in RoundupPanel inline —
-          the two lanes now converge on a single destination (Races), sharing
-          the App header + bottom tab bar + impression spine. The lane choice
-          persists via saveFunnel (the [funnel] effect). Shown on the race
-          picker step (and in research mode, so the user can flip back). */}
-      {step === "race" && (
-        <div
-          className="lane-segmented"
-          role="group"
-          aria-label={t("lane.pickLane")}
-        >
-          <button
-            type="button"
-            className={funnel === "quick" ? "on" : ""}
-            aria-pressed={funnel === "quick"}
-            onClick={() => {
-              setFunnel("quick");
-              setView("browse");
-              setStep("race");
-            }}
-          >
-            {t("lane.quick")}
-          </button>
-          <button
-            type="button"
-            className={funnel === "research" ? "on" : ""}
-            aria-pressed={funnel === "research"}
-            onClick={() => {
-              setFunnel("research");
-              setView("browse");
-              setStep("race");
-            }}
-          >
-            {t("lane.research")}
-          </button>
-        </div>
-      )}
-
-      {/* ADR-0011 Phase 2: first-launch intro card. Shown only when the user
-          hasn't picked a lane yet AND is still on the race picker (no race in
-          flight). One short paragraph per lane, single-disclaimer posture.
-          Dismissed on first selection (the segmented control sets `funnel`). */}
-      {funnel === null && step === "race" && (
-        <section className="section lane-intro">
-          <h2>{t("lane.introTitle")}</h2>
-          <div className="lane-introw-cols">
-            <div className="lane-introw-col">
-              <strong>{t("lane.quick")}</strong>
-              <p className="hint">{t("lane.quickHint")}</p>
-            </div>
-            <div className="lane-introw-col">
-              <strong>{t("lane.research")}</strong>
-              <p className="hint">{t("lane.researchHint")}</p>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* Session 3b (ADR-0015): Research lane renders RoundupPanel inline —
-          shares the App header + bottom tab bar + impression spine with the
-          live-card builder. Marks made in the roundup drill-down land on the
-          same store as marks made on the Quick ticket-builder. */}
-      {funnel === "research" && step === "race" && (
-        <RoundupPanel
-          impressions={impressions}
-          onSetImpressions={setImpressions}
-          oddsSnapshotAt={
-            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
-          }
-        />
-      )}
-
-      {funnel !== "research" && step === "race" && (
-        <RaceScreen
-          runners={runners}
-          raceLabel={raceLabel}
-          snap={snap}
-          snapLoading={snapLoading}
-          snapError={snapError}
-          selectedRaceDate={selectedRaceDate}
-          selectedRaceKey={selectedRaceKey}
-          onReload={() => loadLive(false)}
-          onSeedManual={() => seedManual()}
-          onApplyRace={applyRace}
-          onStandard={standardTickets}
-          raceStatus={raceStatus}
-          raceId={raceId}
-          impressions={impressions}
-          // Snapshot heartbeat — stamped into each mark so a future reader
-          // can tell whether the mark was made against the live odds or a
-          // stale snapshot. Falls back to updated_at when the producer hasn't
-          // set published_at.
-          oddsSnapshotAt={
-            snap?.meta?.published_at ?? snap?.meta?.updated_at ?? null
-          }
-          onSetImpressions={setImpressions}
-          unitStake={style.unit}
-          onSaveTicket={placeTicket}
-          onShareTicket={shareTicket}
-        />
-      )}
-
-      {funnel !== "research" && step === "tickets" && (
-        <TicketsScreen
-          tickets={tickets}
-          onRemix={goToTickets}
-          onReset={resetToStandard}
-          style={style}
-          onStyleChange={setStyle}
-          onPlace={placeTicket}
-          placeLabel={isSignedIn ? t("tickets.placeCta") : t("tickets.placeSignIn")}
-          onShare={shareTicket}
-          shareLabel={t("share.share")}
-          toast={toast}
-          runners={runners}
-          raceId={raceId}
-          impressions={impressions}
-        />
-      )}
-
-      {shareNode}
-      {shareToast && (
-        <div className="kbm-toast" role="status">
-          {shareToast.kind === "shared"
-            ? tFmt("share.sharedToast", { n: shareToast.n })
-            : t("share.shareFailed")}
-        </div>
-      )}
-
-      <Footer />
+    <>
+      <AppHeader view={view} getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
+      {body}
       <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
-    </main>
+    </>
   );
 }
 

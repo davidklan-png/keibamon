@@ -32,8 +32,6 @@ export interface MtCtx {
   userId: string | null;
   /** Clerk JWT getter — for the DetailView CommentThread (share-scoped). */
   getToken: () => Promise<string | null>;
-  onClassic: () => void;
-  onToggleLang: () => void;
 
   // live data
   feature: Feature;

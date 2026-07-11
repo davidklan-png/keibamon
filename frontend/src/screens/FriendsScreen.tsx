@@ -11,7 +11,6 @@ import { avatarColor } from "../lib/mytickets-view";
 import { yen } from "../lib/format";
 import { ShareCard } from "../components/ShareCard";
 import { CommentThread } from "../components/CommentThread";
-import { NotificationBell } from "../components/NotificationBell";
 import {
   acceptFriendRequest,
   declineFriendRequest,
@@ -24,7 +23,6 @@ import {
   searchUsers,
   type FeedItem,
   type FriendSummary,
-  type NotificationView,
 } from "../auth/socialClient";
 
 type Sub = "feed" | "list" | "add" | "detail";
@@ -32,10 +30,9 @@ type Sub = "feed" | "list" | "add" | "detail";
 export interface FriendsScreenProps {
   getToken: () => Promise<string | null>;
   onPendingChange: (n: number) => void;
-  onDeepLink: (n: NotificationView) => void;
 }
 
-export function FriendsScreen({ getToken, onPendingChange, onDeepLink }: FriendsScreenProps) {
+export function FriendsScreen({ getToken, onPendingChange }: FriendsScreenProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
   const [sub, setSub] = useState<Sub>("feed");
@@ -97,14 +94,6 @@ export function FriendsScreen({ getToken, onPendingChange, onDeepLink }: Friends
 
   return (
     <main className="app friends-screen">
-      <header className="head">
-        <div>
-          <p className="eyebrow">keibamon · 友だち</p>
-          <h1>{t("tabs.friends")}</h1>
-        </div>
-        <NotificationBell getToken={getToken} onDeepLink={onDeepLink} />
-      </header>
-
       {sub !== "detail" && (
         <nav className="friends-seg" aria-label="friends panes">
           <button className={sub === "feed" ? "on" : ""} onClick={() => setSub("feed")}>
