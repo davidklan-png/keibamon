@@ -67,15 +67,6 @@ export interface MtCtx {
   profileLoading: boolean;
   selectedProfileHandle: string | null;
 
-  // handle prompt state
-  handlePromptOpen: boolean;
-  setHandlePromptOpen: (open: boolean) => void;
-  handleDraft: string;
-  setHandleDraft: (v: string) => void;
-  handleError: string | null;
-  setHandleError: (v: string | null) => void;
-  handleSetting: boolean;
-
   // report modal state
   reportTarget: ReportTarget;
   setReportTarget: (v: ReportTarget) => void;
@@ -107,7 +98,6 @@ export interface MtCtx {
   commitManual: (ticket: Ticket, existingId?: string, race?: LiveRace) => void;
   doBlock: (targetUserId: string) => void;
   sendReport: () => void;
-  saveHandle: () => Promise<void>;
   doShare: () => Promise<void>;
   // Friend Interactions Phase 2 — share-later / retract on the owner's detail
   // view (the owner engagement surface; structured for Phase 3 congratulate +

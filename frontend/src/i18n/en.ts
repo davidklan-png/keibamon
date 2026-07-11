@@ -324,6 +324,16 @@ export const en = {
     setHandleHint: "This is how other players see you. You can change it later.",
     setHandlePlaceholder: "e.g. alyssa",
     setHandleCta: "Save handle",
+    // Social UX Fixes (Phase B) — first-login handle onboarding (HandleSetup).
+    setHandleRules: "3–20 characters · letters a–z · numbers · underscore",
+    setHandleAvailable: "Available",
+    setHandleTaken: "That handle is taken",
+    setHandleChecking: "Checking…",
+    setHandleErrShort: "Use at least 3 characters",
+    setHandleErrLong: "Use at most 20 characters",
+    setHandleErrCharset: "Only a–z, 0–9, and _ allowed",
+    setHandleContinue: "Continue",
+    setHandleFailed: "Couldn't save — try again",
     // ADR-0007 Phase 2 — server-first persistence + auto-settle strings.
     estimate: "estimate",
     empty: "No tickets yet — pick New bet to commit one.",

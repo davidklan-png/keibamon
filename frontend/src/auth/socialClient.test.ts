@@ -8,6 +8,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // route (the only GET that signed-out users can hit).
 
 import { congratulate, getProfile, requestFriend } from "./socialClient";
+import {
+  checkHandleAvailable,
+  normalizeHandle,
+  suggestHandle,
+  validateHandle,
+} from "./socialClient";
 
 const ORIG_FETCH = globalThis.fetch;
 
@@ -70,6 +76,61 @@ describe("socialClient Phase 3 helpers", () => {
   it("getProfile WITH a token sends Authorization", async () => {
     const { calls } = mockFetch();
     await getProfile("tok", "alyssa");
+    const headers = calls[0].init.headers as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok");
+  });
+});
+
+// Social UX Fixes (Phase B) — @handle rules + availability probe.
+describe("handle helpers (Phase B)", () => {
+  beforeEach(() => {
+    vi.stubEnv("VITE_SOCIAL_API_BASE", "");
+  });
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("normalizeHandle lowercases + trims", () => {
+    expect(normalizeHandle("  Alyssa  ")).toBe("alyssa");
+    expect(normalizeHandle("Bob")).toBe("bob");
+  });
+
+  it("validateHandle accepts 3–20 char [a-z0-9_] (after lowercasing)", () => {
+    expect(validateHandle("alyssa")).toBeNull();
+    expect(validateHandle("abc")).toBeNull();
+    expect(validateHandle("a1_b2")).toBeNull();
+    expect(validateHandle("a".repeat(20))).toBeNull();
+    // Uppercase is normalized away (handles are stored lowercase; HandleSetup
+    // lowercases on input), so a mixed-case candidate is valid post-normalize.
+    expect(validateHandle("Alyssa")).toBeNull();
+  });
+
+  it("validateHandle flags short / long / charset violations", () => {
+    expect(validateHandle("ab")).toBe("short"); // < 3
+    expect(validateHandle("")).toBe("short");
+    expect(validateHandle("a".repeat(21))).toBe("long"); // > 20
+    expect(validateHandle("aly!")).toBe("charset"); // invalid char
+    expect(validateHandle("ハンドル")).toBe("charset"); // non-latin
+  });
+
+  it("suggestHandle derives a valid handle from a display name, else email prefix", () => {
+    expect(suggestHandle("Alyssa Tanaka", null)).toBe("alyssatanaka");
+    expect(suggestHandle(null, "john.doe@example.com")).toBe("johndoe");
+    // CJK name with no latin → fall back to email prefix.
+    expect(suggestHandle("李 明", "liming@example.com")).toBe("liming");
+  });
+
+  it("suggestHandle returns null when the seed is too short / all-invalid", () => {
+    expect(suggestHandle("李", null)).toBeNull(); // single non-latin char
+    expect(suggestHandle(null, null)).toBeNull();
+  });
+
+  it("checkHandleAvailable targets the availability probe with the encoded handle", async () => {
+    const { calls } = mockFetch();
+    const r = await checkHandleAvailable("tok", "Alyssa!");
+    expect(r.ok).toBe(true);
+    expect(calls[0].url).toBe("/api/social/handle-available?h=Alyssa!");
+    expect(calls[0].init.method).toBe("GET");
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer tok");
   });

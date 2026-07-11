@@ -27,7 +27,7 @@ import {
 import { raceHasLiveOdds, snapshotRace } from "./lib/mytickets-view";
 import { newTicketId } from "./lib/ticketId";
 import { useAuth } from "./auth/AuthProvider";
-import { postTicket } from "./auth/socialClient";
+import { postMe, postTicket, suggestHandle } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
 import { useShareTicket } from "./auth/useShareTicket";
 import { useImpressionsSync } from "./auth/impressionsSync";
@@ -38,6 +38,7 @@ import { FriendsScreen } from "./screens/FriendsScreen";
 import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
+import { HandleSetup } from "./components/HandleSetup";
 import { BottomTabBar } from "./components/BottomTabBar";
 import { AppHeader } from "./components/AppHeader";
 import { RaceContextBar } from "./components/RaceContextBar";
@@ -53,7 +54,7 @@ function App() {
   // without re-reading the context inside the handler, and so the signed-out
   // CTA can open Clerk's sign-in modal. The shared <AppHeader /> reads its own
   // auth slice via useAuth() — it does not need these passed in.
-  const { isSignedIn, userId, getToken, openSignIn } = useAuth();
+  const { isSignedIn, userId, getToken, openSignIn, displayName, email } = useAuth();
 
   // Race-first UX: the race browser is the landing. "My Tickets" is a separate
   // top-level view toggled from the header (auth-gated). Session 3a collapsed
@@ -64,6 +65,11 @@ function App() {
   // Friend Interactions Phase 3: pending friend-request count for the Friends
   // tab badge (the Phase 4 bell later takes over notification duty).
   const [pendingFriends, setPendingFriends] = useState(0);
+  // Social UX Fixes (Phase B): the signed-in viewer's @handle, used to gate
+  // first-login onboarding. Tri-state: undefined = profile still loading
+  // (render the shell normally); null = loaded and NO handle → blocking
+  // HandleSetup; string = handle set → app is unlocked.
+  const [viewerHandle, setViewerHandle] = useState<string | null | undefined>(undefined);
 
   /** Friend Interactions Phase 4 — map a notification to the screen it deep-links
    *  to. Most land on Friends; a congratulation lands the owner on My Tickets. */
@@ -240,6 +246,30 @@ function App() {
     isSignedIn,
     getToken,
   });
+
+  // Social UX Fixes (Phase B) — read the signed-in viewer's handle to drive the
+  // onboarding gate. postMe with no body upserts + returns the profile row
+  // (Phase 1 contract). On sign-out the handle resets to "loading" so a re-
+  // sign-in re-checks. Best-effort: a fetch failure leaves viewerHandle
+  // undefined (shell renders, gate stays closed — never blocks on a network
+  // blip).
+  useEffect(() => {
+    if (!isSignedIn) {
+      setViewerHandle(undefined);
+      return;
+    }
+    let cancelled = false;
+    void (async () => {
+      const token = await getToken();
+      if (cancelled) return;
+      const me = await postMe(token);
+      if (cancelled) return;
+      setViewerHandle(me?.handle ?? null);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isSignedIn, getToken]);
 
   // ADR-0011 Phase 2: persist the funnel lane choice. Same best-effort shell
   // as the impression store.
@@ -462,6 +492,24 @@ function App() {
       enabled: runners.length >= 2,
     },
   ];
+
+  // ---- Social UX Fixes (Phase B): handle-onboarding gate ----
+  // BLOCKING: a signed-in user with no @handle never reaches the app. Renders
+  // the shared <HandleSetup /> full-screen (no AppHeader / tabbar — it is a
+  // pre-app step, the one intentional exception to the Phase A shell). The
+  // gate closes the moment HandleSetup.onSuccess reports a saved handle.
+  // viewerHandle === undefined (profile still loading) falls through to the
+  // normal shell so a slow /me never blanks the screen for a user who DOES
+  // have a handle.
+  if (isSignedIn && viewerHandle === null) {
+    return (
+      <HandleSetup
+        getToken={getToken}
+        seed={suggestHandle(displayName, email)}
+        onSuccess={(h) => setViewerHandle(h)}
+      />
+    );
+  }
 
   // ---- Social UX Fixes (Phase A): unified app shell ----
   // AppHeader + BottomTabBar are mounted ONCE in this return; only `body`

@@ -379,6 +379,45 @@ test.describe("visual regression", () => {
       await expect(page.locator(".app-header")).toHaveScreenshot(`app-header.reference.${lang}.png`);
       await expect(page.locator(".bottom-tabbar")).toHaveScreenshot(`bottom-tabbar.reference.${lang}.png`);
     });
+
+    // ---- Social UX Fixes (Phase B): handle-onboarding gate (HandleSetup) ----
+    // Override /api/social/me to report NO handle so the App shell's blocking
+    // gate renders the shared HandleSetup step (the bypass user normally HAS a
+    // handle, which keeps the gate closed in every other test). Pins the
+    // one-field/one-button onboarding screen + the seed prefill.
+    test(`handle-setup gate (${lang})`, async ({ page }) => {
+      await installApiMocks(page);
+      // No handle → gate opens.
+      await page.unroute("**/api/social/me");
+      await page.route("**/api/social/me", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ id: "playwright-fake-user", handle: null }),
+        }),
+      );
+      // Availability probe → free, so the seed reads as available.
+      await page.route("**/api/social/handle-available?h=*", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ available: true }),
+        }),
+      );
+      await page.addInitScript((l) => {
+        try { window.localStorage.setItem("keibamon.lang", l); } catch { /* ignore */ }
+        const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+        Date.now = () => FROZEN;
+      }, lang);
+      await page.goto("/");
+      await expect(page.locator(".handle-setup-card")).toBeVisible({ timeout: 10_000 });
+      // Seed prefilled from the bypass user's displayName "Playwright".
+      await expect(page.locator(".handle-setup-input")).toHaveValue("playwright");
+      await expect(page.locator(".handle-setup-rules")).toBeVisible();
+      // Let the debounced availability check settle before the snapshot.
+      await page.waitForTimeout(500);
+      await expect(page.locator(".handle-setup-card")).toHaveScreenshot(`handle-setup.${lang}.png`);
+    });
   }
 
   // ---- ADR-0020: focused Japanese EXPANDED-Research snapshot ----

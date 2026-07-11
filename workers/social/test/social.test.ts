@@ -1899,6 +1899,150 @@ describe("social Worker — Phase 3 (social graph)", () => {
     expect(await r2.json()).toMatchObject({ error: "handle_taken" });
   });
 
+  // ---- Social UX Fixes (Phase B): tightened handle rules + availability ----
+  // Rules: 3–20 chars, [a-z0-9_], case-insensitive unique, STORED LOWERCASE.
+  it("Phase B handle write rejects <3 chars → 400 bad_handle", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "ab" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "bad_handle" });
+  });
+
+  it("Phase B handle write rejects >20 chars → 400 bad_handle", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "a".repeat(21) }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "bad_handle" });
+  });
+
+  it("Phase B handle write rejects invalid charset → 400 bad_handle", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "aly!" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: "bad_handle" });
+  });
+
+  it("Phase B handle write STORES LOWERCASE (uppercase input → 200, stored lowercased)", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "Alyssa" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ handle: "alyssa" });
+  });
+
+  it("Phase B GET /handle-available reports a taken handle as unavailable", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "alyssa" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_b");
+    const res = await worker.fetch(
+      req("/api/social/handle-available?h=alyssa", { headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ available: false });
+  });
+
+  it("Phase B GET /handle-available reports a free handle as available (case-insensitive query)", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_b");
+    const res = await worker.fetch(
+      req("/api/social/handle-available?h=FreeHandle", { headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ available: true });
+  });
+
+  it("Phase B GET /handle-available marks an invalid format as {available:false, reason:'invalid'} (never 400)", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    const res = await worker.fetch(
+      req("/api/social/handle-available?h=ab", { headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ available: false, reason: "invalid" });
+  });
+
+  it("Phase B GET /handle-available treats the caller's OWN handle as available (rename-safe)", async () => {
+    const { db } = makeFakeD1();
+    jwtSub("clerk_a");
+    await worker.fetch(
+      req("/api/social/me", {
+        method: "POST",
+        headers: { ...authed(), "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: "alyssa" }),
+      }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    jwtSub("clerk_a"); // same user re-checks their own handle
+    const res = await worker.fetch(
+      req("/api/social/handle-available?h=alyssa", { headers: authed() }),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ available: true });
+  });
+
+  it("Phase B GET /handle-available requires auth → 401", async () => {
+    const { db } = makeFakeD1();
+    const res = await worker.fetch(
+      req("/api/social/handle-available?h=alyssa"),
+      { ...BASE_ENV, DB: db },
+      {} as ExecutionContext,
+    );
+    expect(res.status).toBe(401);
+  });
+
   it("POST /tickets persists the Stage 4 derived flat columns", async () => {
     jwtSub("user_abc");
     const { db, calls } = makeFakeD1();

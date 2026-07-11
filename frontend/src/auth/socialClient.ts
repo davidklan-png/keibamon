@@ -129,6 +129,65 @@ export async function postMeTyped(
   return { ok: true, data: (await r.res.json()) as SocialProfile };
 }
 
+// ---------------------------------------------------------------------------
+// Social UX Fixes (Phase B) — @handle rules + availability probe.
+//
+// One source of truth for the handle format so the client (HandleSetup) and the
+// server (handleMe / handleHandleAvailable) can't drift. Rules: 3–20 chars,
+// [a-z0-9_], case-insensitive unique, stored lowercase.
+// ---------------------------------------------------------------------------
+export const HANDLE_MIN = 3;
+export const HANDLE_MAX = 20;
+export const HANDLE_RE = /^[a-z0-9_]+$/;
+
+/** Lowercase + trim — handles are stored lowercase. */
+export function normalizeHandle(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
+/** Validate a candidate. null = valid; otherwise the rule it violated. */
+export function validateHandle(
+  handle: string,
+): null | "short" | "long" | "charset" {
+  const h = normalizeHandle(handle);
+  if (h.length < HANDLE_MIN) return "short";
+  if (h.length > HANDLE_MAX) return "long";
+  if (!HANDLE_RE.test(h)) return "charset";
+  return null;
+}
+
+/**
+ * Derive a suggested handle from a display name (preferred) or the local-part
+ * of an email. Strips to [a-z0-9_] + lowercases. Returns a VALID handle, or
+ * null if neither seed produces one (the field just starts empty). If the
+ * name yields nothing usable (e.g. all-CJK), falls back to the email prefix.
+ */
+export function suggestHandle(displayName: string | null, email: string | null): string | null {
+  const clean = (raw: string): string | null => {
+    const c = raw.toLowerCase().replace(/[^a-z0-9_]/g, "").slice(0, HANDLE_MAX);
+    return c.length >= HANDLE_MIN ? c : null;
+  };
+  const name = (displayName && displayName.trim()) || "";
+  const emailPrefix = email ? (email.split("@")[0] ?? "") : "";
+  return clean(name) ?? clean(emailPrefix);
+}
+
+/** GET /api/social/handle-available?h= — debounced availability probe. */
+export async function checkHandleAvailable(
+  token: string | null,
+  handle: string,
+): Promise<SocialResult<{ available: boolean; reason?: string }>> {
+  const r = await authedFetch(
+    token,
+    `/api/social/handle-available?h=${encodeURIComponent(handle)}`,
+    { method: "GET" },
+  );
+  if (!r.ok) return { ok: false, err: r.err };
+  if (!r.res.ok) return { ok: false, err: { kind: "http", status: r.res.status } };
+  const body = (await r.res.json()) as { available?: boolean; reason?: string } | null;
+  return { ok: true, data: { available: !!body?.available, reason: body?.reason } };
+}
+
 /** Phase 4: POST /api/social/block/:userId — idempotent; severs friend edges both ways. */
 export async function block(
   token: string | null,

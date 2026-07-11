@@ -29,7 +29,6 @@ import { MyTicketsEmpty } from "./MyTicketsEmpty";
 import type { ImpressionMap } from "../lib/impressions";
 import {
   postMe,
-  postMeTyped,
   listTickets,
   postTicket,
   patchTicket,
@@ -72,7 +71,7 @@ import { NewView } from "./mytickets/NewView";
 import { ManualView } from "./mytickets/ManualView";
 import { DetailView } from "./mytickets/DetailView";
 import { ProfileView } from "./mytickets/ProfileView";
-import { HandlePromptModal, ReportModal } from "./mytickets/Modals";
+import { ReportModal } from "./mytickets/Modals";
 
 // ============================================================================
 // ADR-0007 — "My Tickets" surface (Phase 0)
@@ -152,16 +151,10 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
   const [profileLoading, setProfileLoading] = useState(false);
   const [friendsOnCard, setFriendsOnCard] = useState<{ count: number; avatars: FriendsAvatar[] }>({ count: 0, avatars: [] });
   const [friendsOnRace, setFriendsOnRace] = useState<Record<string, { count: number; avatars: FriendsAvatar[] }>>({});
-  const [handlePromptOpen, setHandlePromptOpen] = useState(false);
-  const [handleDraft, setHandleDraft] = useState("");
-  const [handleError, setHandleError] = useState<string | null>(null);
-  const [handleSetting, setHandleSetting] = useState(false);
   // Phase 4 — report modal state. `reportTarget` is null when modal is closed.
   const [reportTarget, setReportTarget] = useState<{ type: "ticket" | "user"; id: string } | null>(null);
   const [reportReason, setReportReason] = useState("");
   const [reportSending, setReportSending] = useState(false);
-  // The signed-in viewer's handle (null = hasn't set one yet → prompt on social action).
-  const [viewerHandle, setViewerHandle] = useState<string | null>(null);
   // Ref to the detail-card root so the share button can raster it.
   const detailCardRef = useRef<HTMLDivElement | null>(null);
   // Initial state is the localStorage CACHE so the feed renders instantly on
@@ -407,23 +400,6 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [snap, userId]);
 
-  // ---- Phase 3 — read the viewer's handle on sign-in. If null, the first
-  // social action will trip the set-handle prompt.
-  useEffect(() => {
-    if (!userId) {
-      setViewerHandle(null);
-      return;
-    }
-    void (async () => {
-      const token = await getToken();
-      if (!token) return;
-      // postMe with no body upserts + returns the row (Phase 1 contract).
-      const p = await postMe(token);
-      if (p?.handle) setViewerHandle(p.handle);
-    })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [userId]);
-
   // ---- AUTO-SETTLE (Phase 2): driven by the /api/live poll, not a button.
   // For each OPEN ticket, find its race; when that race reports
   // status:'result', resolve win/miss via lib/settle and PATCH the ticket
@@ -607,33 +583,6 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     setSelectedProfileHandle(handle);
     setView("profile");
     void loadProfile(handle);
-  }
-
-  /**
-   * Phase 3 — save a handle for the signed-in viewer. On 409 (taken) surface
-   * inline; on success close the prompt and proceed with whatever social
-   * action triggered it.
-   */
-  async function saveHandle() {
-    const h = handleDraft.trim();
-    if (!h || !/^[a-zA-Z0-9_]+$/.test(h)) {
-      setHandleError(t("mine.setHandlePlaceholder"));
-      return;
-    }
-    setHandleSetting(true);
-    setHandleError(null);
-    const token = await getToken();
-    const r = await postMeTyped(token, { handle: h });
-    setHandleSetting(false);
-    if (r.ok) {
-      setViewerHandle(r.data.handle ?? null);
-      setHandlePromptOpen(false);
-      setHandleDraft("");
-    } else if (r.err.kind === "http" && r.err.status === 409) {
-      setHandleError(t("mine.setHandlePlaceholder") + " — taken");
-    } else {
-      setHandleError(t("mine.shareFailed"));
-    }
   }
 
   /** Phase 3 — export the detail card as a PNG (share or download). */
@@ -962,13 +911,6 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     profile,
     profileLoading,
     selectedProfileHandle,
-    handlePromptOpen,
-    setHandlePromptOpen,
-    handleDraft,
-    setHandleDraft,
-    handleError,
-    setHandleError,
-    handleSetting,
     reportTarget,
     setReportTarget,
     reportReason,
@@ -987,7 +929,6 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     commitManual,
     doBlock,
     sendReport,
-    saveHandle,
     doShare,
     requestShare,
     detailShare,
@@ -1003,7 +944,6 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
       {view === "manual" && <ManualView ctx={ctx} />}
       {view === "detail" && <DetailView ctx={ctx} />}
       {view === "profile" && <ProfileView ctx={ctx} />}
-      <HandlePromptModal ctx={ctx} />
       <ReportModal ctx={ctx} />
       {shareNode}
       {toast && <div className="mt-toast">{toast}</div>}

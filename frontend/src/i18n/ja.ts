@@ -312,6 +312,16 @@ export const ja = {
     setHandleHint: "他のプレイヤーに見つかる名前です。あとで変えられます。",
     setHandlePlaceholder: "例: alyssa",
     setHandleCta: "ハンドルを保存",
+    // Social UX Fixes (Phase B) — 初回ログインのハンドル設定 (HandleSetup)。
+    setHandleRules: "3〜20文字 · 半角英字 a〜z · 数字 · アンダースコア",
+    setHandleAvailable: "使えます",
+    setHandleTaken: "このハンドルは使われています",
+    setHandleChecking: "確認中…",
+    setHandleErrShort: "3文字以上で入力してください",
+    setHandleErrLong: "20文字以内で入力してください",
+    setHandleErrCharset: "a〜z・0〜9・_ のみ使えます",
+    setHandleContinue: "次へ",
+    setHandleFailed: "保存できませんでした — もう一度お試しください",
     // ADR-0007 Phase 2 — サーバ優先の永続化 + 自動精算。
     estimate: "見積もり",
     empty: "まだ馬券がありません。「新規」から登録できます。",

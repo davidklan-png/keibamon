@@ -81,6 +81,9 @@ const FRIEND_REQUEST_PATH = /^\/api\/social\/friends\/request\/([^/]+)$/;
 const FRIENDS_LIST_PATH = "/api/social/friends";
 const FRIEND_PATH = /^\/api\/social\/friends\/([^/]+)$/;
 const USER_SEARCH_PATH = "/api/social/users/search";
+// Social UX Fixes (Phase B) — handle-availability probe for the onboarding
+// typeahead. Exact path (must precede the parameterized /users/:handle).
+const HANDLE_AVAILABLE_PATH = "/api/social/handle-available";
 // Friend Interactions Phase 2 — shared tickets. retract before /:id; the bare
 // /shares path only matches POST (create-or-widen).
 const SHARES_PATH = "/api/social/shares";
@@ -219,6 +222,12 @@ export async function router(request: Request, env: Env, cors: Record<string, st
     return handleUserSearch(request, env, cors, url);
   }
 
+  // /api/social/handle-available — Phase B onboarding availability probe.
+  // Exact path; registered here before /users/:handle for safety.
+  if (pathname === HANDLE_AVAILABLE_PATH && request.method === "GET") {
+    return handleHandleAvailable(request, env, cors, url);
+  }
+
   // /api/social/users/:handle — Phase 3 public profile.
   const profileMatch = PROFILE_PATH.exec(pathname);
   if (profileMatch) {
@@ -257,13 +266,18 @@ async function handleMe(
         avatar?: unknown;
       };
       if (typeof body.age_verified === "number") patch.age_verified = body.age_verified;
-      // Phase 3: handle/dn/avatar. Empty string clears; null also accepted.
+      // Phase 3 / Social UX Fixes (Phase B): handle rules are 3–20 chars,
+      // [a-z0-9_], case-insensitive unique, STORED LOWERCASE. Lowercase the
+      // input first (so "Bob" becomes "bob"), then validate length + charset.
+      // null clears the handle; an empty/under-length/over-length/invalid
+      // string is rejected. The DB enforces CI uniqueness via
+      // idx_users_handle_ci_unique (migration 0010); this is the format gate.
       if (typeof body.handle === "string") {
-        const h = body.handle.trim();
-        if (h.length === 0 || h.length > 32) {
+        const h = body.handle.trim().toLowerCase();
+        if (h.length < 3 || h.length > 20) {
           return json({ error: "bad_handle" }, 400, cors);
         }
-        if (!/^[a-zA-Z0-9_]+$/.test(h)) {
+        if (!/^[a-z0-9_]+$/.test(h)) {
           return json({ error: "bad_handle" }, 400, cors);
         }
         patch.handle = h;
@@ -799,6 +813,34 @@ async function handleUserSearch(
 
   const results = await searchUsers(env.DB, url.searchParams.get("q") ?? "", caller.id);
   return json({ results }, 200, cors);
+}
+
+/**
+ * GET /api/social/handle-available?h=<candidate> — Social UX Fixes (Phase B).
+ * Debounced availability probe for the handle-onboarding typeahead. Auth
+ * required (the user is signed in during onboarding). Applies the SAME rules
+ * as handleMe (lowercase, 3–20, [a-z0-9_]) and reports whether the candidate
+ * is free. The caller's OWN handle (if any) counts as available so a rename
+ * to the current handle doesn't read as taken. Never 400s on a bad format —
+ * returns {available:false, reason:"invalid"} so the client can tell "invalid
+ * format" apart from "taken".
+ */
+async function handleHandleAvailable(
+  request: Request,
+  env: Env,
+  cors: Record<string, string>,
+  url: URL,
+): Promise<Response> {
+  if (request.method !== "GET") return json({ error: "method_not_allowed" }, 405, cors);
+  const verified = await verifyToken(env, request.headers.get("Authorization"));
+  if (!verified) return json({ error: "unauthorized" }, 401, cors);
+  const h = (url.searchParams.get("h") ?? "").trim().toLowerCase();
+  if (h.length < 3 || h.length > 20 || !/^[a-z0-9_]+$/.test(h)) {
+    return json({ available: false, reason: "invalid" }, 200, cors);
+  }
+  const existing = await userByHandle(env.DB, h);
+  const available = !existing || existing.clerk_user_id === verified.sub;
+  return json({ available }, 200, cors);
 }
 
 // ---------------------------------------------------------------------------

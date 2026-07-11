@@ -1,51 +1,13 @@
-// ====================== HANDLE PROMPT (Phase 3) + REPORT MODAL (Phase 4) ====
-// Extracted from MyTickets' inner renderHandlePrompt / renderReportModal
-// (2026-07-08 split — behavior preserving; state comes through MtCtx).
+// ====================== REPORT MODAL (Phase 4) =============================
+// Extracted from MyTickets' inner renderReportModal (2026-07-08 split —
+// behavior preserving; state comes through MtCtx).
+//
+// Social UX Fixes (Phase B): the HandlePromptModal that used to live here was
+// removed — it was vestigial (rendered but never opened) and is superseded by
+// the single shared <HandleSetup /> onboarding step mounted by the App shell.
+// Exactly one handle-setup UI exists in the codebase now.
 import React from "react";
 import type { MtCtx } from "./ctx";
-
-export function HandlePromptModal({ ctx }: { ctx: MtCtx }) {
-  const {
-    t,
-    handlePromptOpen,
-    setHandlePromptOpen,
-    handleDraft,
-    setHandleDraft,
-    handleError,
-    setHandleError,
-    handleSetting,
-    saveHandle,
-  } = ctx;
-  if (!handlePromptOpen) return null;
-  return (
-    <div className="mt-modal-overlay" onClick={() => setHandlePromptOpen(false)}>
-      <div className="mt-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="mt-modal-title">{t("mine.setHandleTitle")}</div>
-        <p className="mt-modal-hint">{t("mine.setHandleHint")}</p>
-        <input
-          className="mt-modal-input"
-          type="text"
-          value={handleDraft}
-          placeholder={t("mine.setHandlePlaceholder")}
-          onChange={(e) => {
-            setHandleDraft(e.target.value);
-            setHandleError(null);
-          }}
-          autoFocus
-          maxLength={32}
-        />
-        {handleError && <div className="mt-modal-error">{handleError}</div>}
-        <button
-          className="mt-modal-cta"
-          onClick={() => void saveHandle()}
-          disabled={handleSetting || !handleDraft.trim()}
-        >
-          {handleSetting ? "…" : t("mine.setHandleCta")}
-        </button>
-      </div>
-    </div>
-  );
-}
 
 export function ReportModal({ ctx }: { ctx: MtCtx }) {
   const {

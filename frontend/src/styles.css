@@ -210,6 +210,99 @@ a {
   padding: 0 0 10px;
 }
 
+/* HandleSetup — first-login @handle onboarding (Social UX Fixes, Phase B).
+   A focused, blocking, one-field/one-button card. Not skippable. */
+.handle-setup {
+  min-height: 100dvh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.handle-setup-card {
+  width: 100%;
+  max-width: 380px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 10px;
+}
+.handle-setup-card .avatar {
+  width: 56px;
+  height: 56px;
+  border-radius: 16px;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  object-fit: cover;
+  margin-bottom: 4px;
+}
+.handle-setup-title {
+  margin: 0;
+  font-size: 22px;
+}
+.handle-setup-hint {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.handle-setup-field {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--panel);
+  overflow: hidden;
+}
+.handle-setup-field:focus-within {
+  border-color: var(--turf);
+}
+.handle-setup-at {
+  padding: 0 4px 0 14px;
+  color: var(--muted);
+  font: 800 16px/1 ui-monospace, monospace;
+}
+.handle-setup-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  padding: 14px 14px 14px 4px;
+  font: 800 16px/1 ui-monospace, monospace;
+  letter-spacing: 0.02em;
+  color: var(--ink);
+}
+.handle-setup-input:focus {
+  outline: none;
+}
+.handle-setup-status {
+  min-height: 18px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.handle-setup-ok {
+  color: var(--turf-deep);
+}
+.handle-setup-err {
+  color: #c0392b;
+}
+.handle-setup-checking {
+  color: var(--muted);
+}
+.handle-setup-rules {
+  margin: 2px 0 12px;
+  color: var(--muted);
+  font: 700 11px/1.4 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+}
+.handle-setup-cta {
+  width: 100%;
+  min-height: 48px;
+  font-size: 15px;
+}
+
 .head .avatar {
   width: 44px;
   height: 44px;

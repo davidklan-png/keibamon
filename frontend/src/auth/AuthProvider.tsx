@@ -41,6 +41,17 @@ export interface AuthState {
    * ClerkProvider mounted).
    */
   clerkMounted: boolean;
+  /**
+   * Clerk display name (firstName / username / fullName) — the seed for a
+   * suggested @handle during first-login onboarding (Phase B). null signed-out
+   * or when Clerk has no name for the user.
+   */
+  displayName: string | null;
+  /**
+   * Clerk primary email address — the fallback seed for a suggested @handle
+   * (the local-part before @). null signed-out / unavailable.
+   */
+  email: string | null;
 }
 
 const NOOP_VALUE: AuthState = {
@@ -48,6 +59,8 @@ const NOOP_VALUE: AuthState = {
   userId: null,
   ageVerified: false,
   clerkMounted: false,
+  displayName: null,
+  email: null,
   getToken: async () => null,
   openSignIn: () => {
     if (import.meta.env.DEV) {
@@ -85,6 +98,12 @@ const PLAYWRIGHT_VALUE: AuthState = {
   // unmounted. isSignedIn=true && clerkMounted=false is the exact combo that
   // prevents <UserButton /> from throwing inside the visual-regression build.
   clerkMounted: false,
+  // Phase B: a fake seed so the handle-onboarding visual path (if exercised)
+  // has something to suggest; the bypass user already HAS a handle ("playwright"
+  // via the /api/social/me fixture), so the gate stays closed in the default
+  // visual suite.
+  displayName: "Playwright",
+  email: "playwright@example.com",
   getToken: async () => "playwright-fake-token",
   openSignIn: () => {
     /* no-op in bypass mode */
@@ -117,6 +136,8 @@ const PLAYWRIGHT_SIGNED_OUT_VALUE: AuthState = {
   userId: null,
   ageVerified: false,
   clerkMounted: false,
+  displayName: null,
+  email: null,
   getToken: async () => null,
   openSignIn: () => {
     /* no-op in bypass mode */
@@ -181,6 +202,12 @@ function ClerkAuthInner({ children }: { children: React.ReactNode }) {
     userId,
     ageVerified,
     clerkMounted: true,
+    // Phase B: surface a name/email seed for the handle-onboarding suggestion.
+    // Prefer firstName, then username, then fullName; email is the local-part
+    // fallback. All null when Clerk has nothing (the onboarding field just
+    // starts empty — the user types their own).
+    displayName: user?.firstName || user?.username || user?.fullName || null,
+    email: user?.primaryEmailAddress?.emailAddress ?? null,
     getToken: async () => {
       try {
         return (await getToken()) ?? null;
