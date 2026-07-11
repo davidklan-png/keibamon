@@ -3,9 +3,10 @@
 // preserving; all state/actions come through MtCtx, including detailCardRef
 // which the share exporter rasters).
 import React, { useEffect, useState } from "react";
-import { MT_MOOD_COLOR, avatarColor, mtSep } from "../../lib/mytickets-view";
+import { MT_MOOD_COLOR, avatarColor } from "../../lib/mytickets-view";
 import { yen } from "../../lib/format";
 import { CommentThread } from "../../components/CommentThread";
+import { TicketLines } from "../../components/TicketLines";
 import { getShare, type FeedItem } from "../../auth/socialClient";
 import type { MtCtx } from "./ctx";
 
@@ -73,7 +74,6 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
     setDismissedWin(true);
   }
   const open = tk.state === "open";
-  const sep = mtSep(tk.ticket.type);
   const ribbon =
     open
       ? "linear-gradient(135deg,#0E7A47,#16AC66)"
@@ -183,13 +183,10 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
               </span>
             </div>
 
-            <div className="mt-chips-lg">
-              {tk.ticket.lines.map((ln, j) => (
-                <span key={j} className="mt-chip-lg">
-                  {ln.combo.join(sep)}
-                </span>
-              ))}
-            </div>
+            {/* Ticket-detail UX — structure-aware body (Box / Formation / Wheel
+                tiles, or capped chips for legacy). showPoints is off here: the
+                pay panel below already shows cost + combo count. */}
+            <TicketLines ticket={tk.ticket} unitStake={tk.unit} showPoints={false} />
 
             <div className="mt-pay-panel">
               <div>

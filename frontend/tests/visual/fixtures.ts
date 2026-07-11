@@ -132,6 +132,127 @@ export const FIXTURE_TICKETS: CommittedTicket[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Ticket-detail UX — structured-ticket fixtures for the per-mode visual
+// snapshots (box / formation / wheel). Lines are GENERATED from the payload so
+// counts + cost are genuine; prob math is irrelevant to the renderer (it reads
+// structure + payload + lines.length + cost). All three reuse the open G1 race.
+// ---------------------------------------------------------------------------
+const STRUCT_TS = Date.parse("2026-06-21T13:00:00Z");
+type FixtureLine = CommittedTicket["ticket"]["lines"][number];
+function structLine(combo: string[]): FixtureLine {
+  return { combo, prob: 0, fairOdds: 0, payout: 0, tag: "blend" };
+}
+/** k-permutations of arr (ordered box + wheel expansions). */
+function permute(arr: string[], k: number): string[][] {
+  const out: string[][] = [];
+  const rec = (cur: string[], rest: string[]): void => {
+    if (cur.length === k) {
+      out.push(cur);
+      return;
+    }
+    for (let i = 0; i < rest.length; i++) {
+      rec([...cur, rest[i]], [...rest.slice(0, i), ...rest.slice(i + 1)]);
+    }
+  };
+  rec([], arr);
+  return out;
+}
+/** Cartesian product of disjoint position sets (formation expansion — no
+ *  repeat-filter needed when the sets are disjoint). */
+function formationExpansion(positions: string[][]): string[][] {
+  return positions.reduce<string[][]>(
+    (acc, set) => acc.flatMap((prefix) => set.map((u) => [...prefix, u])),
+    [[]],
+  );
+}
+
+const STRUCT_UNIT = 100;
+const BOX_SET = ["1", "2", "3", "4"]; // P(4,3) = 24 trifecta perms
+const FORM_POSITIONS = [["1", "2"], ["3", "4"], ["5", "6"]]; // 2×2×2 = 8
+const WHEEL_AXIS = ["1"];
+const WHEEL_OPP = ["2", "3", "4"]; // P(3,2) = 6 partners over 2着/3着
+
+function structuredTicket(p: {
+  id: string;
+  serial: string;
+  type: CommittedTicket["ticket"]["type"];
+  lines: string[][];
+  structure: "box" | "formation" | "wheel";
+  payload: NonNullable<CommittedTicket["ticket"]["structurePayload"]>;
+  core: string[];
+  mood: CommittedTicket["mood"];
+  payoutBase: number;
+}): CommittedTicket {
+  return {
+    id: p.id,
+    serial: p.serial,
+    ticket: {
+      id: "rec-" + p.id,
+      type: p.type,
+      lines: p.lines.map(structLine),
+      hitProb: 0,
+      cost: p.lines.length * STRUCT_UNIT,
+      expectedReturn: 0,
+      avgPayout: p.payoutBase,
+      bestCaseReturn: p.payoutBase,
+      core: p.core,
+      tag: "blend",
+      unit: STRUCT_UNIT,
+      variance: "high",
+      rationaleKeys: [],
+      structure: p.structure,
+      structurePayload: p.payload,
+      unitStake: STRUCT_UNIT,
+    },
+    unit: STRUCT_UNIT,
+    mood: p.mood,
+    state: "open",
+    payoutBase: p.payoutBase,
+    race: RACE_SNAPSHOT,
+    owner: "you",
+    claps: 0,
+    createdAt: STRUCT_TS,
+  };
+}
+
+/** Box / Formation / Wheel trifectas for the ticket-detail-UX mode snapshots. */
+export const STRUCTURED_TICKETS: CommittedTicket[] = [
+  structuredTicket({
+    id: "kb-box-1",
+    serial: "KB-BOX01",
+    type: "trifecta",
+    lines: permute(BOX_SET, 3),
+    structure: "box",
+    payload: { set: BOX_SET },
+    core: BOX_SET,
+    mood: "spicier",
+    payoutBase: 18600,
+  }),
+  structuredTicket({
+    id: "kb-form-1",
+    serial: "KB-FORM1",
+    type: "trifecta",
+    lines: formationExpansion(FORM_POSITIONS),
+    structure: "formation",
+    payload: { positions: FORM_POSITIONS },
+    core: ["1", "2", "3", "4", "5", "6"],
+    mood: "balanced",
+    payoutBase: 14200,
+  }),
+  structuredTicket({
+    id: "kb-wheel-1",
+    serial: "KB-WHL01",
+    type: "trifecta",
+    lines: permute(WHEEL_OPP, 2).map((tail) => [...WHEEL_AXIS, ...tail]),
+    structure: "wheel",
+    payload: { axis: WHEEL_AXIS, opponents: WHEEL_OPP, position: 1 },
+    core: ["1", "2", "3", "4"],
+    mood: "safer",
+    payoutBase: 9800,
+  }),
+];
+
 /**
  * ADR-0020 — a PUBLISHED weekend edition for the focused Japanese expanded-
  * Research visual snapshot. Realistic Japanese horse names + live odds + gates
@@ -184,8 +305,15 @@ export const FIXTURE_WEEKEND_PUBLISHED = {
   ],
 };
 
-/** Registers page.route() handlers that intercept /api/live + social Worker calls. */
-export async function installApiMocks(page: import("@playwright/test").Page): Promise<void> {
+/**
+ * Registers page.route() handlers that intercept /api/live + social Worker
+ * calls. Pass `tickets` to swap the feed/detail ticket set (used by the
+ * ticket-detail-ux structured-mode snapshots); defaults to FIXTURE_TICKETS.
+ */
+export async function installApiMocks(
+  page: import("@playwright/test").Page,
+  tickets: CommittedTicket[] = FIXTURE_TICKETS,
+): Promise<void> {
   // /api/live → deterministic open race
   // /api/live → deterministic open race
   await page.route("**/api/live", (route) =>
@@ -217,7 +345,7 @@ export async function installApiMocks(page: import("@playwright/test").Page): Pr
       return route.fulfill({
         status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ tickets: FIXTURE_TICKETS }),
+        body: JSON.stringify({ tickets }),
       });
     }
     if (url.includes("/me")) {

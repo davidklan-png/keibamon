@@ -621,6 +621,13 @@ export const ja = {
     perPoint: "1点",
     share: "共有",
   },
+  // TicketLines — 構造対応の馬券本体レンダラー (ticket-detail UX)。
+  ticketLines: {
+    points: "{n}点 × {unit} = {cost}",
+    allCombos: "{n}点すべて",
+    partners: "相手",
+    multi: "軸複数",
+  },
   formation: {
     title: "着順ボックス",
   },

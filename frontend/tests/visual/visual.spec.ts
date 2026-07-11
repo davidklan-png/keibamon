@@ -13,7 +13,7 @@
 // Language:         set via `keibamon.lang` localStorage before each visit.
 // ============================================================================
 import { test, expect } from "@playwright/test";
-import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED } from "./fixtures";
+import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS } from "./fixtures";
 
 const LANGS = ["en", "ja"] as const;
 
@@ -522,4 +522,65 @@ test.describe("visual regression", () => {
     await page.waitForTimeout(300);
     await expect(page).toHaveScreenshot("research-expanded-ja.png");
   });
+});
+
+// ============================================================================
+// Ticket-detail UX — structured-mode snapshots (box / formation / wheel).
+// The renderer's new track-style CSS (tiles, position columns, axis+partners)
+// is pinned here in the real detail card. A dedicated ticket set
+// (STRUCTURED_TICKETS) is installed in beforeEach; the feed lists them in array
+// order [box, formation, wheel], so each test opens the nth card and verifies
+// the structure badge before screenshotting. Points line is OFF on the detail
+// card (the pay panel carries cost + combo count) — it's covered by the
+// TicketLines unit tests with showPoints on.
+// ============================================================================
+test.describe("ticket-detail structured modes", () => {
+  test.beforeEach(async ({ page }) => {
+    await installApiMocks(page, STRUCTURED_TICKETS);
+  });
+
+  async function openStructuredDetail(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+    cardIndex: number,
+    badgeSelector: string,
+  ): Promise<void> {
+    await page.addInitScript((l) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+      } catch {
+        /* ignore */
+      }
+      Date.now = () => Date.parse("2026-06-21T13:00:00+09:00");
+    }, lang);
+    await page.goto("/");
+    await page.getByTestId("tab-mine").click();
+    await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(600);
+    await page.locator(".mt-card").nth(cardIndex).click();
+    await expect(page.locator(".mt-detail")).toBeVisible();
+    // Confirm we opened the intended mode before pinning the screenshot.
+    await expect(page.locator(badgeSelector)).toBeVisible();
+    // Wait for web fonts (the mono tiles) to load before capturing — the
+    // formation card carries the most tiles and is the most font-sensitive.
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(400);
+  }
+
+  for (const lang of LANGS) {
+    test(`ticket-detail box trifecta (${lang})`, async ({ page }) => {
+      await openStructuredDetail(page, lang, 0, ".tl-badge-box");
+      await expect(page).toHaveScreenshot(`ticket-detail-box.${lang}.png`);
+    });
+
+    test(`ticket-detail formation (${lang})`, async ({ page }) => {
+      await openStructuredDetail(page, lang, 1, ".tl-badge-form");
+      await expect(page).toHaveScreenshot(`ticket-detail-formation.${lang}.png`);
+    });
+
+    test(`ticket-detail wheel (${lang})`, async ({ page }) => {
+      await openStructuredDetail(page, lang, 2, ".tl-badge-wheel");
+      await expect(page).toHaveScreenshot(`ticket-detail-wheel.${lang}.png`);
+    });
+  }
 });

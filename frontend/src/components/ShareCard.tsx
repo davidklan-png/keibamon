@@ -11,6 +11,7 @@ import { yen } from "../lib/format";
 import { avatarColor } from "../lib/mytickets-view";
 import { MT_MOOD_COLOR } from "../lib/mytickets-view";
 import { congratulate as apiCongratulate, unCongratulate, type FeedItem } from "../auth/socialClient";
+import { TicketLines } from "./TicketLines";
 
 export interface ShareCardProps {
   item: FeedItem;
@@ -27,7 +28,6 @@ export function ShareCard({ item, getToken, onOpen }: ShareCardProps) {
 
   const tk = item.ticket;
   const ownerLabel = item.owner.handle ? `@${item.owner.handle}` : item.owner.display_name ?? "";
-  const sep = tk && (tk.ticket.type === "exacta" || tk.ticket.type === "trifecta") ? " > " : " - ";
 
   async function toggleCongrats() {
     if (busy) return;
@@ -75,12 +75,10 @@ export function ShareCard({ item, getToken, onOpen }: ShareCardProps) {
             {ja ? tk.race.nameJa : tk.race.nameEn}
             {tk.race.grade ? ` · ${tk.race.grade}` : ""}
           </div>
-          <div className="sc-chips">
-            {tk.ticket.lines.slice(0, 6).map((ln, i) => (
-              <span key={i} className="sc-chip">{ln.combo.join(sep)}</span>
-            ))}
-            {tk.ticket.lines.length > 6 && <span className="sc-chip">+{tk.ticket.lines.length - 6}</span>}
-          </div>
+          {/* Ticket-detail UX — structure-aware body (compact): Box/Formation/
+              Wheel tiles, or capped chips + "+N" for legacy. Old share
+              snapshots without `structure` take the legacy path untouched. */}
+          <TicketLines ticket={tk.ticket} unitStake={tk.unit} compact />
           <div className="sc-foot">
             <span className="sc-cost">{t("mine.cost")} {yen(tk.ticket.cost)}</span>
             {item.is_win && item.multiplier != null && (

@@ -658,6 +658,13 @@ export const en = {
     perPoint: "Per point",
     share: "Share",
   },
+  // TicketLines — structure-aware ticket-body renderer (ticket-detail UX).
+  ticketLines: {
+    points: "{n} combos × {unit} = {cost}",
+    allCombos: "All {n} combos",
+    partners: "Partners",
+    multi: "multi-axis",
+  },
   formation: {
     title: "Ordered boxes",
   },
