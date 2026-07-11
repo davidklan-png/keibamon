@@ -33,17 +33,16 @@ import {
   listTickets,
   postTicket,
   patchTicket,
-  follow as socialFollow,
-  unfollow as socialUnfollow,
-  cheer as socialCheer,
-  uncheer as socialUncheer,
   block as socialBlock,
   report as socialReport,
   getProfile,
   getFriendsOnCard,
+  getMyShareForTicket,
+  retractShare,
   type PublicProfile,
   type FriendsAvatar,
 } from "../auth/socialClient";
+import { useShareTicket } from "../auth/useShareTicket";
 import {
   loadPending,
   pushPending,
@@ -543,107 +542,11 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     window.setTimeout(() => setToast(""), 1900);
   }
 
-  /**
-   * Phase 3 — cheer toggle. Optimistic flip; reconcile to server-authoritative
-   * count on response. Second tap while already cheering = uncheer.
-   *
-   * Won-only + self-cheer are enforced at the server; a 409 surfaces a friendly
-   * message and rolls back the optimistic update.
-   */
-  function cheer(id: string) {
-    const tk = tickets.find((x) => x.id === id);
-    if (!tk) return;
-    // Gate: prompt for handle on first social action.
-    if (!viewerHandle) {
-      setHandlePromptOpen(true);
-      return;
-    }
-    const wasCheering = !!tk.cheeredByMe;
-    const next = tickets.map((x) =>
-      x.id === id
-        ? {
-            ...x,
-            cheeredByMe: !wasCheering,
-            cheers: Math.max(0, (x.cheers ?? x.claps ?? 0) + (wasCheering ? -1 : 1)),
-          }
-        : x,
-    );
-    setTickets(next);
-    mirrorToCache(next);
-    if (!wasCheering) {
-      setBurstId(id);
-      window.setTimeout(() => setBurstId(null), 1100);
-    }
-    if (!userId) return;
-    void (async () => {
-      const token = await getToken();
-      if (!token) return;
-      const r = !wasCheering
-        ? await socialCheer(token, id)
-        : await socialUncheer(token, id);
-      if (r.ok) {
-        const settled = tickets.map((x) =>
-          x.id === id
-            ? { ...x, cheers: r.data.count, cheeredByMe: r.data.cheeredByMe }
-            : x,
-        );
-        setTickets(settled);
-        mirrorToCache(settled);
-      } else if (r.err.kind === "http" && r.err.status === 409) {
-        // likely self-cheer or won-only; re-fetch to learn which.
-        flash(t("mine.cannotCheerOwn"));
-        // Roll back.
-        const rolled = tickets.map((x) =>
-          x.id === id ? { ...x, cheeredByMe: wasCheering } : x,
-        );
-        setTickets(rolled);
-        mirrorToCache(rolled);
-      } else if (r.err.kind === "http" && r.err.status === 429) {
-        flash(t("mine.rateLimited"));
-      }
-    })();
-  }
-
-  /** Phase 3 — follow/unfollow a user by id. Used by ProfileView. */
-  function doFollow(targetUserId: string, targetHandle: string | null) {
-    if (!viewerHandle && targetHandle) {
-      // Following doesn't strictly need the caller's handle, but the prompt
-      // gives a better UX (the followee sees a real handle in their follower list).
-      setHandlePromptOpen(true);
-      return;
-    }
-    // Optimistic: we'll flip from the current profile.is_following.
-    setProfile((p) =>
-      p ? { ...p, is_following: true, follower_count: p.follower_count + 1 } : p,
-    );
-    void (async () => {
-      const token = await getToken();
-      if (!token) return;
-      const r = await socialFollow(token, targetUserId);
-      if (!r.ok && r.err.kind === "http" && r.err.status === 403) {
-        flash(t("profile.blockedSelfFollow"));
-      }
-      // Reconcile by re-reading the profile (server-authoritative).
-      if (targetHandle) void loadProfile(targetHandle, true);
-    })();
-  }
-  function doUnfollow(targetUserId: string, targetHandle: string | null) {
-    setProfile((p) =>
-      p
-        ? {
-            ...p,
-            is_following: false,
-            follower_count: Math.max(0, p.follower_count - 1),
-          }
-        : p,
-    );
-    void (async () => {
-      const token = await getToken();
-      if (!token) return;
-      await socialUnfollow(token, targetUserId);
-      if (targetHandle) void loadProfile(targetHandle, true);
-    })();
-  }
+  // Friend Interactions Phase 3: the legacy cheer toggle was removed with the
+  // cheer system (congratulate replaces it, on win shares in the Friends tab).
+  // Friend Interactions Phase 2: legacy doFollow/doUnfollow removed with the
+  // follow system. Profile no longer shows follower/following counts or a Follow
+  // button; an Add-friend affordance lands in Phase 3 (Friends tab).
 
   /**
    * Phase 4 — block a user. Immediate (no confirm — block is reversible via
@@ -828,9 +731,70 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       })();
     }
   }
+  // Friend Interactions Phase 2 — share-later/retract. The hook owns the
+  // FriendPicker modal; detailShare is the open ticket's active-share state.
+  const { requestShare, shareNode, shareToast, clearShareToast } = useShareTicket(getToken);
+  const [detailShare, setDetailShare] = useState<{ shared: boolean; id?: string; audience_mode?: string } | null>(null);
+  useEffect(() => {
+    if (!shareToast) return;
+    flash(
+      shareToast.kind === "shared"
+        ? tFmt("share.sharedToast", { n: shareToast.n })
+        : t("share.shareFailed"),
+    );
+    clearShareToast();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shareToast]);
+
   function openDetail(id: string) {
     setDetailId(id);
     setView("detail");
+    setDetailShare(null);
+    // Fetch the owner's active share so the detail view can show Share vs Retract.
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      const r = await getMyShareForTicket(token, id);
+      if (r.ok) setDetailShare(r.data);
+    })();
+  }
+
+  /** Retract the open detail ticket's share. Silent per spec; comments hidden. */
+  function retractDetail() {
+    const s = detailShare;
+    if (!s?.shared || !s.id) return;
+    const sid = s.id;
+    void (async () => {
+      const token = await getToken();
+      if (!token) return;
+      await retractShare(token, sid);
+      setDetailShare({ shared: false });
+      flash(t("share.retractedToast"));
+    })();
+  }
+
+  /**
+   * Friend Interactions Phase 2 — Share the currently-selected New-bet option.
+   * Builds the same CommittedTicket as commit(), then opens the FriendPicker;
+   * save-if-needed + publish happens on confirm. Share is deliberate (picker).
+   */
+  function shareSelected() {
+    const opt = options[selIdx];
+    if (!opt || !feature) return;
+    const tk: CommittedTicket = {
+      id: newTicketId(),
+      serial: "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase(),
+      ticket: opt.ticket,
+      unit,
+      mood: opt.mood,
+      state: "open",
+      payoutBase: opt.ticket.avgPayout,
+      race: snapshotRace(feature, fallbackDate),
+      owner: "you",
+      claps: 0,
+      createdAt: Date.now(),
+    };
+    requestShare(tk);
   }
 
   const burstStyle = (left: number, bx: string, fontSize?: number) =>
@@ -957,6 +921,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     lang,
     ja,
     userId,
+    getToken,
     onClassic,
     onToggleLang,
     feature,
@@ -1004,16 +969,17 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
     runnerRaceName,
     openDetail,
     openProfile,
-    cheer,
     settle,
     commit,
     commitManual,
-    doFollow,
-    doUnfollow,
     doBlock,
     sendReport,
     saveHandle,
     doShare,
+    requestShare,
+    detailShare,
+    retractDetail,
+    shareSelected,
   };
 
   return (
@@ -1025,6 +991,7 @@ function MyTickets({ snap, onClassic, onToggleLang, userId, getToken }: MyTicket
       {view === "profile" && <ProfileView ctx={ctx} />}
       <HandlePromptModal ctx={ctx} />
       <ReportModal ctx={ctx} />
+      {shareNode}
       {toast && <div className="mt-toast">{toast}</div>}
     </div>
   );

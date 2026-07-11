@@ -1902,7 +1902,7 @@ select:focus {
   animation: kbmFill 3s linear infinite;
 }
 
-/* ---- Settled owner/cheer row ---- */
+/* ---- Settled owner row ---- */
 .mt-owner-row {
   display: flex;
   align-items: center;
@@ -1922,20 +1922,6 @@ select:focus {
   flex: none;
 }
 .mt-owner-line { font-weight: 700; font-size: 12px; color: var(--ink-2); }
-.mt-cheer {
-  position: relative;
-  margin-left: auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 800;
-  font-size: 12px;
-  color: var(--gold-text);
-  background: var(--gold-bg);
-  border: 1px solid var(--gold-border);
-  padding: 6px 11px;
-  border-radius: 999px;
-}
 .mt-burst {
   position: absolute;
   top: -2px;
@@ -2731,22 +2717,18 @@ select:focus {
   font-size: 15px;
   box-shadow: 0 8px 20px rgba(14, 122, 71, 0.28);
 }
-.mt-cheer-lg {
-  position: relative;
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  padding: 15px 18px;
-  border-radius: 15px;
-  background: var(--gold-bg);
-  border: 1.5px solid var(--gold-border);
-  color: var(--gold-text);
-  font-weight: 900;
-  font-size: 15px;
+.mt-win-prompt {
+  margin: 0 0 12px;
+  padding: 13px 15px;
+  border-radius: 14px;
+  background: var(--won-bg);
+  border: 1px solid var(--gold-border);
 }
+.mt-win-prompt-text { margin-bottom: 9px; }
+.mt-win-prompt-text strong { color: var(--gold-text); }
+.mt-win-prompt-actions { display: flex; gap: 8px; }
 /* Phase 4 — secondary social buttons (block / report). Lighter weight than
-   .mt-share/.mt-cheer-lg so the destructive actions read as quieter. */
+   .mt-share so the destructive actions read as quieter. */
 .mt-follow-btn,
 .mt-block-btn,
 .mt-report-btn {

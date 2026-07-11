@@ -9,14 +9,11 @@ import type { MtCtx } from "./ctx";
 export function ProfileView({ ctx }: { ctx: MtCtx }) {
   const {
     t,
-    tFmt,
     setView,
     profile,
     profileLoading,
     userId,
     selectedProfileHandle,
-    doFollow,
-    doUnfollow,
     doBlock,
     setReportTarget,
     openDetail,
@@ -45,23 +42,9 @@ export function ProfileView({ ctx }: { ctx: MtCtx }) {
               </div>
               <div className="mt-profile-meta">
                 <div className="mt-profile-handle">@{p.handle}</div>
-                <div className="mt-profile-counts">
-                  <span>{tFmt("profile.followers", { n: p.follower_count })}</span>
-                  <span>{tFmt("profile.following", { n: p.followee_count })}</span>
-                </div>
               </div>
               {userId && selectedProfileHandle && p.id !== "__self__" && (
                 <>
-                  <button
-                    className={`mt-follow-btn ${p.is_following ? "on" : ""}`}
-                    onClick={() =>
-                      p.is_following
-                        ? doUnfollow(p.id, p.handle)
-                        : doFollow(p.id, p.handle)
-                    }
-                  >
-                    {p.is_following ? t("profile.unfollow") : t("profile.follow")}
-                  </button>
                   <button
                     className="mt-block-btn"
                     onClick={() => doBlock(p.id)}

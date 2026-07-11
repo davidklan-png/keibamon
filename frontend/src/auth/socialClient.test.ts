@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // for authed routes, and (c) tolerates a missing token on the PUBLIC profile
 // route (the only GET that signed-out users can hit).
 
-import { cheer, getProfile, follow } from "./socialClient";
+import { congratulate, getProfile, requestFriend } from "./socialClient";
 
 const ORIG_FETCH = globalThis.fetch;
 
@@ -37,36 +37,22 @@ describe("socialClient Phase 3 helpers", () => {
     vi.unstubAllEnvs();
   });
 
-  it("cheer posts to /api/social/tickets/:id/cheer with Bearer token", async () => {
+  it("congratulate posts to /api/social/shares/:id/congratulate with Bearer token", async () => {
     const { calls } = mockFetch();
-    const r = await cheer("tok-abc", "kb-1");
+    const r = await congratulate("tok-abc", "s1");
     expect(r.ok).toBe(true);
     expect(calls).toHaveLength(1);
-    expect(calls[0].url).toBe("/api/social/tickets/kb-1/cheer");
+    expect(calls[0].url).toBe("/api/social/shares/s1/congratulate");
     expect(calls[0].init.method).toBe("POST");
     const headers = calls[0].init.headers as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer tok-abc");
   });
 
-  it("cheer encodes the ticket id (special chars)", async () => {
+  it("requestFriend targets /api/social/friends/request/:id", async () => {
     const { calls } = mockFetch();
-    await cheer("tok", "kb with space");
-    expect(calls[0].url).toBe("/api/social/tickets/kb%20with%20space/cheer");
-  });
-
-  it("cheer without a token returns {ok:false, err:{kind:'no_token'}}", async () => {
-    const { calls } = mockFetch();
-    const r = await cheer(null, "kb-1");
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.err.kind).toBe("no_token");
-    expect(calls).toHaveLength(0);
-  });
-
-  it("follow targets /api/social/follow/:userId", async () => {
-    const { calls } = mockFetch();
-    const r = await follow("tok", "u-target");
+    const r = await requestFriend("tok", "u-target");
     expect(r.ok).toBe(true);
-    expect(calls[0].url).toBe("/api/social/follow/u-target");
+    expect(calls[0].url).toBe("/api/social/friends/request/u-target");
     expect(calls[0].init.method).toBe("POST");
   });
 

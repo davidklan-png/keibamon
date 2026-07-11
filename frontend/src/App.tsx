@@ -30,10 +30,12 @@ import { newTicketId } from "./lib/ticketId";
 import { useAuth } from "./auth/AuthProvider";
 import { postTicket } from "./auth/socialClient";
 import { pushPending } from "./auth/ticketQueue";
+import { useShareTicket } from "./auth/useShareTicket";
 import { useImpressionsSync } from "./auth/impressionsSync";
 import { RaceScreen } from "./screens/RaceScreen";
 import { TicketsScreen } from "./screens/TicketsScreen";
 import { MyTicketsHome } from "./screens/MyTickets";
+import { FriendsScreen } from "./screens/FriendsScreen";
 import { ReferenceScreen } from "./screens/ReferenceScreen";
 import { RoundupPanel } from "./screens/RoundupPanel";
 import { Footer } from "./components/Footer";
@@ -41,7 +43,7 @@ import { BottomTabBar } from "./components/BottomTabBar";
 import { RaceContextBar } from "./components/RaceContextBar";
 
 type Step = "race" | "tickets";
-type View = "browse" | "mine" | "reference";
+type View = "browse" | "mine" | "friends" | "reference";
 
 function App() {
   const i18n = useI18n();
@@ -57,6 +59,9 @@ function App() {
   // now an inline "Refine ▾" panel on Tickets and Why is an inline per-ticket
   // <details>, so neither is a routed step anymore.
   const [view, setView] = useState<View>("browse");
+  // Friend Interactions Phase 3: pending friend-request count for the Friends
+  // tab badge (the Phase 4 bell later takes over notification duty).
+  const [pendingFriends, setPendingFriends] = useState(0);
   const [step, setStep] = useState<Step>("race");
   const [runners, setRunners] = useState<Runner[]>([]);
   const [raceLabel, setRaceLabel] = useState<string>("");
@@ -343,39 +348,36 @@ function App() {
     regenerate(DEFAULT_STYLE, undefined, raceId);
   }
 
+  // Friend Interactions Phase 2 — Share orchestrator (FriendPicker modal +
+  // postShare). requestShare opens the picker; shareNode is the modal to render;
+  // shareToast is the audience-result feedback.
+  const { requestShare, shareNode, shareToast, clearShareToast } = useShareTicket(getToken);
+  useEffect(() => {
+    if (!shareToast) return;
+    const id = window.setTimeout(() => clearShareToast(), 2600);
+    return () => window.clearTimeout(id);
+  }, [shareToast, clearShareToast]);
+
   /**
-   * Place (commit) a single ticket from the Tickets screen — mirrors
-   * MyTickets.commit(). If not signed in, open Clerk's sign-in modal and stop
-   * (the user returns to the same TicketsScreen and taps Place again). On a
-   * successful POST, drop into the My Tickets view; on failure, queue the
-   * ticket offline and flash the offline-queued copy.
+   * Build a CommittedTicket from a recommender Ticket against the FROZEN
+   * selectedRace. Shared by Save (placeTicket) and Share (shareTicket) so both
+   * publish the identical snapshot. Returns null when no race is selected.
    */
-  async function placeTicket(tk: Ticket) {
-    if (!isSignedIn) {
-      openSignIn();
-      return;
-    }
-    // Use the race frozen at selection time. Re-finding it in `snap` would
-    // miss whenever the 45s live refresh rotated the card (race ran / name
-    // drifted / date rolled) — the silent-bail bug that made every tap no-op.
+  function buildCommittedTicket(tk: Ticket): CommittedTicket | null {
+    // Re-finding the race in `snap` would miss whenever the 45s live refresh
+    // rotated the card (race ran / name drifted / date rolled) — the silent-bail
+    // bug that made every tap no-op. selectedRace is frozen at selection time.
     const race = selectedRace;
     if (!race) {
-      // This should not happen post-fix (selectedRace is set in applyRace).
-      // Surface it loudly in DEV so a regression of the volatile-snap lookup
-      // can't hide as a silent no-op again.
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
-        console.warn(
-          "[placeTicket] no selectedRace — Place tapped without a race context",
-        );
+        console.warn("[buildCommittedTicket] no selectedRace — no race context");
       }
-      return; // no race to snapshot — can't commit
+      return null;
     }
-    const id = newTicketId();
-    const serial = "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase();
-    const committed: CommittedTicket = {
-      id,
-      serial,
+    return {
+      id: newTicketId(),
+      serial: "KB-" + Math.random().toString(16).slice(2, 8).toUpperCase(),
       ticket: tk,
       unit: style.unit,
       mood: moodKey(tk),
@@ -386,6 +388,22 @@ function App() {
       claps: 0,
       createdAt: Date.now(),
     };
+  }
+
+  /**
+   * Place (commit) a single ticket from the Tickets screen — mirrors
+   * MyTickets.commit(). Save has ZERO social side effects: it persists privately
+   * and returns to My Tickets. If not signed in, open Clerk's sign-in modal and
+   * stop (the user returns to the same TicketsScreen and taps again). On a
+   * successful POST, drop into the My Tickets view; on failure, queue offline.
+   */
+  async function placeTicket(tk: Ticket) {
+    if (!isSignedIn) {
+      openSignIn();
+      return;
+    }
+    const committed = buildCommittedTicket(tk);
+    if (!committed) return; // no race to snapshot — can't commit
     const token = await getToken();
     if (!token) {
       if (userId) pushPending(userId, committed);
@@ -407,6 +425,22 @@ function App() {
       setToast(t("mine.offlineQueued"));
       setView("mine");
     }
+  }
+
+  /**
+   * Share (Friend Interactions Phase 2): opens the FriendPicker. The backend
+   * saves-if-needed, then publishes to the chosen audience + notifies. Share is
+   * DELIBERATE — the picker is the confirmation step, so a single tap only opens
+   * the modal (never a muscle-memory publish). Stays on the builder after.
+   */
+  function shareTicket(tk: Ticket) {
+    if (!isSignedIn) {
+      openSignIn();
+      return;
+    }
+    const committed = buildCommittedTicket(tk);
+    if (!committed) return;
+    void requestShare(committed);
   }
 
   // ---------- Step nav (two-step builder, under view === "browse") ----------
@@ -433,7 +467,19 @@ function App() {
           onToggleLang={() => setLang(lang === "ja" ? "en" : "ja")}
           impressions={impressions}
         />
-        <BottomTabBar view={view} onNavigate={setView} />
+        <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
+      </>
+    );
+  }
+
+  // Friend Interactions Phase 3 — Friends tab (feed + friends list + add friend
+  // + share detail). The ONLY social entry point alongside the two re-pointed
+  // surfaces; the solo flow stays social-free.
+  if (view === "friends") {
+    return (
+      <>
+        <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} />
+        <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
       </>
     );
   }
@@ -446,7 +492,7 @@ function App() {
     return (
       <>
         <ReferenceScreen onBack={() => setView("browse")} />
-        <BottomTabBar view={view} onNavigate={setView} />
+        <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
       </>
     );
   }
@@ -655,6 +701,8 @@ function App() {
           onStyleChange={setStyle}
           onPlace={placeTicket}
           placeLabel={isSignedIn ? t("tickets.placeCta") : t("tickets.placeSignIn")}
+          onShare={shareTicket}
+          shareLabel={t("share.share")}
           toast={toast}
           runners={runners}
           raceId={raceId}
@@ -662,8 +710,17 @@ function App() {
         />
       )}
 
+      {shareNode}
+      {shareToast && (
+        <div className="kbm-toast" role="status">
+          {shareToast.kind === "shared"
+            ? tFmt("share.sharedToast", { n: shareToast.n })
+            : t("share.shareFailed")}
+        </div>
+      )}
+
       <Footer />
-      <BottomTabBar view={view} onNavigate={setView} />
+      <BottomTabBar view={view} onNavigate={setView} friendsBadge={pendingFriends} />
     </main>
   );
 }

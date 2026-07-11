@@ -412,17 +412,14 @@ export function decodeTicket(
   } else {
     delete body.placings;
   }
-  // Phase 3: claps are now server COUNT(*) from cheers. Strip the legacy
-  // Phase 2 payload field so the client never renders a stale value.
+  // Friend Interactions Phase 3: claps + cheers + cheeredByMe are legacy
+  // (claps never used; cheers replaced by share-scoped congratulate). Strip
+  // them so the client never renders a stale value.
   delete body.claps;
+  delete body.cheers;
+  delete body.cheeredByMe;
   if (social?.owner !== undefined) {
     body.owner = social.owner;
-  }
-  if (social?.cheers !== undefined) {
-    body.cheers = social.cheers;
-  }
-  if (social?.cheeredByMe !== undefined) {
-    body.cheeredByMe = social.cheeredByMe;
   }
   return body;
 }

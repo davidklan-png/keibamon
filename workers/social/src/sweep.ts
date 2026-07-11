@@ -39,6 +39,7 @@
 // stranding the cron).
 
 import { NOW, RATE_WINDOW } from "./core";
+import { promoteShareWin } from "./shares";
 import {
   resolveTicket,
   topPlacings,
@@ -221,6 +222,10 @@ async function trySettle(
         `settleSweep: settled ${row.id} open -> ${formatOutcome(newState, newReturned)} ` +
         `${sourceTag} [hash ${shortHash(currentHash)}]`,
       );
+      // Friend Interactions Phase 3: promote an active share to a win (flip
+      // is_win + fan out friends_ticket_wwon). Fire-and-forget intent; errors
+      // are swallowed so a notify failure can't block settlement.
+      await promoteShareWin(db, row.id, newState === "won").catch(() => {});
       return { settled: true, reSettled: false };
     }
   } else if (row.settle_result_hash !== currentHash) {
@@ -236,6 +241,9 @@ async function trySettle(
         `${formatTransition(row.state, row.returned, newState, newReturned)} ` +
         `(${kind}) ${sourceTag} [hash ${shortHash(row.settle_result_hash)} -> ${shortHash(currentHash)}]`,
       );
+      // Re-settlement: re-promote on a correction back to won, or clear on a
+      // correction away from won.
+      await promoteShareWin(db, row.id, newState === "won").catch(() => {});
       return { settled: false, reSettled: true };
     }
   }

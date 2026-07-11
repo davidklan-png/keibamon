@@ -36,6 +36,13 @@ export interface TicketsScreenProps {
   onPlace?: (ticket: Ticket) => void;
   /** Label for the Place button (auth-aware, resolved by the caller). */
   placeLabel?: string;
+  /**
+   * Friend Interactions Phase 2 — Share a ticket. Opens the FriendPicker (the
+   * confirmation step); a single tap never publishes. Absent on the test render.
+   */
+  onShare?: (ticket: Ticket) => void;
+  /** Label for the Share button (resolved by the caller). */
+  shareLabel?: string;
   /** Transient status line (e.g. "Updated with your marks", offline-queued). */
   toast?: string;
   /**
@@ -59,6 +66,8 @@ export function TicketsScreen(props: TicketsScreenProps) {
     onStyleChange,
     onPlace,
     placeLabel,
+    onShare,
+    shareLabel,
     toast,
     runners,
     raceId,
@@ -196,6 +205,11 @@ export function TicketsScreen(props: TicketsScreenProps) {
                     onClick={() => onPlace(tk)}
                   >
                     {placeLabel ?? t("tickets.placeCta")}
+                  </button>
+                )}
+                {onShare && (
+                  <button className="btn ghost" onClick={() => onShare(tk)}>
+                    {shareLabel ?? t("share.share")}
                   </button>
                 )}
                 <button className="btn ghost" onClick={onRemix}>
