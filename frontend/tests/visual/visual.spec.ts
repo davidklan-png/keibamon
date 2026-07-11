@@ -196,6 +196,15 @@ test.describe("visual regression", () => {
       await landOnFeed(page, lang);
       await page.locator(".mt-card").first().click();
       await expect(page.locator(".mt-detail")).toBeVisible();
+      // Ticket-detail UX: the footer (@you/disclaimer/barcode) is gone and the
+      // action row now leads with [Back] (real nav) + [Download] (image export).
+      // The card is tall enough that the action row sits below the fold of the
+      // card screenshot below, so assert the buttons directly (both langs).
+      await expect(page.locator(".mt-back-btn")).toBeVisible();
+      await expect(page.locator(".mt-download")).toBeVisible();
+      // And confirm the removed footer pieces are truly gone.
+      await expect(page.locator(".mt-card-foot")).toHaveCount(0);
+      await expect(page.locator(".mt-barcode")).toHaveCount(0);
       await page.waitForTimeout(300);
       await expect(page).toHaveScreenshot(`mytickets-detail-open.${lang}.png`);
     });

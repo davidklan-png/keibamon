@@ -4,10 +4,17 @@
 // the ticket card DOM, then prefers the Web Share API (mobile) and falls back
 // to a download link (desktop).
 //
-// HARD GATE: the exported PNG MUST contain the not-betting-advice micro-line.
-// The caller passes the ticket card node; we assert that a descendant matches
-// [data-not-advice]. If absent, we throw MissingNotAdvice — better to fail
-// loudly than silently ship an advice-less card.
+// DISCLAIMER GATE: by default the exported PNG MUST contain the not-betting-
+// advice micro-line — the caller passes the ticket card node and we assert a
+// descendant matches [data-not-advice]. If absent, we throw MissingNotAdvice:
+// better to fail loudly than silently ship an advice-less card.
+//
+// Opt-out (ticket-detail-ux, 2026-07-12): the My Tickets detail card is
+// intentionally clean — the footer disclaimer + barcode were removed by locked
+// decision (the age-gate acknowledgment is now the guardrail touchpoint, not a
+// per-card micro-line). That path passes { requireNotAdvice: false }. The
+// FillGuide "fill card" still carries its own [data-not-advice] micro-line and
+// keeps the default (true), so its guardrail is unchanged.
 
 import { toPng } from "html-to-image";
 
@@ -23,22 +30,31 @@ export class MissingNotAdvice extends Error {
 
 const FILENAME = "keibamon-ticket.png";
 
+export interface ExportOptions {
+  /**
+   * Enforce the [data-not-advice] disclaimer gate (default true). The detail
+   * card opts out — it's a clean card by design; FillGuide keeps the default.
+   */
+  requireNotAdvice?: boolean;
+}
+
 /**
  * Export a ticket-card DOM node as a PNG.
  *
- * @param node    the card root (must contain a child matching [data-not-advice])
- * @param _filename unused — kept for the call signature promised by the plan.
- *                   The actual file is named "keibamon-ticket.png" so devices
- *                   that key off filename (iOS share sheet) see the brand.
+ * @param node  the card root. By default must contain a child matching
+ *              [data-not-advice]; pass { requireNotAdvice: false } for the
+ *              intentionally-clean detail card.
+ * @param opts  export options (disclaimer gate).
  */
 export async function exportTicketCard(
   node: HTMLElement,
-  _filename?: string,
+  opts: ExportOptions = {},
 ): Promise<ShareOutcome> {
-  // Pre-export assertion. The detail card footer carries data-not-advice on
-  // the micro-line span; if a future refactor drops it, we fail here rather
-  // than ship an advice-less card.
-  if (!node.querySelector('[data-not-advice]')) {
+  const requireNotAdvice = opts.requireNotAdvice !== false;
+  // Pre-export assertion. FillGuide's footer carries data-not-advice on the
+  // micro-line span; if a future refactor drops it, we fail here rather than
+  // ship an advice-less card. The detail card opts out (clean by design).
+  if (requireNotAdvice && !node.querySelector('[data-not-advice]')) {
     throw new MissingNotAdvice();
   }
 

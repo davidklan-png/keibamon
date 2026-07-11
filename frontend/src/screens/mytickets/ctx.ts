@@ -59,6 +59,8 @@ export interface MtCtx {
 
   // view routing
   setView: (v: MtView) => void;
+  /** Ticket-detail UX — return to the actual previous (non-detail) screen. */
+  goBack: () => void;
 
   // social state
   friendsOnCard: FriendsBadge;

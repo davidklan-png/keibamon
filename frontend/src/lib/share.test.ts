@@ -45,4 +45,17 @@ describe("exportTicketCard", () => {
     // signal — the gate passed and toPng ran.
     expect(["downloaded", "shared", "none"]).toContain(outcome.kind);
   });
+
+  it("opts out of the disclaimer gate when requireNotAdvice:false (clean detail card)", async () => {
+    // The My Tickets detail card is intentionally advice-free by locked
+    // decision; it must export without the [data-not-advice] marker.
+    const node = makeNode(false);
+    const outcome = await exportTicketCard(node, { requireNotAdvice: false });
+    expect(["downloaded", "shared", "none"]).toContain(outcome.kind);
+  });
+
+  it("still defaults to requiring [data-not-advice] when no opts passed", async () => {
+    const node = makeNode(false);
+    await expect(exportTicketCard(node)).rejects.toBeInstanceOf(MissingNotAdvice);
+  });
 });

@@ -15,7 +15,7 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
     tFmt,
     ja,
     detailTk,
-    setView,
+    goBack,
     detailCardRef,
     settleId,
     runnerRaceName,
@@ -95,9 +95,6 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
   return (
     <>
       <div className="mt-back-head">
-        <button className="mt-back" onClick={() => setView("feed")}>
-          ‹
-        </button>
         <div className="mt-back-title">{t("mine.ticketTitle")}</div>
       </div>
 
@@ -332,14 +329,6 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
               </div>
             )}
 
-            <div className="mt-card-foot">
-              <div className="mt-card-foot-mark">競</div>
-              <div style={{ lineHeight: 1.2 }}>
-                <div className="mt-handle">{t("mine.handle")}</div>
-                <div className="mt-card-foot-micro" data-not-advice="">{t("auth.disclaimer")}</div>
-              </div>
-              <div className="mt-barcode" />
-            </div>
           </div>
         </div>
 
@@ -351,37 +340,47 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
         )}
 
         <div className="mt-actions">
-          <button
-            className="mt-share"
-            onClick={() => void doShare()}
-          >
-            <span style={{ fontSize: 16 }}>⇪</span>
-            {t("mine.tapShare")}
+          {/* Ticket-detail UX — [Back] returns to the actual previous screen
+              (feed / profile / new / manual), not a hardcoded target. Nav left,
+              actions right. */}
+          <button className="mt-back-btn" onClick={goBack}>
+            <span aria-hidden="true">‹</span> {t("mine.back")}
           </button>
-          {/* Phase 4 — ticket report. Anyone can report any ticket
-              (including their own — the moderation queue decides). */}
-          <button
-            className="mt-report-btn"
-            onClick={() =>
-              setReportTarget({ type: "ticket", id: tk.id })
-            }
-          >
-            {t("profile.report")}
-          </button>
-          {/* Friend Interactions Phase 2 — share-later / retract. The owner
-              engagement surface; Phase 3 adds congratulate + comment counts +
-              the comment thread alongside these. Share opens the FriendPicker
-              (deliberate); retract asks once, then is silent. */}
-          {requestShare && !detailShare?.shared && (
-            <button className="mt-share-friend" onClick={() => requestShare(tk)}>
-              {t("share.shareLater")}
+          <div className="mt-actions-right">
+            {/* Download = the existing image-export (doShare), honestly
+                labeled. The card is advice-free by design (age-gate is the
+                guardrail), so doShare opts out of the disclaimer gate. */}
+            <button
+              className="mt-download"
+              onClick={() => void doShare()}
+            >
+              <span aria-hidden="true">⤓</span> {t("mine.download")}
             </button>
-          )}
-          {detailShare?.shared && (
-            <button className="mt-retract-btn" onClick={() => setConfirmRetract(true)}>
-              {t("share.retract")}
+            {/* Phase 4 — ticket report. Anyone can report any ticket
+                (including their own — the moderation queue decides). */}
+            <button
+              className="mt-report-btn"
+              onClick={() =>
+                setReportTarget({ type: "ticket", id: tk.id })
+              }
+            >
+              {t("profile.report")}
             </button>
-          )}
+            {/* Friend Interactions Phase 2 — share-later / retract. The owner
+                engagement surface; Phase 3 adds congratulate + comment counts +
+                the comment thread alongside these. Share opens the FriendPicker
+                (deliberate); retract asks once, then is silent. */}
+            {requestShare && !detailShare?.shared && (
+              <button className="mt-share-friend" onClick={() => requestShare(tk)}>
+                {t("share.shareLater")}
+              </button>
+            )}
+            {detailShare?.shared && (
+              <button className="mt-retract-btn" onClick={() => setConfirmRetract(true)}>
+                {t("share.retract")}
+              </button>
+            )}
+          </div>
         </div>
 
         {detailShare?.shared && detailShare.id && (
