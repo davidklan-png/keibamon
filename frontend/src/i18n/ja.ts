@@ -362,6 +362,8 @@ export const ja = {
     pending: "未確定",
     est: "想定",
     field: "頭数",
+    // ADR-0020: 有力馬行の馬番表示（「4番」）。
+    horseNo: "{n}番",
     postTime: "発走",
     favorites: "上位人気",
     draws: "枠順メモ",

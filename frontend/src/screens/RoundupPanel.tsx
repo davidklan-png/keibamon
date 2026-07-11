@@ -25,6 +25,8 @@ import {
 } from "../api";
 import {
   generateReport,
+  resolveEditionLabel,
+  resolveWeekendLabel,
   type WeekendInput,
   type WeeklyReport,
 } from "../lib/weeklyReport";
@@ -46,7 +48,7 @@ export function RoundupPanel({
   onSetImpressions,
   oddsSnapshotAt,
 }: RoundupPanelProps) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const [resp, setResp] = useState<WeeklyReportResponse>({ status: "empty" });
   const [loaded, setLoaded] = useState(false);
 
@@ -83,9 +85,12 @@ export function RoundupPanel({
   const idx = Math.min(selectedIdx, ordered.length - 1);
   const current = ordered[idx];
 
+  // ADR-0020: generation is locale-aware. `lang` is a memo dependency so a
+  // language toggle re-renders the already-loaded report in the new locale
+  // immediately — no refetch, no page reload.
   const report: WeeklyReport | null = useMemo(
-    () => (current ? generateReport(current) : null),
-    [current],
+    () => (current ? generateReport(current, { locale: lang }) : null),
+    [current, lang],
   );
 
   if (!loaded) {
@@ -104,7 +109,10 @@ export function RoundupPanel({
             >
               {ordered.map((w, i) => (
                 <option key={`${w.edition_key}-v${w.version}`} value={i}>
-                  {w.edition_label ?? w.edition_key} · {w.weekend_label}
+                  {(w.edition_label != null
+                    ? resolveEditionLabel(w, lang)
+                    : w.edition_key)}{" "}
+                  · {resolveWeekendLabel(w, lang)}
                 </option>
               ))}
             </select>

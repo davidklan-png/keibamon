@@ -13,7 +13,7 @@
 // Language:         set via `keibamon.lang` localStorage before each visit.
 // ============================================================================
 import { test, expect } from "@playwright/test";
-import { installApiMocks } from "./fixtures";
+import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED } from "./fixtures";
 
 const LANGS = ["en", "ja"] as const;
 
@@ -297,4 +297,51 @@ test.describe("visual regression", () => {
       await expect(page).toHaveScreenshot(`signed-out-empty-marks.${lang}.png`);
     });
   }
+
+  // ---- ADR-0020: focused Japanese EXPANDED-Research snapshot ----
+  // The LANGS-loop `research-mode` baseline captures the EMPTY roundup. This
+  // focused JA-only test overrides /api/weekly-report with a PUBLISHED edition
+  // and expands the deep dive, so the generated JA prose (headline, glance,
+  // market/pace/gate, contender reasons, trend, ticket notes, watchlist, lens)
+  // is pixel-pinned. JA-only on purpose — the EN expanded surface has no prior
+  // baseline and is covered structurally by the RoundupPanel integration test.
+  test(`research-expanded (ja)`, async ({ page }) => {
+    await installApiMocks(page);
+    // Deterministically override the empty weekly-report mock (unroute first so
+    // handler order can't decide which wins).
+    await page.unroute("**/api/weekly-report");
+    await page.route("**/api/weekly-report", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(FIXTURE_WEEKEND_PUBLISHED),
+      }),
+    );
+    await page.addInitScript(() => {
+      try {
+        window.localStorage.setItem("keibamon.lang", "ja");
+      } catch {
+        /* ignore */
+      }
+      const FROZEN = Date.parse("2026-06-28T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    });
+    await page.goto("/");
+    await expect(page.locator(".lane-segmented")).toBeVisible({ timeout: 10_000 });
+    await page.locator(".lane-segmented button").nth(1).click(); // Research lane
+    await expect(page.locator(".roundup-tab")).toBeVisible({ timeout: 10_000 });
+    // Expand the (single) deep dive to expose the generated JA blocks.
+    await page.locator("button.deepdive-toggle").first().click();
+    await expect(page.locator(".ticket-notes")).toBeVisible({ timeout: 5_000 });
+    // Durable text assertions (guard against a formatter regression passing CI
+    // by pixel-matching a stale baseline): the expanded JA surface carries JA
+    // generated prose, not English template fragments.
+    const body = page.locator("body");
+    await expect(body).toContainText("ペースの読み"); // pace read (JA)
+    await expect(body).toContainText("約2.4倍"); // contender reason, JA odds
+    await expect(body).toContainText("馬連"); // ticket-note shape
+    await expect(body).not.toContainText("Running styles not yet declared");
+    await page.waitForTimeout(300);
+    await expect(page).toHaveScreenshot("research-expanded-ja.png");
+  });
 });

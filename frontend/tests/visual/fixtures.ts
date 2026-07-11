@@ -132,8 +132,61 @@ export const FIXTURE_TICKETS: CommittedTicket[] = [
   },
 ];
 
+/**
+ * ADR-0020 — a PUBLISHED weekend edition for the focused Japanese expanded-
+ * Research visual snapshot. Realistic Japanese horse names + live odds + gates
+ * + styles, so the JA report renders substantive market/pace/contender/trend/
+ * ticket prose. edition_label + weekend_label are legacy English-only strings
+ * on purpose, to exercise the JA structural fallback (date range + 土曜更新).
+ * Override the empty /api/weekly-report mock per-test with this payload.
+ */
+export const FIXTURE_WEEKEND_PUBLISHED = {
+  status: "published",
+  inputs: [
+    {
+      edition_key: "2026-W26",
+      edition_label: "Saturday refresh",
+      weekend_label: "June 27–28, 2026",
+      version: 2,
+      published_at: "2026-06-27T00:30:00Z",
+      odds_snapshot_at: "2026-06-27T00:15:00Z",
+      gate_snapshot_at: "2026-06-26T08:00:00Z",
+      card_snapshot_at: "2026-06-26T07:30:00Z",
+      condition_snapshot_at: "2026-06-27T00:10:00Z",
+      races: [
+        {
+          race_id: "jra-20260628-09-11",
+          name: "Takarazuka Kinen",
+          name_ja: "宝塚記念",
+          grade: "G1",
+          venue: "Hanshin",
+          venue_ja: "阪神",
+          surface: "turf",
+          distance_m: 2200,
+          post_time: "15:35",
+          date: "2026-06-28",
+          field_size: 8,
+          going: "good",
+          weather: "cloudy",
+          runners: [
+            { horse_number: 1, horse_name: "クロワデュノール", gate: 1, win_odds: 2.4, style_signal: "stalker" },
+            { horse_number: 2, horse_name: "シンブリタニア", gate: 2, win_odds: 5.1, style_signal: "presser" },
+            { horse_number: 3, horse_name: "ペガサスセイヤ", gate: 3, win_odds: 7.2, style_signal: "front" },
+            { horse_number: 4, horse_name: "マイネルサファイア", gate: 4, win_odds: 12.0, style_signal: "closer" },
+            { horse_number: 5, horse_name: "セキフ", gate: 5, win_odds: 18.5, style_signal: "stalker" },
+            { horse_number: 6, horse_name: "ホウオウビスケー", gate: 6, win_odds: 6.3, style_signal: "presser", fragile: true },
+            { horse_number: 7, horse_name: "ソーラーエイペックス", gate: 7, win_odds: 9.7, style_signal: "stalker", trend_signal: "firming" },
+            { horse_number: 8, horse_name: "キタサンマジック", gate: 8, win_odds: 25.0, style_signal: "closer" },
+          ],
+        },
+      ],
+    },
+  ],
+};
+
 /** Registers page.route() handlers that intercept /api/live + social Worker calls. */
 export async function installApiMocks(page: import("@playwright/test").Page): Promise<void> {
+  // /api/live → deterministic open race
   // /api/live → deterministic open race
   await page.route("**/api/live", (route) =>
     route.fulfill({

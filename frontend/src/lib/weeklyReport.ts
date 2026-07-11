@@ -2,10 +2,19 @@
 // Weekly graded-stakes report — deterministic generator.
 //
 // This is the research/report engine for the "Weekend Roundup" Reference tab.
-// It is a PURE function: generateReport(input) -> WeeklyReport. No network, no
-// Date.now(), no randomness. Same input always yields byte-identical output, so
-// reports are testable and reproducible (requirement: "Keep generation
-// deterministic where possible so reports are testable").
+// It is a PURE function: generateReport(input, opts) -> WeeklyReport. No network,
+// no Date.now(), no randomness. Same input + opts always yields byte-identical
+// output, so reports are testable and reproducible (requirement: "Keep
+// generation deterministic where possible so reports are testable").
+//
+// LOCALE-AWARE (ADR-0020) — generation is locale-aware via an options object
+// (defaulting to English — the pre-locale default locale). All dynamic prose is sourced
+// from a dedicated locale/template module (lib/weeklyReport.locale.ts); this
+// file holds only the logic that decides WHICH template applies. Free-text
+// editorial inputs (notes, trend_tags, weekend_label, edition_label, going,
+// weather) carry an explicit bilingual {en,ja} representation with a documented
+// legacy fallback (lib/weeklyReport.locale.ts:tx). The generator never silently
+// shows English editorial prose in a Japanese report.
 //
 // FRAMING — Keibamon is a recreational keiba companion for research and
 // exotic-ticket construction. Output is analytical framing only (market signal,
@@ -14,17 +23,30 @@
 //   "guaranteed", "sure thing", "lock" (standalone), "beat the market",
 //   "best bet", "positive EV", "profit" (as a promise).
 // Ticket sections describe structure and risk; they never instruct a wager.
+// The guardrail applies identically in both locales (the JA pack contains no
+// English edge/advice wording; both editions are scanned by the test suite).
 //
 // NARRATIVE — generation is deterministic by default. An optional
 // NarrativeProvider interface is exposed so a future AI/drafting pass can
 // rewrite the `headline`, per-race `why`, and `themes` strings; until one is
-// supplied the deterministic provider is used. AI is never on by default.
-// Every provider return value passes through sanitizeNarrative (lib/guardrails)
-// before it lands in the report, so a non-deterministic provider cannot slip a
-// banned edge/advice phrase through at runtime.
+// supplied the deterministic provider (locale-aware) is used. AI is never on by
+// default. Every provider return value passes through sanitizeNarrative
+// (lib/guardrails) before it lands in the report, so a non-deterministic
+// provider cannot slip a banned edge/advice phrase through at runtime.
 // ============================================================================
 
 import { sanitizeNarrative } from "./guardrails";
+import {
+  PROSE,
+  tx,
+  goingLabel,
+  weatherLabel,
+  surfaceLabel,
+  raceName,
+  venueName,
+  JA_WEEKEND_LABEL_FALLBACK,
+  type LocalizedText,
+} from "./weeklyReport.locale";
 
 /**
  * Generator version — the reproducibility key for a generated report.
@@ -37,8 +59,21 @@ import { sanitizeNarrative } from "./guardrails";
  * SEMANTICS change (new fields, reworded framing, altered contender logic); a
  * reader comparing two editions can then tell whether a wording difference is a
  * real data change or a generator-version change. See docs/adr/0008.
+ *
+ * 1.2.0 — locale-aware generation (ADR-0020). The deterministic prose templates
+ * (market/pace/gate/contender/ticket/watchlist/lens copy) and the not-advice
+ * reminder are unchanged in English; a Japanese prose pack was added and the
+ * free-text inputs gained an explicit {en,ja} representation. ONE deliberate
+ * English change: Research is now single-language (the glossary is the sole
+ * bilingual comparison surface), so the headline + per-race "why" no longer
+ * append the former "English / 日本語" name pair — English shows the English
+ * name only. English output is therefore NOT byte-identical to 1.1.0; the pair
+ * removal is the sole retroactive wording change for existing English editions.
  */
-export const GENERATOR_VERSION = "1.1.0";
+export const GENERATOR_VERSION = "1.2.0";
+
+/** Report output locale. Defaults to "en" everywhere (English is the default). */
+export type ReportLocale = "en" | "ja";
 
 export type Grade = "G1" | "G2" | "G3";
 export type Surface = "turf" | "dirt";
@@ -51,10 +86,19 @@ export type TrendSignal =
 
 // ---------------------------------------------------------------------------
 // INPUT TYPES — what a Friday/Saturday publish supplies.
+//
+// Free-text editorial fields (notes, trend_tags, weekend_label, edition_label)
+// and externally-supplied non-enum values (going, weather) accept an explicit
+// bilingual representation (LocalizedText = string | {en, ja}). A plain string
+// is the legacy English-only form and is resolved under the documented policy
+// in weeklyReport.locale.ts:tx (shown in EN; omitted or structurally fallback'd
+// in JA — never silently displayed as English editorial prose).
 // ---------------------------------------------------------------------------
 
 export interface RunnerInput {
   horse_number: number;
+  /** Horse name. In real data this is already Japanese (カタカナ); it is a proper
+   *  noun shown verbatim in both locales (no separate JA variant). */
   horse_name: string;
   /** Post position / gate draw. null until the draw is published. */
   gate: number | null;
@@ -67,8 +111,9 @@ export interface RunnerInput {
   style_signal?: StyleSignal;
   /** Editor flag: low-odds horse carrying a known weakness. */
   fragile?: boolean;
-  /** Optional trend tags feeding trend analysis (e.g. "class drop"). */
-  trend_tags?: string[];
+  /** Optional trend tags feeding trend analysis (e.g. "class drop"). Bilingual:
+   *  a legacy English-only tag is omitted from a JA report until a JA value exists. */
+  trend_tags?: LocalizedText[];
   /** Observed odds-direction signal for the watchlist. */
   trend_signal?: TrendSignal;
 }
@@ -88,20 +133,26 @@ export interface RaceInput {
   date: string;
   /** Declared field size (runners list may be partial before the roster firms). */
   field_size?: number;
-  going?: string | null;
-  weather?: string | null;
-  /** Optional editorial notes feeding trend analysis. */
-  notes?: string[];
+  /** Track condition. A controlled JRA vocabulary where recognized (good/firm/
+   *  soft/...); an unrecognized or {en,ja} value resolves via locale.ts. */
+  going?: LocalizedText | null;
+  /** Weather. Controlled JRA vocabulary where recognized; else bilingual/legacy. */
+  weather?: LocalizedText | null;
+  /** Optional editorial notes feeding trend analysis. Bilingual: a legacy
+   *  English-only note is omitted from a JA report until a JA value exists. */
+  notes?: LocalizedText[];
   runners: RunnerInput[];
 }
 
 export interface WeekendInput {
   /** Edition key, e.g. "2026-W26". Stable across Friday/Saturday versions. */
   edition_key: string;
-  /** Human label, e.g. "Friday edition" / "Saturday refresh". */
-  edition_label?: string;
-  /** Human weekend label, e.g. "June 27–28, 2026". */
-  weekend_label: string;
+  /** Human label, e.g. "Friday edition" / "Saturday refresh". Bilingual. */
+  edition_label?: LocalizedText;
+  /** Human weekend label, e.g. "June 27–28, 2026". Bilingual; a legacy
+   *  English-only label falls back to a JA date range derived from the race
+   *  dates (never shown as English editorial prose in JA mode). */
+  weekend_label: LocalizedText;
   /** Monotonic version: 1 = Friday initial, 2 = Saturday refresh, ... */
   version: number;
   /** Publication timestamp (ISO, UTC). When this report was generated/published. */
@@ -237,6 +288,10 @@ export interface WeeklyReport {
   not_advice_reminder: string;
 }
 
+// Re-export the bilingual editorial type so consumers import it from the
+// generator barrel (the data contract lives next to the types that use it).
+export type { LocalizedText } from "./weeklyReport.locale";
+
 // ---------------------------------------------------------------------------
 // Narrative provider — isolated AI hook with a deterministic default.
 // ---------------------------------------------------------------------------
@@ -259,58 +314,62 @@ export interface NarrativeProvider {
   ): string[];
 }
 
-/** Deterministic, copy-safe default. Used unless an AI provider is supplied. */
-export const deterministicNarrative: NarrativeProvider = {
-  weekendHeadline(input, report) {
-    const g1 = input.races.find((r) => r.grade === "G1");
-    if (!g1) {
-      return `${input.weekend_label}: a graded-stakes weekend with ${report.glance.length} feature races.`;
-    }
-    const shape = marketShape(g1);
-    const fav = topByOdds(g1.runners)[0];
-    const favClause = fav
-      ? ` Early market attention centers on ${fav.horse_name} (No.${fav.horse_number}).`
-      : "";
-    return `${input.weekend_label}: the ${g1.name}${g1.name_ja ? ` / ${g1.name_ja}` : ""} anchors the weekend. ${shape.label}${favClause}`;
-  },
-  raceWhy(race) {
-    const gradeTier: Record<Grade, string> = {
-      G1: "championship-tier",
-      G2: "prestige tier just below the championship",
-      G3: "graded stakes, a wide-open shape",
-    };
-    return `${race.name}${race.name_ja ? ` / ${race.name_ja}` : ""} is a ${race.distance_m} m ${race.surface} ${gradeTier[race.grade]} contest. This section frames the market signal, draw, pace, and ticket-shape context — research framing, not a recommendation.`;
-  },
-  themes(_input, report) {
-    const out: string[] = [];
-    const fragile = report.deep_dives.filter((d) =>
-      d.contender_groups.fragile_favorites.length > 0,
-    );
-    if (fragile.length > 0) {
-      out.push(
-        `Fragile-favorite watch: ${fragile.length} feature ${fragile.length === 1 ? "race has" : "races have"} a short-priced runner carrying a question mark — a pace or draw angle that could reshape the exotic shape.`,
+/** Build the deterministic, copy-safe, LOCALE-AWARE provider. Used unless an AI
+ *  provider is supplied. English by default. */
+export function deterministicNarrativeFor(loc: ReportLocale): NarrativeProvider {
+  const P = PROSE[loc];
+  return {
+    weekendHeadline(_input, report) {
+      // report.weekend_label is already locale-resolved by generateReport.
+      const wl = report.weekend_label;
+      const g1 = _input.races.find((r) => r.grade === "G1");
+      if (!g1) {
+        return P.weekendHeadlineNoG1(wl, report.glance.length);
+      }
+      const shape = marketShape(g1, loc);
+      const fav = topByOdds(g1.runners)[0];
+      return P.weekendHeadlineG1(
+        wl,
+        raceName(g1.name, g1.name_ja, loc),
+        shape.label,
+        fav ? fav.horse_name : null,
+        fav ? fav.horse_number : null,
       );
-    }
-    const bigFields = report.deep_dives.filter((d) => d.snapshot.field_size >= 16);
-    if (bigFields.length > 0) {
-      out.push(
-        `Big-field variance: ${bigFields.length} ${bigFields.length === 1 ? "race" : "races"} with 16+ runners widens the trifecta space and raises variance.`,
+    },
+    raceWhy(race) {
+      return P.raceWhy(
+        raceName(race.name, race.name_ja, loc),
+        race.distance_m,
+        surfaceLabel(race.surface, loc),
+        P.gradeTier(race.grade),
       );
-    }
-    const dirt = report.deep_dives.filter((d) => d.snapshot.surface === "dirt");
-    if (dirt.length > 0) {
-      out.push(
-        `Dirt draw in play: ${dirt.length} ${dirt.length === 1 ? "dirt race is" : "dirt races are"} on the card — inside draws tend to matter more on the sand.`,
+    },
+    themes(_input, report) {
+      const out: string[] = [];
+      const fragile = report.deep_dives.filter((d) =>
+        d.contender_groups.fragile_favorites.length > 0,
       );
-    }
-    if (out.length === 0) {
-      out.push(
-        "Balanced weekend: no single theme dominates — read each race on its own market and shape.",
-      );
-    }
-    return out;
-  },
-};
+      if (fragile.length > 0) {
+        out.push(P.themeFragile(fragile.length));
+      }
+      const bigFields = report.deep_dives.filter((d) => d.snapshot.field_size >= 16);
+      if (bigFields.length > 0) {
+        out.push(P.themeBigField(bigFields.length));
+      }
+      const dirt = report.deep_dives.filter((d) => d.snapshot.surface === "dirt");
+      if (dirt.length > 0) {
+        out.push(P.themeDirt(dirt.length));
+      }
+      if (out.length === 0) {
+        out.push(P.themeBalanced);
+      }
+      return out;
+    },
+  };
+}
+
+/** English deterministic provider — the historical default (backward-compat name). */
+export const deterministicNarrative: NarrativeProvider = deterministicNarrativeFor("en");
 
 // ---------------------------------------------------------------------------
 // Helpers — pure, exported for targeted unit tests.
@@ -353,13 +412,14 @@ export interface MarketShape {
   top3_concentration: number;
 }
 
-export function marketShape(race: RaceInput): MarketShape {
+export function marketShape(race: RaceInput, loc: ReportLocale = "en"): MarketShape {
+  const P = PROSE[loc];
   const probs = deviggedProbs(race.runners);
   const ranked = topByOdds(race.runners).filter((r) =>
     probs.has(r.horse_number),
   );
   if (ranked.length === 0) {
-    return { label: "Market not yet priced — estimates only.", top3_concentration: 0 };
+    return { label: P.marketUnpriced, top3_concentration: 0 };
   }
   const top3 = ranked.slice(0, 3);
   const conc = top3.reduce((a, r) => a + (probs.get(r.horse_number) ?? 0), 0);
@@ -367,13 +427,13 @@ export function marketShape(race: RaceInput): MarketShape {
   const favProb = probs.get(fav.horse_number) ?? 0;
   let label: string;
   if (favProb >= 0.5) {
-    label = `Dominant favorite shape — ${fav.horse_name} carries ~${pct(favProb)} of the devigged win chance; the rest fight for place money.`;
+    label = P.marketDominant(fav.horse_name, pct(favProb));
   } else if (conc >= 0.55) {
-    label = `Concentrated at the top — the first three absorb ~${pct(conc)} of the devigged chance; a chalky exotic base.`;
+    label = P.marketConcentrated(pct(conc));
   } else if (conc <= 0.33) {
-    label = `Open, wide-open shape — the market spreads the chance out (top three ~${pct(conc)}); higher variance, richer exotics possible.`;
+    label = P.marketOpen(pct(conc));
   } else {
-    label = `Balanced shape — a clear favorite with real depth behind (top three ~${pct(conc)}); workable for several ticket shapes.`;
+    label = P.marketBalanced(pct(conc));
   }
   return { label, top3_concentration: conc };
 }
@@ -383,28 +443,30 @@ export function pct(x: number): string {
 }
 
 /** Pace shape from running-style distribution. */
-export function paceMap(race: RaceInput): string {
+export function paceMap(race: RaceInput, loc: ReportLocale = "en"): string {
+  const P = PROSE[loc];
   const styles = race.runners.map((r) => r.style_signal ?? "unknown");
   const front = styles.filter((s) => s === "front").length;
   const pressers = styles.filter((s) => s === "presser").length;
   const closers = styles.filter((s) => s === "closer").length;
   const stalkers = styles.filter((s) => s === "stalker").length;
   if (front + pressers === 0 && closers === 0) {
-    return "Running styles not yet declared — pace read opens up once the roster firms.";
+    return P.paceNotDeclared;
   }
   if (front >= 3) {
-    return `Hot pace read: ${front} confirmed front-runners + ${pressers} pressers should cook the early fractions — a setup that can favor a stalker/closer (${stalkers}/${closers} on the card).`;
+    return P.paceHot(front, pressers, stalkers, closers);
   }
   if (front <= 1) {
-    return `Soft pace read: ${front} lone front-runner candidate — an unchallenged leader could steal it cheaply, compressing the exotic.`;
+    return P.paceSoft(front);
   }
-  return `Even pace read: ${front} front-runner(s), ${pressers} presser(s), ${stalkers} stalker(s), ${closers} closer(s) — fractions look genuinely contested.`;
+  return P.paceEven(front, pressers, stalkers, closers);
 }
 
 /** Gate/draw impact from the favorites' post positions + surface. */
-export function gateDrawImpact(race: RaceInput): string {
+export function gateDrawImpact(race: RaceInput, loc: ReportLocale = "en"): string {
+  const P = PROSE[loc];
   if (!race.runners.some((r) => r.gate != null)) {
-    return "Draw not yet published — gate-impact read opens Friday once post positions are set.";
+    return P.gateNotPublished;
   }
   const favs = topByOdds(race.runners)
     .filter((r) => effectiveOdds(r) != null)
@@ -414,28 +476,30 @@ export function gateDrawImpact(race: RaceInput): string {
   const n = race.runners.length;
   if (race.surface === "dirt") {
     if (inside.length >= 2) {
-      return `Dirt draw leans inside — ${listFavs(inside)} drawn 1–3, where the sand tends to travel. Favors racing on the rail.`;
+      return P.gateDirtInside(listFavs(inside, loc));
     }
-    return `Dirt draw looks balanced — no heavy inside concentration among the favorites (${listFavs(favs)}).`;
+    return P.gateDirtBalanced(listFavs(favs, loc));
   }
   if (n >= 16 && outside.length >= 2) {
-    return `Big-field turf draw watch — ${listFavs(outside)} are drawn wide (≥${n - 2}); losing ground into the first bend is a real cost on the swing for home.`;
+    return P.gateBigWide(listFavs(outside, loc), n - 2);
   }
   if (inside.length >= 2) {
-    return `Turf draw favors the inner posts here — ${listFavs(inside)} drawn 1–3, saving ground into the first turn.`;
+    return P.gateTurfInside(listFavs(inside, loc));
   }
-  return `Turf draw looks even-handed — the favorites (${listFavs(favs)}) land in the middle of the gate, no obvious draw tax.`;
+  return P.gateTurfEven(listFavs(favs, loc));
 }
 
-function listFavs(rs: RunnerInput[]): string {
-  if (rs.length === 0) return "no favorites priced";
+function listFavs(rs: RunnerInput[], loc: ReportLocale): string {
+  const P = PROSE[loc];
+  if (rs.length === 0) return P.gateNoFavs;
   return rs
-    .map((r) => `${r.horse_name} (No.${r.horse_number}, gate ${r.gate ?? "—"})`)
-    .join("; ");
+    .map((r) => P.gateFav(r.horse_name, r.horse_number, r.gate))
+    .join(P.gateFavJoiner);
 }
 
 /** Group runners into contender buckets. Deterministic given the inputs. */
-export function contenderGroups(race: RaceInput): ContenderGroups {
+export function contenderGroups(race: RaceInput, loc: ReportLocale = "en"): ContenderGroups {
+  const P = PROSE[loc];
   const ranked = topByOdds(race.runners);
   const fieldSize = race.runners.length;
   const core: ContenderRef[] = [];
@@ -452,25 +516,25 @@ export function contenderGroups(race: RaceInput): ContenderGroups {
       reason,
     });
     if (r.fragile && (o ?? Infinity) <= 5.0) {
-      fragile.push(ref(fragileReason(r)));
+      fragile.push(ref(fragileReason(r, P)));
       continue;
     }
     if (o == null) {
       chaos.push(
         ref(
-          joinClauses("Unpriced — pool not open or no estimate yet", [
-            tagsClause(r.trend_tags),
+          P.joinClauses(P.unpricedLead, [
+            tagsClause(r.trend_tags, loc),
           ]),
         ),
       );
       continue;
     }
     if (o <= 6.0) {
-      core.push(ref(coreReason(r, o, core.length, fieldSize)));
+      core.push(ref(coreReason(r, o, core.length, fieldSize, loc)));
     } else if (o <= 20.0) {
-      price.push(ref(priceReason(r, o, fieldSize)));
+      price.push(ref(priceReason(r, o, fieldSize, loc)));
     } else {
-      chaos.push(ref(chaosReason(r, o, fieldSize)));
+      chaos.push(ref(chaosReason(r, o, fieldSize, loc)));
     }
   }
   // Fragile-favorite also stays visible in core so the reader still sees it.
@@ -478,7 +542,9 @@ export function contenderGroups(race: RaceInput): ContenderGroups {
     const r = race.runners.find((x) => x.horse_number === f.horse_number);
     if (r) {
       const o = effectiveOdds(r);
-      if (o != null && o <= 6.0) core.push({ ...f, reason: f.reason + " Also a core price." });
+      if (o != null && o <= 6.0) {
+        core.push({ ...f, reason: f.reason + P.fragileAlsoCore });
+      }
     }
   }
   return {
@@ -495,110 +561,113 @@ export function contenderGroups(race: RaceInput): ContenderGroups {
 // instead of one templated sentence repeated across every horse in the
 // group (only the odds figure used to vary). gateDrawImpact() covers the
 // race-level draw read; drawClause() is the per-horse echo of the same idea.
+// All vocabulary is locale-sourced (PROSE[loc]).
 // ---------------------------------------------------------------------------
 
-const STYLE_LABEL: Record<StyleSignal, string> = {
-  front: "front-running profile",
-  presser: "rides close to the pace",
-  stalker: "stalks mid-pack",
-  closer: "needs a setup to close",
-  unknown: "style not yet declared",
-};
+function joinNames(arr: string[], loc: ReportLocale): string {
+  return arr.join(loc === "ja" ? "・" : ", ");
+}
 
-const TREND_LABEL: Record<Exclude<TrendSignal, "unknown">, string> = {
-  firming: "odds firming through the week — market support building",
-  drifting: "drifting out in the betting — support has been thin",
-  steady: "price has held steady since first quoted",
-};
+/** Stable identity for a (possibly bilingual) trend tag, for counting. */
+function tagKey(t: LocalizedText): string {
+  return typeof t === "string" ? t : `${t.en}||${t.ja}`;
+}
 
-function drawClause(gate: number | null, fieldSize: number): string | null {
+/** Does the runner carry a trend tag matching the EN or JA needle? */
+function hasTag(
+  tags: LocalizedText[] | undefined,
+  enNeedle: string,
+  jaNeedle: string,
+): boolean {
+  return !!tags?.some((t) =>
+    typeof t === "string"
+      ? t === enNeedle || t === jaNeedle
+      : t.en === enNeedle || t.ja === jaNeedle,
+  );
+}
+
+function drawClause(gate: number | null, fieldSize: number, loc: ReportLocale): string | null {
   if (gate == null) return null;
-  if (gate <= 2) return `drawn ${gate}, on the rail`;
-  if (gate <= 4) return `drawn ${gate}, an inside post`;
-  if (fieldSize > 0 && gate >= fieldSize - 1) return `drawn ${gate}, the widest post in the field`;
-  if (fieldSize > 0 && gate >= fieldSize - 3) return `drawn ${gate}, out wide`;
-  return null; // mid-gate is unremarkable; don't manufacture a clause
+  return PROSE[loc].drawClause(gate, fieldSize);
 }
 
-function trendClause(signal: TrendSignal | undefined): string | null {
+function trendClause(signal: TrendSignal | undefined, loc: ReportLocale): string | null {
   if (!signal || signal === "unknown") return null;
-  return TREND_LABEL[signal];
+  return PROSE[loc].trendLabel[signal];
 }
 
-function tagsClause(tags: string[] | undefined): string | null {
+function tagsClause(tags: LocalizedText[] | undefined, loc: ReportLocale): string | null {
   if (!tags || tags.length === 0) return null;
-  return tags.join(", ");
+  const parts = tags.map((t) => tx(t, loc)).filter((x): x is string => !!x);
+  return parts.length ? joinNames(parts, loc) : null;
 }
 
-/** Compose a lead clause + optional detail clauses into one sentence, skipping any that are null. */
-function joinClauses(lead: string, clauses: Array<string | null>): string {
-  const present = clauses.filter((c): c is string => !!c);
-  return present.length ? `${lead}; ${present.join("; ")}.` : `${lead}.`;
-}
-
-function coreReason(r: RunnerInput, o: number, rank: number, fieldSize: number): string {
-  const lead =
-    rank === 0
-      ? `~${o.toFixed(1)} — the market's clear top choice here`
-      : rank === 1
-        ? `~${o.toFixed(1)} — sits right with the leader, not far off at the top of the market`
-        : `~${o.toFixed(1)} — still inside the market's top tier`;
-  return joinClauses(lead, [
-    STYLE_LABEL[r.style_signal ?? "unknown"],
-    drawClause(r.gate, fieldSize),
-    tagsClause(r.trend_tags),
-    trendClause(r.trend_signal),
+function coreReason(
+  r: RunnerInput,
+  o: number,
+  rank: number,
+  fieldSize: number,
+  loc: ReportLocale,
+): string {
+  const P = PROSE[loc];
+  return P.joinClauses(P.coreLead(o, rank), [
+    P.styleLabel[r.style_signal ?? "unknown"],
+    drawClause(r.gate, fieldSize, loc),
+    tagsClause(r.trend_tags, loc),
+    trendClause(r.trend_signal, loc),
   ]);
 }
-function priceReason(r: RunnerInput, o: number, fieldSize: number): string {
-  const lead =
-    o <= 10
-      ? `~${o.toFixed(1)} — just off the core tier, the first price angle worth a look`
-      : o <= 15
-        ? `~${o.toFixed(1)} — a mid-price runner, squarely in exotic-spicing territory`
-        : `~${o.toFixed(1)} — near the top of the double-digit range, the last price step before chaos territory`;
-  return joinClauses(lead, [
-    STYLE_LABEL[r.style_signal ?? "unknown"],
-    drawClause(r.gate, fieldSize),
-    tagsClause(r.trend_tags),
-    trendClause(r.trend_signal),
+function priceReason(
+  r: RunnerInput,
+  o: number,
+  fieldSize: number,
+  loc: ReportLocale,
+): string {
+  const P = PROSE[loc];
+  return P.joinClauses(P.priceLead(o), [
+    P.styleLabel[r.style_signal ?? "unknown"],
+    drawClause(r.gate, fieldSize, loc),
+    tagsClause(r.trend_tags, loc),
+    trendClause(r.trend_signal, loc),
   ]);
 }
-function chaosReason(r: RunnerInput, o: number, fieldSize: number): string {
-  const lead =
-    o < 30
-      ? `~${o.toFixed(1)} — a longshot, live enough to matter in a wide exotic`
-      : o < 60
-        ? `~${o.toFixed(1)} — a deep outsider, mostly here to widen the combinations`
-        : `~${o.toFixed(1)} — about as long as they come, a rank outsider`;
-  return joinClauses(lead, [
-    drawClause(r.gate, fieldSize),
-    tagsClause(r.trend_tags),
-    trendClause(r.trend_signal),
+function chaosReason(
+  r: RunnerInput,
+  o: number,
+  fieldSize: number,
+  loc: ReportLocale,
+): string {
+  const P = PROSE[loc];
+  return P.joinClauses(P.chaosLead(o), [
+    drawClause(r.gate, fieldSize, loc),
+    tagsClause(r.trend_tags, loc),
+    trendClause(r.trend_signal, loc),
   ]);
 }
-function fragileReason(r: RunnerInput): string {
+function fragileReason(r: RunnerInput, P: (typeof PROSE)[ReportLocale]): string {
   const bits: string[] = [];
-  if (r.style_signal === "closer") bits.push("needs pace to close into");
-  if (r.gate != null && r.gate >= 14) bits.push("drawn outside");
-  if (r.trend_tags?.includes("class rise")) bits.push("rising in class");
-  if (r.trend_tags?.includes("layoff")) bits.push("coming off a layoff");
-  if (r.trend_signal === "drifting") bits.push("drifting out in the betting despite the short price");
-  return bits.length
-    ? `Short-priced but ${bits.join(", ")} — a question mark on the bridge.`
-    : "Short-priced with a flagged weakness — fragile at the head of the market.";
+  if (r.style_signal === "closer") bits.push(P.fragileCloserBit);
+  if (r.gate != null && r.gate >= 14) bits.push(P.fragileOutsideBit);
+  if (hasTag(r.trend_tags, "class rise", "クラス昇級")) bits.push(P.fragileClassRiseBit);
+  if (hasTag(r.trend_tags, "layoff", "久々")) bits.push(P.fragileLayoffBit);
+  if (r.trend_signal === "drifting") bits.push(P.fragileDriftBit);
+  return bits.length ? P.fragileComposed(bits) : P.fragileEmpty;
 }
 
 // ---------------------------------------------------------------------------
 // Ticket-shape notes — describe structure + risk, never instruct a wager.
 // ---------------------------------------------------------------------------
 
-export function ticketNotes(race: RaceInput): {
+export function ticketNotes(
+  race: RaceInput,
+  loc: ReportLocale = "en",
+): {
   safeish: TicketNote;
   balanced: TicketNote;
   spicy: TicketNote;
 } {
-  const g = contenderGroups(race);
+  const P = PROSE[loc];
+  const g = contenderGroups(race, loc);
   const core = g.core_contenders;
   const price = g.price_horses;
   const chaos = g.chaos_slots;
@@ -614,32 +683,32 @@ export function ticketNotes(race: RaceInput): {
     safeish: {
       shape:
         safeishCore.length >= 2
-          ? `Quinella/wide on the top 2 (${safeishCore.join(", ")}).`
-          : "Quinella on the clear favorites once priced.",
-      cost_window: "Low combo count — smaller outlay.",
-      rationale:
-        "Tightest shape: concentrates on the market leaders, fewer combinations.",
-      risk: "Low hit-rate variance, modest payout — the takeout is still in the pool.",
+          ? P.ticketSafeishShape(joinNames(safeishCore, loc))
+          : P.ticketSafeishShapeFallback,
+      cost_window: P.ticketSafeishCost,
+      rationale: P.ticketSafeishRationale,
+      risk: P.ticketSafeishRisk,
     },
     balanced: {
       shape:
         balancedCore.length >= 3
-          ? `Trio boxed around ${balancedCore.join(", ")}${balancedPrice.length ? ` + ${balancedPrice[0]} as a price` : ""}.`
-          : "Trio around the leading three once the field firms.",
-      cost_window: "Medium combo count.",
-      rationale:
-        "Keeps the leaders and adds a price angle — a real shot with fun upside.",
-      risk: "Misses when a complete outsider runs into the frame.",
+          ? P.ticketBalancedShape(
+              joinNames(balancedCore, loc),
+              balancedPrice.length ? balancedPrice[0] : null,
+            )
+          : P.ticketBalancedShapeFallback,
+      cost_window: P.ticketBalancedCost,
+      rationale: P.ticketBalancedRationale,
+      risk: P.ticketBalancedRisk,
     },
     spicy: {
       shape:
         spicyCore.length >= 2 && spicyMix.length
-          ? `Trifecta keying ${spicyCore.join(", ")} up front, weaving in ${spicyMix.join(", ")} underneath.`
-          : "Trifecta weaving in the longshots underneath.",
-      cost_window: "High combo count — larger outlay to cover the spread.",
-      rationale:
-        "Embraces chaos — leans into the variance a big exotic payout needs.",
-      risk: "High variance — misses often, pays well when the shape breaks open.",
+          ? P.ticketSpicyShape(joinNames(spicyCore, loc), joinNames(spicyMix, loc))
+          : P.ticketSpicyShapeFallback,
+      cost_window: P.ticketSpicyCost,
+      rationale: P.ticketSpicyRationale,
+      risk: P.ticketSpicyRisk,
     },
   };
 }
@@ -648,25 +717,41 @@ export function ticketNotes(race: RaceInput): {
 // Trend analysis — derives readable lines from notes + runner tags.
 // ---------------------------------------------------------------------------
 
-export function trendAnalysis(race: RaceInput): string[] {
+export function trendAnalysis(race: RaceInput, loc: ReportLocale = "en"): string[] {
+  const P = PROSE[loc];
   const out: string[] = [];
   const tagged = race.runners.filter((r) => (r.trend_tags ?? []).length > 0);
-  const tagCounts = new Map<string, number>();
-  for (const r of tagged)
-    for (const tag of r.trend_tags ?? [])
-      tagCounts.set(tag, (tagCounts.get(tag) ?? 0) + 1);
-  for (const [tag, n] of [...tagCounts.entries()].sort((a, b) => b[1] - a[1])) {
-    out.push(`Trend — "${tag}": appears on ${n} runner${n === 1 ? "" : "s"} in this field.`);
+  const tagCounts = new Map<string, { display: string | null; n: number }>();
+  for (const r of tagged) {
+    for (const tag of r.trend_tags ?? []) {
+      const key = tagKey(tag);
+      const display = tx(tag, loc);
+      const cur = tagCounts.get(key);
+      if (cur) {
+        cur.n += 1;
+        if (cur.display == null && display != null) cur.display = display;
+      } else {
+        tagCounts.set(key, { display, n: 1 });
+      }
+    }
   }
-  for (const note of race.notes ?? []) out.push(`Editor note — ${note}`);
+  for (const [, { display, n }] of [...tagCounts.entries()].sort(
+    (a, b) => b[1].n - a[1].n,
+  )) {
+    // Legacy English-only tag in JA → display null → omit (documented fallback).
+    if (display == null) continue;
+    out.push(P.trendTagLine(display, n));
+  }
+  for (const note of race.notes ?? []) {
+    const resolved = tx(note, loc);
+    if (resolved != null) out.push(P.editorNoteLine(resolved));
+  }
   const fragile = race.runners.filter((r) => r.fragile);
   if (fragile.length > 0) {
-    out.push(
-      `Fragility flag — ${fragile.length} short-priced runner${fragile.length === 1 ? "" : "s"} carrying a structural question (see fragile-favorites group).`,
-    );
+    out.push(P.fragilityLine(fragile.length));
   }
   if (out.length === 0) {
-    out.push("No notable trend tags this round — read the race on market and shape alone.");
+    out.push(P.trendEmpty);
   }
   return out;
 }
@@ -702,52 +787,58 @@ export function freshness(input: WeekendInput): DataFreshness {
 // Glance row + watchlist.
 // ---------------------------------------------------------------------------
 
-export function glanceRow(race: RaceInput): GlanceRace {
+export function glanceRow(race: RaceInput, loc: ReportLocale = "en"): GlanceRace {
+  const P = PROSE[loc];
   const ranked = topByOdds(race.runners).filter(
     (r) => effectiveOdds(r) != null,
   );
   const topFavs = ranked.slice(0, 3).map((r) => r.horse_name);
+  const going = goingLabel(race.going, loc);
+  const weather = weatherLabel(race.weather, loc);
   return {
     race_id: race.race_id,
-    name: race.name,
+    name: raceName(race.name, race.name_ja, loc),
     grade: race.grade,
-    venue: race.venue,
+    venue: venueName(race.venue, race.venue_ja, loc),
     surface: race.surface,
     distance_m: race.distance_m,
     post_time: race.post_time,
     date: race.date,
     field_size: race.field_size ?? race.runners.length,
     top_favorites: topFavs,
-    notable_draws: glanceDraws(race),
+    notable_draws: glanceDraws(race, loc),
     going_watch:
-      race.going != null || race.weather != null
-        ? `${[race.going && `going ${race.going}`, race.weather && `${race.weather}`].filter(Boolean).join(", ")}`
-        : "Going/weather not yet posted.",
+      going != null || weather != null
+        ? P.glanceGoingWatch(going, weather)
+        : P.glanceGoingWatchEmpty,
   };
 }
 
-function glanceDraws(race: RaceInput): string {
-  if (!race.runners.some((r) => r.gate != null)) return "Draw pending.";
+function glanceDraws(race: RaceInput, loc: ReportLocale): string {
+  const P = PROSE[loc];
+  if (!race.runners.some((r) => r.gate != null)) return P.glanceDrawPending;
   const favs = topByOdds(race.runners)
     .filter((r) => effectiveOdds(r) != null)
     .slice(0, 2);
-  return favs
-    .map((r) => `${r.horse_name} gate ${r.gate ?? "—"}`)
-    .join("; ") || "Draw set.";
+  const lines = favs.map((r) => P.glanceDrawLine(r.horse_name, r.gate));
+  return lines.length ? lines.join(P.glanceDrawJoiner) : P.glanceDrawSet;
 }
 
-export function buildWatchlist(input: WeekendInput): WatchlistEntry[] {
+export function buildWatchlist(
+  input: WeekendInput,
+  loc: ReportLocale = "en",
+): WatchlistEntry[] {
   const out: WatchlistEntry[] = [];
   for (const race of input.races) {
     for (const r of race.runners) {
       if (r.trend_signal && r.trend_signal !== "unknown") {
         out.push({
           race_id: race.race_id,
-          race_name: race.name,
+          race_name: raceName(race.name, race.name_ja, loc),
           horse_number: r.horse_number,
           horse_name: r.horse_name,
           signal: r.trend_signal,
-          note: watchNote(r),
+          note: watchNote(r, loc),
         });
       }
     }
@@ -766,21 +857,25 @@ export function buildWatchlist(input: WeekendInput): WatchlistEntry[] {
   });
 }
 
-function watchNote(r: RunnerInput): string {
+function watchNote(r: RunnerInput, loc: ReportLocale): string {
+  const P = PROSE[loc];
   const o = effectiveOdds(r);
-  const priced = o != null ? ` ~${o.toFixed(1)}` : "";
-  if (r.trend_signal === "firming")
-    return `Shortening${priced} — money coming for this runner across the snapshots.`;
-  if (r.trend_signal === "drifting")
-    return `Lengthening${priced} — easing away across the snapshots.`;
-  return `Steady${priced} — holding in line across the snapshots.`;
+  const priced = o != null ? P.watchPriced(o) : "";
+  if (r.trend_signal === "firming") return P.watchFirming(priced);
+  if (r.trend_signal === "drifting") return P.watchDrifting(priced);
+  return P.watchSteady(priced);
 }
 
 // ---------------------------------------------------------------------------
 // Ticket lens — cross-race deterministic picks.
 // ---------------------------------------------------------------------------
 
-export function buildTicketLens(input: WeekendInput, dives: RaceDeepDive[]): TicketLens {
+export function buildTicketLens(
+  input: WeekendInput,
+  dives: RaceDeepDive[],
+  loc: ReportLocale = "en",
+): TicketLens {
+  const P = PROSE[loc];
   if (input.races.length === 0) {
     return {
       best_for_safeish: null,
@@ -795,7 +890,7 @@ export function buildTicketLens(input: WeekendInput, dives: RaceDeepDive[]): Tic
   const diveByRace = new Map(dives.map((d) => [d.race_id, d]));
 
   const scored = input.races.map((r) => {
-    const shape = marketShape(r);
+    const shape = marketShape(r, loc);
     const probs = deviggedProbs(r.runners);
     const ranked = topByOdds(r.runners).filter((x) => probs.has(x.horse_number));
     const favProb = ranked.length ? probs.get(ranked[0].horse_number) ?? 0 : 0;
@@ -816,7 +911,7 @@ export function buildTicketLens(input: WeekendInput, dives: RaceDeepDive[]): Tic
     reason: string,
   ): RacePick => ({
     race_id: s.race.race_id,
-    name: s.race.name,
+    name: raceName(s.race.name, s.race.name_ja, loc),
     grade: s.race.grade,
     reason,
   });
@@ -845,48 +940,99 @@ export function buildTicketLens(input: WeekendInput, dives: RaceDeepDive[]): Tic
   )[0];
 
   return {
-    best_for_safeish: pick(
-      safeish,
-      `Chalkiest shape of the weekend (top-three ~${pct(safeish.concentration)} of the devigged chance) — the lowest-variance exotic base.`,
-    ),
-    best_for_balanced: pick(
-      balanced,
-      `Clear favorite with real depth behind — a workable trio/trifecta shape (~${pct(balanced.concentration)} on the top three).`,
-    ),
-    best_for_longshot: pick(
-      longshot,
-      `Biggest field (${longshot.field}) with the widest spread — the variance a longshot hunter wants.`,
-    ),
+    best_for_safeish: pick(safeish, P.lensSafeish(pct(safeish.concentration))),
+    best_for_balanced: pick(balanced, P.lensBalanced(pct(balanced.concentration))),
+    best_for_longshot: pick(longshot, P.lensLongshot(longshot.field)),
     most_fragile_favorite:
-      frag.fragileCount > 0
-        ? pick(
-            frag,
-            `Carries the most flagged fragile-favorite weight this weekend — the bridge most worth questioning.`,
-          )
-        : null,
-    best_to_simplify: pick(
-      simplify,
-      `Smallest field (${simplify.field}) and tightest shape — least moving parts if you want to keep a ticket simple.`,
-    ),
+      frag.fragileCount > 0 ? pick(frag, P.lensFragile) : null,
+    best_to_simplify: pick(simplify, P.lensSimplify(simplify.field)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Edition + weekend label resolution (free-text / legacy fallback policy).
+// ---------------------------------------------------------------------------
+
+export function defaultEditionLabel(version: number, loc: ReportLocale = "en"): string {
+  const P = PROSE[loc];
+  return version <= 1 ? P.editionLabelFriday : P.editionLabelSaturday(version);
+}
+
+/** Resolve the weekend label for a locale. EN always returns the English side.
+ *  JA never returns an English editorial string: a {en,ja} value uses the JA
+ *  side; a legacy English-only string falls back to a date range derived from
+ *  the race dates; and when no dates are available, the JA-safe fallback
+ *  (「今週末」) — never the raw English label. */
+export function resolveWeekendLabel(input: WeekendInput, loc: ReportLocale): string {
+  const v = input.weekend_label;
+  if (typeof v !== "string") {
+    if (loc === "en") return v.en;
+    return v.ja ?? JA_WEEKEND_LABEL_FALLBACK;
+  }
+  if (loc === "en") return v;
+  return jaWeekendRange(input.races) ?? JA_WEEKEND_LABEL_FALLBACK;
+}
+
+/** Resolve the edition label for a locale. A {en,ja} value picks the side; a
+ *  legacy English-only string is shown in EN, and in JA falls back to the
+ *  localized default edition label (金曜版 / 土曜更新). */
+export function resolveEditionLabel(input: WeekendInput, loc: ReportLocale): string {
+  const v = input.edition_label;
+  if (v != null && typeof v !== "string") return v[loc] ?? defaultEditionLabel(input.version, loc);
+  if (v != null && loc === "en") return v;
+  return defaultEditionLabel(input.version, loc);
+}
+
+/** Derive a JA date-range label ("2026年6月27–28日") from the race dates.
+ *  Null when there are no usable dates (caller falls back to the raw label). */
+function jaWeekendRange(races: RaceInput[]): string | null {
+  const days = races
+    .map((r) => r.date)
+    .filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(d))
+    .sort();
+  if (days.length === 0) return null;
+  const min = days[0];
+  const max = days[days.length - 1];
+  const [yyMin, mmMin, ddMin] = min.split("-");
+  const [yyMax, mmMax, ddMax] = max.split("-");
+  const n = (s: string) => Number(s);
+  if (min === max) return `${yyMin}年${n(mmMin)}月${n(ddMin)}日`;
+  if (yyMin === yyMax && mmMin === mmMax) {
+    return `${yyMin}年${n(mmMin)}月${n(ddMin)}–${n(ddMax)}日`;
+  }
+  return `${yyMin}年${n(mmMin)}月${n(ddMin)}日–${yyMax}年${n(mmMax)}月${n(ddMax)}日`;
 }
 
 // ---------------------------------------------------------------------------
 // The generator itself.
 // ---------------------------------------------------------------------------
 
+export interface GenerateReportOptions {
+  /** Output locale. Defaults to "en". English prose templates are unchanged
+   *  from pre-locale, except Research is single-language now (no "English /
+   *  日本語" name pair) — so EN output is NOT byte-identical to the pre-locale
+   *  generator. */
+  locale?: ReportLocale;
+  /** Optional narrative provider (AI seam). Defaults to the locale's
+   *  deterministic provider. */
+  provider?: NarrativeProvider;
+}
+
 export function generateReport(
   input: WeekendInput,
-  provider: NarrativeProvider = deterministicNarrative,
+  opts: GenerateReportOptions = {},
 ): WeeklyReport {
+  const loc = opts.locale ?? "en";
+  const provider = opts.provider ?? deterministicNarrativeFor(loc);
+  const P = PROSE[loc];
   const fr = freshness(input);
   const ordered = [...input.races].sort(gradeOrder);
   const deep_dives: RaceDeepDive[] = ordered.map((race) => {
-    const groups = contenderGroups(race);
-    const tickets = ticketNotes(race);
+    const groups = contenderGroups(race, loc);
+    const tickets = ticketNotes(race, loc);
     const diveSansWhy: Omit<RaceDeepDive, "why_this_race_matters"> = {
       race_id: race.race_id,
-      name: race.name,
+      name: raceName(race.name, race.name_ja, loc),
       name_ja: race.name_ja ?? "",
       grade: race.grade,
       snapshot: {
@@ -894,16 +1040,16 @@ export function generateReport(
         post_time: race.post_time,
         surface: race.surface,
         distance_m: race.distance_m,
-        going: race.going ?? null,
-        weather: race.weather ?? null,
+        going: goingLabel(race.going, loc),
+        weather: weatherLabel(race.weather, loc),
         has_live_odds: race.runners.some((r) => r.win_odds != null && r.win_odds > 0),
         has_gates: race.runners.some((r) => r.gate != null),
       },
-      market_shape: marketShape(race).label,
-      gate_draw_impact: gateDrawImpact(race),
-      pace_map: paceMap(race),
+      market_shape: marketShape(race, loc).label,
+      gate_draw_impact: gateDrawImpact(race, loc),
+      pace_map: paceMap(race, loc),
       contender_groups: groups,
-      trend_analysis: trendAnalysis(race),
+      trend_analysis: trendAnalysis(race, loc),
       ticket_notes: tickets,
     };
     return {
@@ -912,15 +1058,15 @@ export function generateReport(
     };
   });
 
-  const glance = ordered.map(glanceRow);
-  const watchlist = buildWatchlist(input);
-  const lens = buildTicketLens(input, deep_dives);
+  const glance = ordered.map((r) => glanceRow(r, loc));
+  const watchlist = buildWatchlist(input, loc);
+  const lens = buildTicketLens(input, deep_dives, loc);
 
   const sansHeadline = {
     edition_key: input.edition_key,
     version: input.version,
-    edition_label: input.edition_label ?? defaultEditionLabel(input.version),
-    weekend_label: input.weekend_label,
+    edition_label: resolveEditionLabel(input, loc),
+    weekend_label: resolveWeekendLabel(input, loc),
     freshness: fr,
     glance,
     deep_dives,
@@ -936,14 +1082,8 @@ export function generateReport(
     generator_version: GENERATOR_VERSION,
     weekend_headline: headline,
     weekend_themes: themes,
-    not_advice_reminder:
-      "Recreational research only. Not betting advice, not a winning method, not a profit guarantee. Pool takeout applies to every ticket.",
+    not_advice_reminder: P.notAdvice,
   };
-}
-
-function defaultEditionLabel(version: number): string {
-  if (version <= 1) return "Friday edition";
-  return `Saturday refresh (v${version})`;
 }
 
 /** Grade ordering for display: G1 first, then G2, then G3. */

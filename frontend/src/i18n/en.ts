@@ -380,6 +380,8 @@ export const en = {
     pending: "pending",
     est: "estimated",
     field: "Field",
+    // ADR-0020: per-contender horse-number prefix in the deep-dive ("No. 4").
+    horseNo: "No. {n}",
     postTime: "Post",
     favorites: "Top favorites",
     draws: "Notable draws",

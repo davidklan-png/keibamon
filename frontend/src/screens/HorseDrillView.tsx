@@ -25,6 +25,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { useI18n } from "../i18n";
 import { fmt } from "../lib/format";
+import { surfaceToken, styleTokenOf } from "../lib/weeklyReport.locale";
 import {
   fetchHorseForm,
   fetchJockeyForm,
@@ -153,11 +154,11 @@ export function HorseContent(props: HorseContentProps) {
                   <span className="fr-course">{f.racecourse ?? "-"}</span>
                   <span className="fr-pos">#{f.finish_position ?? "-"}</span>
                   <span className="fr-odds">{fmt(f.win_odds ?? undefined, 1)}x</span>
-                  <span className="fr-surf">{f.surface ?? ""}</span>
+                  <span className="fr-surf">{surfaceToken(f.surface, lang)}</span>
                   <span className="fr-dist">
                     {f.distance_m ? `${f.distance_m}m` : ""}
                   </span>
-                  <span className="fr-style">{f.style_signal ?? ""}</span>
+                  <span className="fr-style">{styleTokenOf(f.style_signal, lang)}</span>
                 </li>
               ))}
             </ul>
@@ -180,7 +181,7 @@ export function HorseContent(props: HorseContentProps) {
                 .sort((a, b) => b[1] - a[1])
                 .map(([k, n]) => (
                   <span key={k} className="combo-chip">
-                    {k} · {n}
+                    {styleTokenOf(k, lang)} · {n}
                   </span>
                 ))}
             </div>
@@ -199,7 +200,7 @@ export function HorseContent(props: HorseContentProps) {
     const surface = horse.by_surface || {};
     for (const [k, s] of Object.entries(surface)) {
       chips.push(
-        <SplitChip key={`s-${k}`} label={`${t("form.surface")} ${k}`} split={s} />,
+        <SplitChip key={`s-${k}`} label={`${t("form.surface")} ${surfaceToken(k, lang)}`} split={s} />,
       );
     }
     const dist = horse.by_distance_band || {};

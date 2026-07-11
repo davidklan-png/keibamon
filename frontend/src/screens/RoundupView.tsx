@@ -23,6 +23,7 @@ import type {
   RacePick,
 } from "../lib/weeklyReport";
 import { effectiveOdds } from "../lib/weeklyReport";
+import { fmtOdds, surfaceLabel } from "../lib/weeklyReport.locale";
 import type { ImpressionMap } from "../lib/impressions";
 import { getImpression, impressionsByRace } from "../lib/impressions";
 import { normalizeName } from "../lib/normalizeName";
@@ -254,10 +255,7 @@ function RaceDeepDiveBlock({
         onClick={() => setOpen((o) => !o)}
       >
         <span className={`grade-chip grade-${dive.grade}`}>{dive.grade}</span>
-        <span className="deepdive-name">
-          {dive.name}
-          {dive.name_ja ? <span className="ja"> / {dive.name_ja}</span> : null}
-        </span>
+        <span className="deepdive-name">{dive.name}</span>
         <span className="deepdive-caret">{open ? "▾" : "▸"}</span>
       </button>
 
@@ -323,12 +321,12 @@ function RaceDeepDiveBlock({
 }
 
 function SnapshotLine({ dive }: { dive: RaceDeepDive }) {
-  const { t } = useI18n();
+  const { t, tFmt, lang } = useI18n();
   const s = dive.snapshot;
   const bits = [
-    `${s.distance_m} m`,
-    s.surface,
-    `${s.field_size} ${t("roundup.field")}`,
+    `${s.distance_m}${lang === "ja" ? "" : " m"}`,
+    surfaceLabel(s.surface, lang),
+    tFmt("race.runnersCount", { count: s.field_size }),
     `${t("roundup.postTime")} ${s.post_time}`,
     s.going ? `${t("roundup.going")}: ${s.going}` : null,
     s.weather ? s.weather : null,
@@ -366,7 +364,7 @@ function ContenderGroupsBlock({
   onSetImpressions: (next: ImpressionMap) => void;
   oddsSnapshotAt: string | null;
 }) {
-  const { t } = useI18n();
+  const { t, tFmt, lang } = useI18n();
   // Per-race expand state (mirrors RaceScreen's openUma pattern). Only one
   // contender drill is open at a time per race. null = all collapsed; the
   // mount IS the lazy-fetch gate (collapsed rows never fetch form data).
@@ -397,10 +395,10 @@ function ContenderGroupsBlock({
                     </span>
                   )}
                   <span className="contender-name">
-                    No.{r.horse_number} {r.horse_name}
+                    {tFmt("roundup.horseNo", { n: r.horse_number })} {r.horse_name}
                   </span>
                   {r.win_odds != null && (
-                    <span className="contender-odds">~{r.win_odds.toFixed(1)}</span>
+                    <span className="contender-odds">{fmtOdds(r.win_odds, lang)}</span>
                   )}
                   <span className="contender-caret">{isOpen ? "▾" : "▸"}</span>
                 </button>
