@@ -3,10 +3,10 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Keibamon 競馬モン — the honest keiba companion</title>
-<meta name="description" content="Keibamon: a companion for Japanese horse racing (JRA). Weekend graded-stakes research that refreshes through post time, horse & jockey form at a glance, and honest ticket structuring you copy straight onto the JRA card. Built on a research spine rigorous enough to prove the market is efficient — so it never sells you a winning system.">
-<meta property="og:title" content="Keibamon 競馬モン — the honest keiba companion">
-<meta property="og:description" content="A companion for JRA racing: weekend graded-stakes research, horse & jockey form, honest ticket structuring. Built in public on a rigorous, market-tested research spine. Never a tip sheet.">
+<title>Keibamon 競馬モン — your JRA race-day companion</title>
+<meta name="description" content="Keibamon: your JRA race-day companion — research the card, structure honest tickets, and share the ride with friends. Weekend graded-stakes research that refreshes through post time, horse & jockey form at a glance, honest ticket structuring, and friends & sharing — in English and 日本語. Built on a research spine rigorous enough to prove the market is efficient, so it never sells you a winning system.">
+<meta property="og:title" content="Keibamon 競馬モン — your JRA race-day companion">
+<meta property="og:description" content="Research the card, structure honest tickets, and share the ride with friends. Weekend graded-stakes research, horse & jockey form, honest tickets, and a friends & sharing layer — built in public on a market-tested research spine. Never a tip sheet.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://keibamon.com/keibamon.png">
 <style>
@@ -25,15 +25,24 @@
   h1{font-size:clamp(40px,9vw,76px); line-height:.98; margin:.35em 0 .1em; letter-spacing:-.02em}
   h1 .ja{color:var(--gold); font-weight:700}
   .lede{font-size:clamp(17px,2.6vw,21px); color:var(--muted); max-width:62ch; margin:.4em 0 0}
-  .status{display:inline-flex; align-items:center; gap:.5em; margin-top:22px; padding:.4em .8em;
+  .lede .ja{color:var(--ink)}
+  .badges{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:22px}
+  .status{display:inline-flex; align-items:center; gap:.5em; padding:.4em .8em;
     border:1px solid var(--line); border-radius:999px; background:var(--panel); font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; color:var(--muted)}
+  .status.ver{text-decoration:none; color:var(--turf); border-color:var(--rail)}
+  .status.ver:hover{border-color:var(--turf); transform:translateY(-1px)}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--turf);box-shadow:0 0 0 4px rgba(57,192,122,.18)}
   h2{font:600 12px/1 ui-monospace,monospace; letter-spacing:.18em; text-transform:uppercase; color:var(--muted); margin:54px 0 18px}
+  h2 .ja{color:var(--gold); text-transform:none; letter-spacing:0; font:700 14px/1 inherit}
+  .lede-sec{color:var(--muted); max-width:64ch; margin:-6px 0 18px; font-size:15px}
   .grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:14px}
   .card{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:18px 18px 20px}
   .card .k{font:600 11px/1 ui-monospace,monospace; letter-spacing:.12em; color:var(--gold)}
+  .card .k .new{color:var(--turf); margin-left:.5em}
   .card h3{margin:.6em 0 .3em; font-size:18px}
   .card p{margin:0; color:var(--muted); font-size:14.5px}
+  .card .privacy{margin-top:10px; padding:.5em .7em; border-radius:10px; font:600 12px/1.4 ui-monospace,monospace;
+    color:var(--turf); background:rgba(57,192,122,.08); border:1px solid rgba(57,192,122,.28)}
   .card .stat{font:700 22px/1 ui-monospace,monospace; color:var(--ink); margin:.5em 0 .15em}
   .score{display:flex; flex-direction:column; gap:10px}
   .scorerow{display:flex; align-items:center; justify-content:space-between; gap:14px;
@@ -42,7 +51,6 @@
   .scorerow .name span{display:block; color:var(--muted); font-size:13px; font-weight:400; margin-top:2px}
   .tag{font:600 10.5px/1 ui-monospace,monospace; letter-spacing:.1em; padding:.5em .7em; border-radius:999px; white-space:nowrap; text-transform:uppercase}
   .tag--null{color:var(--gold); background:rgba(224,179,65,.1); border:1px solid rgba(224,179,65,.32)}
-  .tag--live{color:var(--turf); background:rgba(57,192,122,.12); border:1px solid rgba(57,192,122,.34)}
   .links{display:flex; flex-wrap:wrap; gap:12px; margin-top:22px}
   .btn{display:inline-flex; align-items:center; gap:.55em; text-decoration:none; font-weight:600;
     padding:.7em 1.1em; border-radius:12px; border:1px solid var(--line); color:var(--ink); background:var(--panel); transition:transform .15s,border-color .15s}
@@ -58,63 +66,89 @@
 <body>
   <main class="wrap">
     <img class="avatar" src="keibamon.png" width="104" height="104" alt="Keibamon 競馬モン avatar" decoding="async">
+
+    <!-- ============================================================
+         1. HERO — what it is, in one breath. App-first.
+         ============================================================ -->
     <p class="eyebrow">build in public · 個人開発</p>
     <h1>Keibamon <span class="ja">競馬モン</span></h1>
-    <p class="lede">Your companion for Japanese horse racing (JRA) — weekend graded-stakes research that refreshes through post time, horse-and-jockey form at a glance, and honest ticket structuring you can copy straight onto the JRA card. Built on a research spine rigorous enough to prove the market is efficient — which is exactly why it will never sell you a winning system.</p>
-    <span class="status"><span class="dot"></span>RESEARCH PREVIEW · LIVE ON RACE DAY</span>
+    <p class="lede">Your JRA race-day companion — research the card, structure honest tickets, and share the ride with friends. <span class="ja">競馬当日のパートナー。カードを研究し、正直な馬券を組み立て、友だちとシェアできます。</span></p>
+    <div class="badges">
+      <span class="status"><span class="dot"></span>RESEARCH PREVIEW · LIVE ON RACE DAY</span>
+      <a class="status ver" href="/updates.html">v<span data-version-stamp>0.3.0</span> · what's new →</a>
+    </div>
 
     <div class="links">
       <a class="btn btn--turf" href="/app/">アプリを開く · Open the app &rarr;</a>
     </div>
 
-    <h2>// What it does</h2>
+    <!-- ============================================================
+         2. THE APP — the main event. Six cards, in the order a
+         user meets them.
+         ============================================================ -->
+    <h2>// The app <span class="ja">· アプリでできること</span></h2>
     <div class="grid">
       <div class="card">
         <div class="k">WEEKEND ROUNDUP</div>
         <h3>Graded-stakes research, live</h3>
-        <p>Every G1–G3 on the card, with race shape, contenders, pace, gate &amp; going — and it refreshes itself every few minutes through post time, with an "as of" stamp so you always know how current the odds are.</p>
+        <p>Every G1–G3 on the card — race shape, contenders, pace, gate &amp; going — and it refreshes itself every few minutes through post time, with an "as of" stamp so you always know how current the odds are.</p>
       </div>
       <div class="card">
-        <div class="k">FORM &amp; YOUR READ</div>
-        <h3>Know the runners</h3>
-        <p>Tap any horse for career, recent finishes with surface &amp; distance, going splits and running style — then mark your own read (anchor, like, price, avoid) and watch it against how the market moves.</p>
+        <div class="k">RUNNERS &amp; YOUR READ</div>
+        <h3>Know the horses</h3>
+        <p>Tap any horse for career form, recent finishes with surface &amp; distance, and running style — then mark your own read (anchor, like, price, avoid) and watch it against how the market moves.</p>
       </div>
       <div class="card">
         <div class="k">HONEST TICKETS</div>
         <h3>Structure, then transcribe</h3>
-        <p>Turn your reads into box / wheel / formation tickets across 馬連・ワイド・3連複・馬単・3連単, with a mark-card fill guide you copy straight onto the JRA card. The math is honest — WIDE pays on multiple lines, and we count every one.</p>
+        <p>Turn your reads into box / wheel / formation tickets across 馬連・ワイド・3連複・馬単・3連単, drawn like real track tickets. A mark-card fill guide copies straight onto the JRA card, and the cost &amp; fair-payout math is honest — WIDE pays on multiple lines, and we count every one.</p>
+      </div>
+      <div class="card">
+        <div class="k">FRIENDS &amp; SHARING<span class="new">NEW</span></div>
+        <h3>Share the race day</h3>
+        <p>Add friends by handle or invite link, share a ticket with everyone or just a few friends, and comment on each other's tickets. When a friend's ticket wins, it surfaces on its own with a congratulations, and a bell keeps track of what's new.</p>
+        <div class="privacy">Nothing is visible to friends until you share it. · シェアするまで友だちには見えません。</div>
       </div>
       <div class="card">
         <div class="k">GLOSSARY</div>
         <h3>The card, decoded</h3>
         <p>A bilingual EN / 日本語 reference for the terms, bet types and track language — so the betting card stops being a wall of kanji and starts making sense.</p>
       </div>
+      <div class="card">
+        <div class="k">YOUR TICKETS</div>
+        <h3>Saved, settled, tracked</h3>
+        <p>Your tickets live in one place — saved ahead of the race, edited or deleted until the off, then settled at the official payout with your wins tracked across the weekend.</p>
+      </div>
     </div>
 
-    <h2>// Why you can trust it</h2>
-    <p class="note"><b>Six signals tested, six honest nulls.</b> Before any of this was a companion, it was a research lab. Every promising edge — data-mining, going aptitude, training times, the odds curve, cross-pool exotics, even a full multivariate model — was held to one bar: beat the de-vigged market, out of sample, net of takeout. All six failed it. The JRA pari-mutuel prices public information efficiently. We publish that finding plainly, because a companion that knows it can't sell you an edge is one you can actually trust.</p>
+    <!-- ============================================================
+         3. THE TECHNOLOGY — second act. Plain language first,
+         detail second. Everything technical consolidates here.
+         ============================================================ -->
+    <h2>// The technology <span class="ja">· なぜ信頼できるか</span></h2>
+    <p class="lede-sec">The companion is built on a research lab that held itself to one bar — beat the market on races it had never seen. That rigor is why the live numbers hold up, and it's also why you'll never see a tip in this app.</p>
     <div class="grid">
       <div class="card">
-        <div class="k">INTEGRITY</div>
+        <div class="k">THE DATA SPINE</div>
+        <h3>One lake, curated to the edge</h3>
+        <p>A medallion data lake (bronze→silver→gold) of JRA records and intraday odds lives on one machine and is the source of truth; only curated results push to the Cloudflare edge. Official JV-Link data feeds it, a backup capture guards it, and if the edge ever goes stale, a staleness guard freezes the numbers honestly instead of faking fresh.</p>
+      </div>
+      <div class="card">
+        <div class="k">POINT-IN-TIME HONESTY</div>
         <div class="stat">PIT</div>
-        <h3>Point-in-time honest</h3>
-        <p>A decision at time <em>t</em> sees only what was knowable at <em>t</em> — leakage-guarded, walk-forward, settled at official payouts, judged against a calibrated market baseline. The same rigor underwrites the live numbers.</p>
+        <h3>What you knew, when you knew it</h3>
+        <p>A decision at time <em>t</em> sees only what was knowable at <em>t</em> — leakage-guarded, walk-forward, and settled at the official payout. The same rule underwrites the live numbers you see on race day.</p>
       </div>
       <div class="card">
-        <div class="k">NEVER A TIP SHEET</div>
-        <div class="stat">your call</div>
-        <h3>No picks, no rankings</h3>
-        <p>Keibamon surfaces data and structures <em>your</em> read. It never names a winner, ranks runners, or claims a profit. The decision is always yours — and the takeout is always shown.</p>
-      </div>
-      <div class="card">
-        <div class="k">CALIBRATED</div>
-        <div class="stat">even the tail</div>
-        <h3>The market is the yardstick</h3>
-        <p>The de-vigged win market is near-perfectly calibrated, with no exploitable favorite-longshot mispricing. That sound baseline is precisely why the honest numbers in the app hold up.</p>
+        <div class="k">WHY THERE ARE NO TIPS</div>
+        <div class="stat">6 / 6</div>
+        <h3>The market is efficient</h3>
+        <p>Before any of this was a companion, it was a research lab. Six promising edges were each held to one bar — beat the market's fair odds on races it had never seen, after the track's takeout. All six failed it. The JRA pari-mutuel prices public information efficiently, so this app surfaces data and structures <em>your</em> read. It never names a winner. Never a tip sheet.</p>
       </div>
     </div>
 
-    <h2>// The market-test scoreboard</h2>
+    <h2>// The market-test scoreboard <span class="ja">· 検証結果</span></h2>
+    <p class="lede-sec">The evidence behind "no tips" — each edge tested, each honestly priced in.</p>
     <div class="score">
       <div class="scorerow"><div class="name">Data-mining (DM / TM)<span>JRA-VAN's own time &amp; score models</span></div><span class="tag tag--null">priced in</span></div>
       <div class="scorerow"><div class="name">Going / track-condition handling<span>per-horse wet-vs-firm aptitude</span></div><span class="tag tag--null">priced in</span></div>
@@ -124,47 +158,35 @@
       <div class="scorerow"><div class="name">Multivariate model (Benter two-stage)<span>real signal alone — blend weight a=0 once the market is in</span></div><span class="tag tag--null">priced in</span></div>
     </div>
 
-    <h2>// How it runs</h2>
-    <div class="grid">
-      <div class="card">
-        <div class="k">LOCAL-FIRST</div>
-        <h3>Lake to edge</h3>
-        <p>A medallion data lake (bronze→silver→gold) of JRA records and intraday odds curves lives on one machine and is the source of truth. Only curated, derived results push to a Cloudflare edge — if the edge goes stale, the lake is still right.</p>
-      </div>
-      <div class="card">
-        <div class="k">SELF-REFRESHING</div>
-        <h3>The Roundup publishes itself</h3>
-        <p>On race day a scheduled job rebuilds the weekend report from the live capture every few minutes — no human in the loop. A staleness guard freezes it honestly if the upstream feed ever stalls, rather than faking freshness.</p>
-      </div>
-      <div class="card">
-        <div class="k">OPEN</div>
-        <h3>Built in public</h3>
-        <p>122 commits in the first 17 days, the architecture decisions written down as ADRs, and the negative results published alongside the wins. The code and the reasoning are both in the open.</p>
-      </div>
-    </div>
-
-    <h2>// Now &amp; next</h2>
+    <!-- ============================================================
+         4. NOW & NEXT — refreshed to current reality.
+         ============================================================ -->
+    <h2>// Now &amp; next <span class="ja">· 現状と次の一手</span></h2>
     <div class="grid">
       <div class="card">
         <div class="k">LIVE NOW</div>
-        <h3>Race-day ready</h3>
-        <p>The companion is live for JRA weekends — Roundup, form, glossary and ticket structuring, in English and 日本語, on your phone at the track.</p>
+        <h3>Race-day ready, with friends</h3>
+        <p>The whole companion is live for JRA weekends — Roundup, form, honest tickets, glossary, and friends &amp; sharing — in English and 日本語, on your phone at the track.</p>
       </div>
       <div class="card">
-        <div class="k">RAMPING</div>
-        <h3>Toward best-in-class</h3>
-        <p>Heading into the summer: a smoother first run for newcomers, deeper form context, and your saved reads carried across the whole weekend — growing into the keiba companion regulars reach for first.</p>
+        <div class="k">NEXT</div>
+        <h3>Closing the rough edges</h3>
+        <p>Phone push notifications, invite-by-QR-code, and sharing straight from the research view — the known rough edges we want smooth before calling this 1.0.</p>
       </div>
       <div class="card">
-        <div class="k">ONGOING</div>
-        <h3>The lab lives on</h3>
-        <p>Forward odds-curve capture keeps banking race-day data and the evaluation spine stands ready for any future signal — so if an honest edge ever does appear, this is where it gets caught.</p>
+        <div class="k">TOWARD 1.0</div>
+        <h3>One untouched weekend</h3>
+        <p>1.0 isn't a date — it's a trust mark: one full JRA weekend where research → ticket → share → result → win runs for real users with no intervention. We earn it, then keep going.</p>
       </div>
     </div>
 
-    <h2>// Links</h2>
+    <!-- ============================================================
+         5. LINKS & FOOTER — keep + version history.
+         ============================================================ -->
+    <h2>// Links <span class="ja">· リンク</span></h2>
     <div class="links">
       <a class="btn btn--turf" href="/app/">アプリを開く · Open the app &rarr;</a>
+      <a class="btn" href="/updates.html">What's new · 更新情報 →</a>
       <a class="btn" href="/live.html">Live race-day dashboard →</a>
       <a class="btn" href="https://github.com/davidklan-png/keibamon" target="_blank" rel="noreferrer">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8Z"/></svg>

@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What's new · 更新情報 — Keibamon 競馬モン</title>
+<meta name="description" content="What's new in Keibamon, in plain English and 日本語. The honest JRA race-day companion: research the card, structure honest tickets, and share the ride with friends. バージョンごとの更新内容を、わかりやすい言葉でお届けします。">
+<meta property="og:title" content="What's new · 更新情報 — Keibamon 競馬モン">
+<meta property="og:description" content="What's new in Keibamon — the honest JRA race-day companion. Each release in plain English and 日本語.">
+<meta property="og:type" content="article">
+<meta property="og:image" content="https://keibamon.com/keibamon.png">
+<style>
+  :root{
+    --bg:#0c1411; --panel:#10201a; --line:#1f3a2e; --ink:#e9f1ec;
+    --muted:#9fb3a8; --turf:#39c07a; --gold:#e0b341; --rail:#2a4a3a;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:radial-gradient(1200px 600px at 50% -10%,#13261d 0,var(--bg) 60%);
+    color:var(--ink); font:16px/1.6 ui-sans-serif,-apple-system,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+    -webkit-font-smoothing:antialiased; min-height:100vh;
+  }
+  .wrap{max-width:880px; margin:0 auto; padding:clamp(28px,6vw,72px) 22px 56px}
+  .back{display:inline-flex; gap:.4em; text-decoration:none; font:600 12px/1 ui-monospace,monospace;
+    letter-spacing:.12em; text-transform:uppercase; color:var(--muted)}
+  .back:hover{color:var(--turf)}
+  .eyebrow{font:600 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace; letter-spacing:.18em; text-transform:uppercase; color:var(--turf); margin-top:26px}
+  h1{font-size:clamp(34px,7vw,58px); line-height:1; margin:.3em 0 .15em; letter-spacing:-.02em}
+  h1 .ja{color:var(--gold); font-weight:700}
+  .lede{font-size:clamp(16px,2.4vw,19px); color:var(--muted); max-width:64ch; margin:.3em 0 0}
+  .now{display:inline-flex; align-items:center; gap:.5em; margin-top:20px; padding:.4em .8em;
+    border:1px solid var(--line); border-radius:999px; background:var(--panel); font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; color:var(--muted)}
+  .now b{color:var(--turf); font-weight:700}
+  .dot{width:8px;height:8px;border-radius:50%;background:var(--turf);box-shadow:0 0 0 4px rgba(57,192,122,.18)}
+  .entries{margin-top:34px; display:flex; flex-direction:column; gap:18px}
+  .entry{background:var(--panel); border:1px solid var(--line); border-radius:16px; padding:20px 22px 22px}
+  .entry .vh{display:flex; align-items:baseline; flex-wrap:wrap; gap:.5em; margin-bottom:14px}
+  .entry .ver{font:700 20px/1 ui-monospace,monospace; color:var(--gold); letter-spacing:.01em}
+  .entry .date{font:600 12px/1 ui-monospace,monospace; color:var(--muted); letter-spacing:.08em}
+  .entry .title{flex-basis:100%; font-size:18px; font-weight:600; margin:.2em 0 0; color:var(--ink)}
+  .bilingual{display:grid; grid-template-columns:1fr 1fr; gap:20px}
+  .bilingual .lang{font:600 10.5px/1 ui-monospace,monospace; letter-spacing:.14em; text-transform:uppercase; color:var(--turf); margin-bottom:.4em}
+  .bilingual p{margin:0; color:var(--ink); font-size:15px}
+  .bilingual p.ja{color:var(--muted)}
+  .curious{margin-top:16px; padding-top:14px; border-top:1px dashed var(--rail); font:13px/1.5 ui-monospace,monospace; color:var(--muted)}
+  .curious b{color:var(--ink); font-weight:600}
+  .note{margin-top:34px; padding:16px 18px; border-left:3px solid var(--rail); color:var(--muted); font-size:14px; background:linear-gradient(90deg,rgba(57,192,122,.05),transparent)}
+  .note b{color:var(--ink)}
+  footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; display:flex; flex-wrap:wrap; gap:6px 18px; justify-content:space-between}
+  a{color:var(--turf)}
+  @media (max-width:620px){
+    .bilingual{grid-template-columns:1fr; gap:14px}
+    .bilingual .ja-block{margin-top:4px}
+  }
+</style>
+</head>
+<body>
+  <main class="wrap">
+    <a class="back" href="/">← Keibamon home · ホームへ</a>
+    <p class="eyebrow">更新情報 · what's new</p>
+    <h1>What's <span class="ja">新着</span></h1>
+    <p class="lede">Every release of Keibamon in plain language — what you can do now that you couldn't before. / Keibamonの更新内容を、専門言葉なしで。前にはできなかったことが、今できるようになったかをお伝えします。</p>
+    <span class="now"><span class="dot"></span>CURRENT · <b data-version-stamp>0.3.0</b></span>
+
+    <div class="entries">
+
+      <article class="entry">
+        <div class="vh">
+          <span class="ver">v0.3</span>
+          <span class="date">JULY 12, 2026</span>
+          <span class="title">A smoother social side</span>
+        </div>
+        <div class="bilingual">
+          <div>
+            <div class="lang">English</div>
+            <p>This batch makes sharing a race day feel natural. You pick your handle the first time you sign in. Invite links open the app in one tap. Tickets are drawn to look like real track tickets — box, formation, and wheel. Your own shares appear in your feed too, shared tickets carry the race name, the screens are a little tidier, and tapping a notification takes you straight to the thing it was about.</p>
+          </div>
+          <div class="ja-block">
+            <div class="lang">日本語</div>
+            <p class="ja">ソーシャル機能がもっと自然になりました。初回サインイン時にハンドル名を決めます。招待リンクはワンタップでアプリを開きます。馬券は本物の競馬場の馬券そっくりに描画されます（ボックス・フォーメーション・車輪）。自分のシェアも自分のフィードに流れます。シェアした馬券にはレース名が付き、画面を少し整え、通知をタップするとその出来事へ直接ジャンプします。</p>
+          </div>
+        </div>
+        <p class="curious"><b>For the curious:</b> one shared renderer draws every ticket shape; the notification bell now deep-links to the exact event behind the alert.</p>
+      </article>
+
+      <article class="entry">
+        <div class="vh">
+          <span class="ver">v0.2</span>
+          <span class="date">JULY 11, 2026</span>
+          <span class="title">Friends arrive</span>
+        </div>
+        <div class="bilingual">
+          <div>
+            <div class="lang">English</div>
+            <p>You can now share a race day with friends. Add friends by their handle or with an invite link. Share a ticket with everyone, or just a few friends. Leave comments on each other's tickets. When a friend's ticket wins, it shows up on its own with a congratulations — and a bell in the corner keeps track of what's new. Nothing is visible to friends until you share it.</p>
+          </div>
+          <div class="ja-block">
+            <div class="lang">日本語</div>
+            <p class="ja">レース日を友だちとシェアできるようになりました。ハンドル名か招待リンクで友だちを追加できます。馬券を全員に、または特定の友だちだけにシェアできます。おたがいの馬券にコメントを残せます。友だちの馬券が当たると、自動でお祝いと一緒に表示されます。隅のベルアイコンで最新を確認できます。シェアするまで、友だちには何も見えません。</p>
+          </div>
+        </div>
+        <p class="curious"><b>For the curious:</b> sharing is a directed choice — there is no public feed, and each ticket reaches only the audience you pick.</p>
+      </article>
+
+      <article class="entry">
+        <div class="vh">
+          <span class="ver">v0.1</span>
+          <span class="date">JUNE 25, 2026</span>
+          <span class="title">First public preview</span>
+        </div>
+        <div class="bilingual">
+          <div>
+            <div class="lang">English</div>
+            <p>The first version you could actually use on a race day. A weekend roundup of the big graded races that refreshes itself through post time. Tap any horse for its form and recent runs, then mark your own read. Turn that read into an honest ticket — box, wheel, or formation — that you can copy straight onto the JRA card. A bilingual glossary decodes the betting card, and the live numbers refresh on race day.</p>
+          </div>
+          <div class="ja-block">
+            <div class="lang">日本語</div>
+            <p class="ja">レース当日に実際に使える最初のバージョンです。出走時刻まで自動で更新される、週末の大きな重賞レースのまとめ。任意の馬をタップすると戦績と最近の走りが見え、自分の読みをメモできます。その読みを、JRAの馬券用紙にそのまま書き写せる正直な馬券（ボックス・車輪・フォーメーション）に変換できます。2カ国語の用語集が馬券用語を解読し、当日はオッズがリアルタイムで更新されます。</p>
+          </div>
+        </div>
+        <p class="curious"><b>For the curious:</b> the app is built on a research spine that tested every promising edge and found the JRA market efficient — which is exactly why it gives you the card and never a tip.</p>
+      </article>
+
+    </div>
+
+    <p class="note"><b>How we count versions.</b> The middle number goes up each time a batch of features ships that you can see; the last number covers small fixes and polish. <b>1.0</b> will mean one full JRA weekend where the whole loop — research, ticket, share, result, win — runs on its own without us touching it. It's a trust mark, not a date on a calendar. / <b>バージョンの数え方：</b>真ん中の数字は「新しい機能がまとめて届いた」、末尾の数字は「小さな修正・調整」を意味します。<b>1.0</b>は、調査・馬券・シェア・結果・当選までの一連の流れが、誰も触らずに週末ずっと動いたときの信頼の目印です。</p>
+
+    <p class="note">This page is written by hand for each release — there's no auto-generated changelog, and a release isn't done until this page says what changed. / このページはリリースごとに手書きで更新されます。自動生成の変更履歴はなく、「ここに書かれるまでリリースは終わらない」が決まりです。</p>
+
+    <footer>
+      <span>© 2026 David Klan · built in public</span>
+      <span><a href="/">Keibamon home · ホームへ</a></span>
+    </footer>
+  </main>
+</body>
+</html>

@@ -15,6 +15,7 @@ export function Footer() {
     <footer className="foot">
       <a href="/">{t("footer.back")}</a>
       <p className="foot-disclaimer">{t("auth.disclaimer")}</p>
+      <p className="foot-version">Keibamon v{__APP_VERSION__} · 競馬モン</p>
     </footer>
   );
 }
