@@ -4,9 +4,12 @@
 // Self-contained (fetches its own unread count on mount + a 60s interval, and
 // the list when opened) so it can mount in any header without prop-drilling the
 // count. Tap an item → mark-it-read + onDeepLink(n) (the parent maps the type to
-// a screen). Mark-all-read clears the badge. In-app only (push-ready schema, no
-// push in v1). ~90-day retention is server-side (the sweep cron prunes).
-import { useCallback, useEffect, useState } from "react";
+// a screen). Opening the panel marks what it displays as read (bubble = "new
+// since last look") — it zeroes optimistically and reconciles from the next
+// poll; the explicit mark-all button shares the same path. In-app only
+// (push-ready schema, no push in v1). ~90-day retention is server-side (the
+// sweep cron prunes).
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n";
 import {
   getNotifications,
@@ -26,12 +29,18 @@ export function NotificationBell({ getToken, onDeepLink }: NotificationBellProps
   const [count, setCount] = useState(0);
   const [open, setOpen] = useState(false);
   const [list, setList] = useState<NotificationView[] | null>(null);
+  // True while a mark-on-open / mark-all is in flight (open → server mark →
+  // reconcile). Suppresses stale 60s-poll responses issued before the server's
+  // markAll landed, so a cleared bubble can't resurrect after the user looked.
+  const markingRef = useRef(false);
 
   const refreshCount = useCallback(async () => {
     const token = await getToken();
     if (!token) return;
     const r = await getUnreadCount(token);
-    if (r.ok) setCount(r.data.count);
+    // Drop a count that predates an in-flight mark — the bubble already zeroed
+    // optimistically and the mark's own reconcile is authoritative.
+    if (r.ok && !markingRef.current) setCount(r.data.count);
   }, [getToken]);
 
   useEffect(() => {
@@ -50,14 +59,35 @@ export function NotificationBell({ getToken, onDeepLink }: NotificationBellProps
     if (!token) return;
     const r = await getNotifications(token);
     setList(r.ok ? r.data : []);
+    // Opening the panel marks what it displays as read — the bubble is
+    // "new since last look," so it clears once the user has looked. Fires the
+    // existing server markAll path; the count zeroes optimistically and is
+    // reconciled by the read after the mark lands.
+    void markViewed();
   }
 
-  async function markAll() {
-    const token = await getToken();
-    if (!token) return;
-    await markNotificationsRead(token);
+  /**
+   * Mark everything currently visible as read (used by both panel-open and the
+   * explicit "mark all read" button). Zeroes the badge optimistically, marks
+   * server-side, then reconciles from the server. `markingRef` spans the whole
+   * sequence so a stale 60s poll (or a concurrent re-open) can't resurrect the
+   * cleared badge before the server reflects the mark.
+   */
+  async function markViewed() {
     setCount(0);
+    markingRef.current = true;
+    const token = await getToken();
+    if (!token) {
+      markingRef.current = false;
+      return;
+    }
+    await markNotificationsRead(token);
+    markingRef.current = false;
     setList((prev) => (prev ?? []).map((n) => ({ ...n, read_at: n.read_at ?? 1 })));
+    // Reconcile: reads 0 (just marked), or any count for notifications newer
+    // than this view. Suppressed if a newer view began in the meantime.
+    const ur = await getUnreadCount(token);
+    if (ur.ok && !markingRef.current) setCount(ur.data.count);
   }
 
   async function openItem(n: NotificationView) {
@@ -87,7 +117,7 @@ export function NotificationBell({ getToken, onDeepLink }: NotificationBellProps
           <div className="notif-panel-head">
             <strong>{t("notifications.title")}</strong>
             {count > 0 && (
-              <button className="notif-mark-all" onClick={() => void markAll()}>
+              <button className="notif-mark-all" onClick={() => void markViewed()}>
                 {t("notifications.markAllRead")}
               </button>
             )}

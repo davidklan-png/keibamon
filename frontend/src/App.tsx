@@ -67,6 +67,10 @@ function App() {
   // Friend Interactions Phase 3: pending friend-request count for the Friends
   // tab badge (the Phase 4 bell later takes over notification duty).
   const [pendingFriends, setPendingFriends] = useState(0);
+  // Item 4 — own-share-in-feed tap-through: an own share tapped in the Friends
+  // feed routes here (switch to "mine" + carry the ticket id) so MyTickets
+  // opens the owner engagement surface (detail) for that exact ticket.
+  const [myTicketOpenId, setMyTicketOpenId] = useState<string | null>(null);
   // Social UX Fixes (Phase B): the signed-in viewer's @handle, used to gate
   // first-login onboarding. Tri-state: undefined = profile still loading
   // (render the shell normally); null = loaded and NO handle → blocking
@@ -90,7 +94,6 @@ function App() {
   // miss silently and every Place-ticket tap bail with no POST, no toast.
   const [selectedRace, setSelectedRace] = useState<LiveRace | null>(null);
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
-  const [snapLoading, setSnapLoading] = useState(false);
   const [snapError, setSnapError] = useState<string>("");
   // ADR-0006: lifecycle of the selected race — "registered" (grayed, est odds),
   // "open" (live), "result", or "manual" (hand-entered).
@@ -117,7 +120,7 @@ function App() {
 
   // ---------- Live snapshot ----------
   useEffect(() => {
-    loadLive(true);
+    loadLive();
     // ADR-0006: poll in the background so newly REGISTERED races (and odds
     // going live) surface within ~45s without a reload. This only refreshes
     // the snapshot (race list + odds in the picker); it never re-applies a
@@ -139,8 +142,7 @@ function App() {
     }
   }
 
-  async function loadLive(silent: boolean) {
-    if (!silent) setSnapLoading(true);
+  async function loadLive() {
     try {
       const s = await fetchLiveSnapshot();
       setSnap(s);
@@ -167,8 +169,6 @@ function App() {
     } catch (e) {
       setSnapError(e instanceof Error ? e.message : String(e));
       if (runners.length === 0) seedManual();
-    } finally {
-      setSnapLoading(false);
     }
   }
 
@@ -572,9 +572,25 @@ function App() {
   // destination still lives inside its screen (e.g. MyTicketsHome).
   let body: ReactNode;
   if (view === "mine") {
-    body = <MyTicketsHome snap={snap} impressions={impressions} />;
+    body = (
+      <MyTicketsHome
+        snap={snap}
+        impressions={impressions}
+        openTicketId={myTicketOpenId}
+        onTicketOpened={() => setMyTicketOpenId(null)}
+      />
+    );
   } else if (view === "friends") {
-    body = <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} />;
+    body = (
+      <FriendsScreen
+        getToken={getToken}
+        onPendingChange={setPendingFriends}
+        onOpenMyTicket={(id) => {
+          setMyTicketOpenId(id);
+          setView("mine");
+        }}
+      />
+    );
   } else if (view === "reference") {
     body = <ReferenceScreen />;
   } else {
@@ -697,12 +713,9 @@ function App() {
             runners={runners}
             raceLabel={raceLabel}
             snap={snap}
-            snapLoading={snapLoading}
             snapError={snapError}
             selectedRaceDate={selectedRaceDate}
             selectedRaceKey={selectedRaceKey}
-            onReload={() => loadLive(false)}
-            onSeedManual={() => seedManual()}
             onApplyRace={applyRace}
             onStandard={standardTickets}
             raceStatus={raceStatus}

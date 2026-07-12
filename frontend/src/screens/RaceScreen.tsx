@@ -44,12 +44,9 @@ export interface RaceScreenProps {
   runners: Runner[];
   raceLabel: string;
   snap: LiveSnapshot | null;
-  snapLoading: boolean;
   snapError: string;
   selectedRaceDate: string;
   selectedRaceKey: string;
-  onReload: () => void;
-  onSeedManual: () => void;
   onApplyRace: (r: LiveRace, fallbackDate?: string) => void;
   onStandard: () => void;
   raceStatus: string;
@@ -82,12 +79,9 @@ export function RaceScreen(props: RaceScreenProps) {
     runners,
     raceLabel,
     snap,
-    snapLoading,
     snapError,
     selectedRaceDate,
     selectedRaceKey,
-    onReload,
-    onSeedManual,
     onApplyRace,
     onStandard,
     raceStatus,
@@ -348,22 +342,10 @@ export function RaceScreen(props: RaceScreenProps) {
         ) : (
           <p className="empty live-empty">{t("race.noLive")}</p>
         )}
-        <div className="grid-2 race-actions">
+        <div className="race-actions">
           <div className="selected-race">
             <span>{t("race.selected")}</span>
             <strong>{raceLabel}</strong>
-          </div>
-          <div className="btn-row">
-            <button
-              className="btn"
-              onClick={onReload}
-              disabled={snapLoading}
-            >
-              {snapLoading ? "..." : t("race.reload")}
-            </button>
-            <button className="btn gold" onClick={onSeedManual}>
-              {t("race.manual")}
-            </button>
           </div>
         </div>
         {snapError && (

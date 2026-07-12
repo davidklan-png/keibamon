@@ -88,8 +88,24 @@ jobs:
           VITE_CLERK_PUBLISHABLE_KEY: ${{ secrets.VITE_CLERK_PUBLISHABLE_KEY }}
           VITE_SOCIAL_API_BASE: ${{ secrets.VITE_SOCIAL_API_BASE }}
 
-      # Deploy the Worker + static assets (splash/ incl. the freshly built app).
-      - name: Deploy
+      # Deploy the SOCIAL worker (keibamon-social: D1-backed tickets/shares/
+      # feed/comments + the 5-min settle cron). CI has always gated this
+      # worker's tests + tsc but never deployed it — that gap left every social
+      # change to a manual `cd workers/social && npx wrangler deploy`, and the
+      # social worker could silently drift out of sync with the app shell.
+      # Social-first (before the root worker) so the feed contract the frontend
+      # depends on is live before the app that consumes it. Same API token as
+      # the root deploy; if that token isn't account-scoped to keibamon-social,
+      # this step fails loud (the correct behavior) — widen the token to fix.
+      - name: Deploy social worker
+        run: npx wrangler deploy
+        working-directory: workers/social
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Deploy the root Worker + static assets (splash/ incl. the freshly built app).
+      - name: Deploy root worker
         run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

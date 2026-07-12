@@ -1043,11 +1043,13 @@ function makeFakeD1(opts: FakeD1Options = {}) {
         .filter(
           (sh) =>
             sh.retracted_at == null &&
-            sh.owner_id !== viewer &&
-            targets.has(sh.owner_id) &&
-            sources.has(sh.owner_id) &&
-            !blocked.has(sh.owner_id) &&
-            (sh.audience_mode === "all_friends" || shareAudience.has(`${sh.id}|${viewer}`)),
+            // Item 4 — own shares are now INCLUDED (always visible to the owner);
+            // mutual-friend + audience + blocks gates apply only to others' shares.
+            (sh.owner_id === viewer ||
+              (targets.has(sh.owner_id) &&
+                sources.has(sh.owner_id) &&
+                !blocked.has(sh.owner_id) &&
+                (sh.audience_mode === "all_friends" || shareAudience.has(`${sh.id}|${viewer}`)))),
         )
         .sort((a, c) => c.created_at - a.created_at)
         .slice(0, 100)
@@ -2957,15 +2959,19 @@ describe("social Worker — Friend Interactions Phase 2 (shared tickets)", () =>
     expect((await feedAs(db, "clerk_b")).items.some((i) => i.ticket?.id === "kb-retract-1")).toBe(true);
   });
 
-  it("own share is excluded from own feed; non-owner PATCH/retract → 404 (anti-oracle)", async () => {
+  it("own share appears in own feed (is_own + ticket_id); non-owner PATCH/retract → 404 (anti-oracle)", async () => {
     const { db } = makeFakeD1();
     await makeFriends(db, "clerk_a", "clerk_b");
     const created = await shareAs(db, "clerk_a", "kb-own-1", "all_friends");
     const shareId = ((await created.json()) as { id: string }).id;
 
-    // Owner's own feed excludes their own share.
+    // Item 4 — owner's own feed now INCLUDES their own share, flagged is_own and
+    // carrying ticket_id (so the client can route the own-item tap-through).
     const feedA = await feedAs(db, "clerk_a");
-    expect(feedA.items.some((i) => i.ticket?.id === "kb-own-1")).toBe(false);
+    const own = feedA.items.find((i) => i.ticket?.id === "kb-own-1");
+    expect(own).toBeTruthy();
+    expect((own as { is_own?: boolean } | undefined)?.is_own).toBe(true);
+    expect((own as { ticket_id?: string } | undefined)?.ticket_id).toBe("kb-own-1");
 
     // B (a friend, in audience) can GET the share detail.
     jwtSub("clerk_b");

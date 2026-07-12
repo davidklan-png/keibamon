@@ -39,7 +39,6 @@ export const en = {
     raceDay: "Race day",
     runnersCount: "{count} runners",
     manual: "Sample card",
-    reload: "Reload odds",
     runners: "Runners",
     oddsLabel: "Win odds",
     noLive: "No live card available. Start with a sample card.",
@@ -292,6 +291,7 @@ export const en = {
     shareWinHint: "Friends only see it if you share. Dismiss to keep it private.",
     shareWinCta: "Share win",
     dismissWin: "Keep private",
+    you: "You",
   },
   // ADR-0007: "My Tickets" surface. NOTE: commit CTA is "Confirm" (not
   // "Lock it in") — "lock" is banned by guardrails.test.ts.

@@ -36,7 +36,6 @@ export const ja = {
     raceDay: "開催日",
     runnersCount: "{count}頭",
     manual: "サンプルカード",
-    reload: "オッズ再取得",
     runners: "出走馬",
     oddsLabel: "単勝オッズ",
     noLive: "ライブカードがありません。サンプルカードで始めます。",
@@ -281,6 +280,7 @@ export const ja = {
     shareWinHint: "友だちに見えるのはシェアしたときだけ。非公開のままもできます。",
     shareWinCta: "勝利をシェア",
     dismissWin: "非公開のまま",
+    you: "あなた",
   },
   // ADR-0007: 「マイ馬券」サーフェス。
   mine: {

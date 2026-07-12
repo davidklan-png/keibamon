@@ -96,12 +96,9 @@ function renderHtml() {
       runners={[]}
       raceLabel=""
       snap={SNAP}
-      snapLoading={false}
       snapError=""
       selectedRaceDate="20260628"
       selectedRaceKey=""
-      onReload={() => {}}
-      onSeedManual={() => {}}
       onApplyRace={() => {}}
       onStandard={() => {}}
       raceStatus="manual"
@@ -266,12 +263,9 @@ function renderRunnersHtml(impressions: ImpressionMap = {}) {
       runners={RUNNERS}
       raceLabel=""
       snap={null}
-      snapLoading={false}
       snapError=""
       selectedRaceDate=""
       selectedRaceKey=""
-      onReload={() => {}}
-      onSeedManual={() => {}}
       onApplyRace={() => {}}
       onStandard={() => {}}
       raceStatus="manual"

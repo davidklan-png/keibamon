@@ -6,6 +6,7 @@
 // ============================================================================
 import type { LiveSnapshot } from "../../src/api";
 import type { CommittedTicket } from "../../src/lib/types";
+import type { FeedItem } from "../../src/auth/socialClient";
 
 const RACE_RUNNERS = [
   { umaban: 1, name: "Croix du Nord", win_odds: 2.4, odds_is_live: true },
@@ -254,6 +255,46 @@ export const STRUCTURED_TICKETS: CommittedTicket[] = [
 ];
 
 /**
+ * Item 4 + Item 5 — a deterministic Friends feed for the social-feed visual
+ * baseline. Two win shares so the capture pins BOTH reactions surfaces:
+ *   • a FRIEND's win → @handle, the congratulate BUTTON, the multiplier.
+ *   • the viewer's OWN win → the "You" badge + the read-only congrats count
+ *     (no button — server forbids self-congrats).
+ * Both carry the full RACE_SNAPSHOT so the Item 5 identity line
+ * (venue · R# · date) renders under the race name.
+ */
+export const FIXTURE_FEED: FeedItem[] = [
+  {
+    id: "sh-rin-1",
+    ticket_id: "kb-box-1",
+    ticket: STRUCTURED_TICKETS[0],
+    owner: { id: "u-rin", handle: "rin", display_name: "Rin", avatar: null },
+    audience_mode: "all_friends",
+    is_own: false,
+    is_win: true,
+    multiplier: 8.5,
+    congrats_count: 4,
+    congratulated_by_me: false,
+    comment_count: 2,
+    created_at: Date.parse("2026-06-21T12:00:00Z"),
+  },
+  {
+    id: "sh-you-1",
+    ticket_id: "kb-form-1",
+    ticket: STRUCTURED_TICKETS[1],
+    owner: { id: "playwright-fake-user", handle: "playwright", display_name: "You", avatar: null },
+    audience_mode: "all_friends",
+    is_own: true,
+    is_win: true,
+    multiplier: 6.2,
+    congrats_count: 3,
+    congratulated_by_me: false,
+    comment_count: 1,
+    created_at: Date.parse("2026-06-21T11:00:00Z"),
+  },
+];
+
+/**
  * ADR-0020 — a PUBLISHED weekend edition for the focused Japanese expanded-
  * Research visual snapshot. Realistic Japanese horse names + live odds + gates
  * + styles, so the JA report renders substantive market/pace/contender/trend/
@@ -341,6 +382,14 @@ export async function installApiMocks(
   // Social Worker calls — return deterministic shapes for visual regression.
   await page.route("**/api/social/**", (route) => {
     const url = route.request().url();
+    // Item 4 + Item 5 — the Friends feed: friend's win + own win (badged "You").
+    if (url.includes("/feed")) {
+      return route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ items: FIXTURE_FEED }),
+      });
+    }
     if (url.includes("/tickets")) {
       return route.fulfill({
         status: 200,

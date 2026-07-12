@@ -9,7 +9,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useI18n } from "../i18n";
 import { avatarColor } from "../lib/mytickets-view";
 import { yen } from "../lib/format";
-import { ShareCard } from "../components/ShareCard";
+import { ShareCard, raceMeta } from "../components/ShareCard";
 import { CommentThread } from "../components/CommentThread";
 import { TicketLines } from "../components/TicketLines";
 import {
@@ -25,15 +25,18 @@ import {
   type FeedItem,
   type FriendSummary,
 } from "../auth/socialClient";
+import { buildInviteUrl } from "../auth/inviteUrl";
 
 type Sub = "feed" | "list" | "add" | "detail";
 
 export interface FriendsScreenProps {
   getToken: () => Promise<string | null>;
   onPendingChange: (n: number) => void;
+  /** Item 4 — open the viewer's own ticket detail from an own share in the feed. */
+  onOpenMyTicket: (ticketId: string) => void;
 }
 
-export function FriendsScreen({ getToken, onPendingChange }: FriendsScreenProps) {
+export function FriendsScreen({ getToken, onPendingChange, onOpenMyTicket }: FriendsScreenProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
   const [sub, setSub] = useState<Sub>("feed");
@@ -119,7 +122,7 @@ export function FriendsScreen({ getToken, onPendingChange }: FriendsScreenProps)
       )}
 
       {sub === "feed" && (
-        <FeedPane feed={feed} hasFriends={hasFriends} getToken={getToken} onOpen={openDetail} onAddFriend={() => setSub("add")} />
+        <FeedPane feed={feed} hasFriends={hasFriends} getToken={getToken} onOpen={openDetail} onOpenOwn={onOpenMyTicket} onAddFriend={() => setSub("add")} />
       )}
       {sub === "list" && (
         <ListPane fr={fr} getToken={getToken} onChange={refreshFriends} />
@@ -144,11 +147,13 @@ export function FriendsScreen({ getToken, onPendingChange }: FriendsScreenProps)
 
 // ---- Feed pane -----------------------------------------------------------
 
-function FeedPane({ feed, hasFriends, getToken, onOpen, onAddFriend }: {
+function FeedPane({ feed, hasFriends, getToken, onOpen, onOpenOwn, onAddFriend }: {
   feed: FeedItem[] | null;
   hasFriends: boolean;
   getToken: () => Promise<string | null>;
   onOpen: (id: string) => void;
+  /** Item 4 — own-share tap-through to the owner engagement surface. */
+  onOpenOwn: (ticketId: string) => void;
   onAddFriend: () => void;
 }) {
   const { t } = useI18n();
@@ -166,7 +171,14 @@ function FeedPane({ feed, hasFriends, getToken, onOpen, onAddFriend }: {
   return (
     <div className="friends-feed">
       {feed.map((item) => (
-        <ShareCard key={item.id} item={item} getToken={getToken} onOpen={onOpen} />
+        <ShareCard
+          key={item.id}
+          item={item}
+          getToken={getToken}
+          onOpen={onOpen}
+          onOpenOwn={onOpenOwn}
+          viewerIsOwner={!!item.is_own}
+        />
       ))}
     </div>
   );
@@ -268,7 +280,13 @@ function AddPane({ getToken, myHandle, onChange }: {
     void runSearch(q);
   }
 
-  const inviteUrl = myHandle ? `${window.location.origin}/?friend=${encodeURIComponent(myHandle)}` : null;
+  // Build the invite URL from the app base (origin + vite BASE_URL = "/app/"),
+  // not the site root — links built from `origin` alone land on the splash page
+  // and never reach the app's invite resolver. (Old root links are forwarded by
+  // the splash worker as a safety net.)
+  const inviteUrl = myHandle
+    ? buildInviteUrl(myHandle, import.meta.env.BASE_URL, window.location.origin)
+    : null;
 
   async function share() {
     if (!inviteUrl) return;
@@ -388,7 +406,7 @@ function DetailPane({ detail, missing, getToken, onBack }: {
             <div className="sc-bethead">
               <span className="sc-bettype">{t(`betType.${tk.ticket.type}`)}</span>
             </div>
-            <div className="sc-race">{ja ? tk.race.nameJa : tk.race.nameEn}{tk.race.grade ? ` · ${tk.race.grade}` : ""}</div>
+            <div className="sc-race">{ja ? tk.race.nameJa : tk.race.nameEn}{tk.race.grade ? ` · ${tk.race.grade}` : ""}{raceMeta(tk.race, ja) && <span className="sc-race-meta">{raceMeta(tk.race, ja)}</span>}</div>
             {/* Ticket-detail UX — structure-aware body; old share snapshots
                 without `structure` take the legacy capped-chip path. */}
             <TicketLines ticket={tk.ticket} unitStake={tk.unit} />
