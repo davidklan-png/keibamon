@@ -1,0 +1,16 @@
+# Dependabot — keep GitHub Actions current. Actions ship a bundled Node
+# runtime; staying on the latest major avoids runtime deprecations (e.g. the
+# Node 20 → Node 24 force in June 2026). All actions/* updates are grouped into
+# a single monthly PR so bumping checkout/setup-node/setup-python etc. isn't
+# spread across one-PR-per-action noise.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+    open-pull-requests-limit: 5
+    groups:
+      actions:
+        patterns:
+          - "actions/*"
