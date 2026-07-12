@@ -11,6 +11,7 @@ import { avatarColor } from "../lib/mytickets-view";
 import { yen } from "../lib/format";
 import { ShareCard } from "../components/ShareCard";
 import { CommentThread } from "../components/CommentThread";
+import { TicketLines } from "../components/TicketLines";
 import {
   acceptFriendRequest,
   declineFriendRequest,
@@ -370,7 +371,6 @@ function DetailPane({ detail, missing, getToken, onBack }: {
   );
   const tk = detail.ticket;
   const ownerLabel = detail.owner.handle ? `@${detail.owner.handle}` : detail.owner.display_name ?? "";
-  const sep = tk && (tk.ticket.type === "exacta" || tk.ticket.type === "trifecta") ? " > " : " - ";
   return (
     <div className="friends-detail">
       <div className="mt-back-head">
@@ -389,9 +389,9 @@ function DetailPane({ detail, missing, getToken, onBack }: {
               <span className="sc-bettype">{t(`betType.${tk.ticket.type}`)}</span>
             </div>
             <div className="sc-race">{ja ? tk.race.nameJa : tk.race.nameEn}{tk.race.grade ? ` · ${tk.race.grade}` : ""}</div>
-            <div className="sc-chips">
-              {tk.ticket.lines.map((ln, i) => (<span key={i} className="sc-chip">{ln.combo.join(sep)}</span>))}
-            </div>
+            {/* Ticket-detail UX — structure-aware body; old share snapshots
+                without `structure` take the legacy capped-chip path. */}
+            <TicketLines ticket={tk.ticket} unitStake={tk.unit} />
             <div className="sc-foot">
               <span className="sc-cost">{t("mine.cost")} {yen(tk.ticket.cost)}</span>
               {detail.is_win && detail.multiplier != null && (

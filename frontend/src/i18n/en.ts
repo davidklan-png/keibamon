@@ -332,13 +332,17 @@ export const en = {
     finishOrderUnavailable: "Result breakdown not available for this ticket.",
     watchResult: "Watch the result",
     settledToast: "You hit it! 🎉",
-    tapShare: "Save & share",
-    shareToast: "Ticket card copied — share away",
     share: "Share",
     shareFailed: "Couldn't export the card — try again.",
     rateLimited: "Too many actions — wait a moment and retry.",
     count: "{n} total",
-    handle: "@you",
+    // Ticket-detail UX (2026-07-12) — the export button is now an honest
+    // "Download" (image-export mechanics unchanged); the detail card has a real
+    // [Back] that returns to the previous screen. The old @you/disclaimer
+    // footer + barcode were removed by locked decision.
+    download: "Download",
+    savedToast: "Card saved",
+    back: "Back",
     setHandleTitle: "Pick your handle",
     setHandleHint: "This is how other players see you. You can change it later.",
     setHandlePlaceholder: "e.g. alyssa",
@@ -653,6 +657,13 @@ export const en = {
     total: "Total",
     perPoint: "Per point",
     share: "Share",
+  },
+  // TicketLines — structure-aware ticket-body renderer (ticket-detail UX).
+  ticketLines: {
+    points: "{n} combos × {unit} = {cost}",
+    allCombos: "All {n} combos",
+    partners: "Partners",
+    multi: "multi-axis",
   },
   formation: {
     title: "Ordered boxes",

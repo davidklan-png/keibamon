@@ -2753,6 +2753,65 @@ select:focus {
   padding: 9px 11px;
   border-radius: 9px;
 }
+
+/* TicketLines — structure-aware ticket-body renderer (ticket-detail UX).
+ * Keibamon palette only: no JRA marks / mark-card look / official colors. */
+.tl { margin-bottom: 16px; }
+.tl-head { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.tl-badge {
+  font-weight: 800; font-size: 11px; letter-spacing: 0.05em;
+  padding: 3px 9px; border-radius: 7px;
+  background: var(--tint-2); color: var(--ink-2); border: 1px solid var(--line-2);
+}
+.tl-badge-box { background: var(--turf); color: #fff; border-color: transparent; }
+.tl-badge-form { background: var(--sky); color: #fff; border-color: transparent; }
+.tl-badge-wheel { background: var(--coral); color: #fff; border-color: transparent; }
+.tl-multi {
+  font-size: 10px; font-weight: 700; color: var(--ink-2);
+  background: var(--tint-2); border: 1px solid var(--line-2);
+  padding: 2px 6px; border-radius: 5px;
+}
+.tl-tiles { display: flex; flex-wrap: wrap; gap: 6px; }
+.tl-tile {
+  font: 800 16px/1 var(--font-mono);
+  min-width: 32px; text-align: center;
+  padding: 9px 11px; border-radius: 9px;
+  background: var(--tint); border: 1px solid var(--line); color: var(--ink);
+}
+.tl-tile-sm { font-size: 14px; padding: 7px 9px; min-width: 28px; }
+.tl-tile-axis { background: var(--turf); color: #fff; border-color: transparent; }
+.tl-cols { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
+.tl-col { flex: 1 1 0; min-width: 0; }
+.tl-col-label {
+  font-weight: 700; font-size: 11px; color: var(--muted);
+  margin-bottom: 6px; display: flex; align-items: center; gap: 4px;
+}
+.tl-axis-tag {
+  font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 4px;
+  background: var(--turf); color: #fff;
+}
+.tl-arrow { color: var(--faint); font-weight: 800; align-self: center; padding: 0 1px; }
+.tl-col-tiles { display: flex; flex-wrap: wrap; gap: 4px; }
+.tl-points {
+  margin-top: 10px; font-weight: 600; font-size: 12px; color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.tl-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.tl-chip {
+  font: 700 13px/1 var(--font-mono); color: var(--ink);
+  background: var(--tint); border: 1px solid var(--line);
+  padding: 8px 10px; border-radius: 9px;
+}
+.tl-chip-more { color: var(--ink-2); background: var(--tint-2); }
+.tl-more {
+  font-weight: 700; font-size: 12px; color: var(--ink-2);
+  padding: 8px 12px; border-radius: 9px;
+  background: var(--tint-2); border: 1px dashed var(--line-2);
+}
+.tl-compact .tl-tile { font-size: 14px; padding: 6px 8px; min-width: 26px; }
+.tl-compact .tl-chip { font-size: 12px; padding: 6px 8px; }
+.tl-compact .tl-head { margin-bottom: 8px; }
+.tl-compact .tl-points { margin-top: 8px; font-size: 11px; }
 .mt-pay-panel {
   display: flex;
   align-items: flex-end;
@@ -2861,44 +2920,6 @@ select:focus {
 }
 .mt-finish-names { color: var(--ink); font-weight: 600; }
 
-/* Detail card footer */
-.mt-card-foot {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 14px;
-  border-top: 1px dashed var(--line-2);
-}
-.mt-card-foot-mark {
-  width: 30px;
-  height: 30px;
-  border-radius: 9px;
-  background: linear-gradient(135deg, var(--turf), var(--turf-deep));
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 900;
-  font-size: 15px;
-  color: #fffbef;
-  flex: none;
-}
-.mt-handle { font-weight: 800; font-size: 12px; }
-.mt-card-foot-micro { font-weight: 600; font-size: 10px; color: var(--faint); }
-.mt-barcode {
-  margin-left: auto;
-  width: 64px;
-  height: 30px;
-  background: repeating-linear-gradient(
-    90deg,
-    var(--ink) 0 1.5px,
-    transparent 1.5px 3px,
-    var(--ink) 3px 4px,
-    transparent 4px 7px
-  );
-  opacity: 0.55;
-}
-
 /* Detail action buttons */
 .mt-watch {
   width: 100%;
@@ -2917,8 +2938,37 @@ select:focus {
   box-shadow: var(--shadow-gold);
 }
 .mt-watch .mt-dot { background: var(--gold-ink); animation: kbmPulse 1.1s infinite; }
-.mt-actions { display: flex; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
-.mt-share {
+/* Ticket-detail UX — action row: navigation ([Back]) left, actions right. */
+.mt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.mt-back-btn {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px;
+  border-radius: 14px;
+  background: var(--tint-2);
+  border: 1px solid var(--line-2);
+  color: var(--ink);
+  font-weight: 800;
+  font-size: 15px;
+  flex: none;
+}
+.mt-back-btn span { font-size: 20px; line-height: 0; font-weight: 700; }
+.mt-actions-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+.mt-download {
   flex: 1;
   display: flex;
   align-items: center;

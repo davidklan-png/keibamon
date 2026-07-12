@@ -320,13 +320,15 @@ export const ja = {
     finishOrderUnavailable: "この馬券の結果詳細は表示できません。",
     watchResult: "結果を見る",
     settledToast: "的中しました！🎉",
-    tapShare: "保存してシェア",
-    shareToast: "馬券カードをコピーしました",
     share: "シェア",
     shareFailed: "カードの出力に失敗しました — もう一度お試しください。",
     rateLimited: "操作が多すぎます — しばらくしてから再試行してください。",
     count: "{n}件",
-    handle: "@あなた",
+    // Ticket-detail UX (2026-07-12) — 正直な「保存」ボタン（画像出力の仕組みは同じ）。
+    // @あなた / 免責 / バーコードのフッターは確定判断で削除。戻るは前の画面へ。
+    download: "保存",
+    savedToast: "カードを保存しました",
+    back: "戻る",
     setHandleTitle: "ハンドルを決める",
     setHandleHint: "他のプレイヤーに見つかる名前です。あとで変えられます。",
     setHandlePlaceholder: "例: alyssa",
@@ -618,6 +620,13 @@ export const ja = {
     total: "総額",
     perPoint: "1点",
     share: "共有",
+  },
+  // TicketLines — 構造対応の馬券本体レンダラー (ticket-detail UX)。
+  ticketLines: {
+    points: "{n}点 × {unit} = {cost}",
+    allCombos: "{n}点すべて",
+    partners: "相手",
+    multi: "軸複数",
   },
   formation: {
     title: "着順ボックス",

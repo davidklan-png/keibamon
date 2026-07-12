@@ -146,6 +146,14 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
 
   const [view, setView] = useState<MtView>("feed");
   const [detailId, setDetailId] = useState<string | null>(null);
+  // Ticket-detail UX — real back-navigation. Tracks the last non-detail view so
+  // [Back] on the detail action row returns the user to where they actually
+  // came from (feed / profile / new / manual) rather than a hardcoded target.
+  // Updated on every non-detail view; read when the user leaves detail.
+  const prevViewRef = useRef<MtView>("feed");
+  useEffect(() => {
+    if (view !== "detail") prevViewRef.current = view;
+  }, [view]);
   // Phase 3 — social state.
   const [selectedProfileHandle, setSelectedProfileHandle] = useState<string | null>(null);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -589,21 +597,35 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     void loadProfile(handle);
   }
 
-  /** Phase 3 — export the detail card as a PNG (share or download). */
+  /**
+   * Export the detail card as a PNG (share or download). The detail card is
+   * advice-free by locked decision (age-gate is the guardrail touchpoint), so
+   * it opts out of exportTicketCard's [data-not-advice] gate. On the download
+   * fallback (desktop) we confirm with a "Card saved" toast; on mobile the OS
+   * share sheet already gave feedback, so 'shared' stays silent.
+   */
   async function doShare() {
     if (!detailCardRef.current) return;
     let outcome: ShareOutcome;
     try {
-      outcome = await exportTicketCard(detailCardRef.current);
+      outcome = await exportTicketCard(detailCardRef.current, {
+        requireNotAdvice: false,
+      });
     } catch {
       flash(t("mine.shareFailed"));
       return;
     }
     if (outcome.kind === "none") {
       flash(t("mine.shareFailed"));
+    } else if (outcome.kind === "downloaded") {
+      flash(t("mine.savedToast"));
     }
-    // 'shared' / 'downloaded' are silent successes — the OS already showed
-    // the share sheet or saved the file.
+    // 'shared' is a silent success — the OS already showed the share sheet.
+  }
+
+  /** Ticket-detail UX — return to the actual previous (non-detail) screen. */
+  function goBack() {
+    setView(prevViewRef.current ?? "feed");
   }
   // DEV-ONLY manual trigger. In production, settlement is driven by the
   // /api/live poll (see the auto-settle effect above). Gated behind
@@ -939,6 +961,7 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
     burstSpans,
     detailCardRef,
     setView,
+    goBack,
     friendsOnCard,
     friendsOnRace,
     profile,
