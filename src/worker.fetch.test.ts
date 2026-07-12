@@ -84,3 +84,25 @@ describe("worker fetch — invite splash redirect", () => {
     expect(await res.text()).toBe("splash-or-spa");
   });
 });
+
+// Static splash assets (index.html, live.html, helper.html, updates.html) are
+// served directly by the ASSETS binding — the Worker only runs for paths that
+// aren't files. updates.html is a hand-maintained release-notes page linked
+// from the hero version badge; pin that it falls through to ASSETS (200) and is
+// never intercepted or redirected.
+describe("worker fetch — static splash assets", () => {
+  it("serves /updates.html from ASSETS (200, not redirected)", async () => {
+    const res = await fetch(
+      new Request("https://keibamon.com/updates.html"),
+      env(),
+    );
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("splash-or-spa");
+  });
+
+  it("serves / (splash home) from ASSETS when no friend param is present", async () => {
+    const res = await fetch(new Request("https://keibamon.com/"), env());
+    expect(res.status).toBe(200);
+    expect(await res.text()).toBe("splash-or-spa");
+  });
+});
