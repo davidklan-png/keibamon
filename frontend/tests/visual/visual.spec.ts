@@ -391,6 +391,30 @@ test.describe("visual regression", () => {
       await expect(page.locator(".bottom-tabbar")).toHaveScreenshot(`bottom-tabbar.friends.${lang}.png`);
     });
 
+    // ---- Item 4 + Item 5: social feed ShareCards ----
+    // The Friends feed (share-gated) had NO visual coverage until now. This pins
+    // BOTH items: the friend's win card (congratulate BUTTON) vs the viewer's
+    // OWN win card ("You" badge + read-only congrats count — no button, since
+    // the server forbids self-congrats), plus the Item 5 race identity line
+    // (venue · R# · date) under each race name. FIXTURE_FEED (fixtures.ts)
+    // drives it via the /api/social/feed mock.
+    test(`friends feed (${lang})`, async ({ page }) => {
+      await landOnTab(page, lang, "tab-friends", ".friends-screen");
+      await expect(page.locator(".friends-feed")).toBeVisible({ timeout: 10_000 });
+      // Durable assertions (#14 pattern): the friend's card exposes the
+      // congratulate BUTTON; the own card's reaction count is a read-only span
+      // and its owner is the "You" badge — so a regression can't pass by
+      // pixel-matching a stale baseline.
+      await expect(page.locator(".sc-card").first().locator("button.sc-congrats")).toBeVisible();
+      await expect(page.locator(".sc-card").nth(1).locator(".sc-congrats-readonly")).toBeVisible();
+      await expect(page.locator(".sc-card").nth(1).locator(".sc-you")).toBeVisible();
+      // Let webfonts settle so the structure-aware TicketLines tiles + the CJK
+      // identity line are pixel-stable (same lesson as the Formation flake).
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(400);
+      await expect(page.locator(".friends-feed")).toHaveScreenshot(`friends-feed.${lang}.png`);
+    });
+
     test(`app-header+footer reference (${lang})`, async ({ page }) => {
       await landOnTab(page, lang, "tab-reference", ".glossary-search");
       await expect(page.locator(".app-header")).toBeVisible();

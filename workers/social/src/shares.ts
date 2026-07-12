@@ -6,9 +6,11 @@
 // snapshot is frozen at share time — the live ticket row is never mutated, so
 // there is no two-way sync and the shared card is stable.
 //
-// FEED = friends' live shares visible to the viewer (audience-respected,
-// blocks filtered, own shares excluded). This REPLACES the legacy auto-feed in
-// a clean cut: only explicitly-shared tickets appear.
+// FEED = the viewer's own live shares + their MUTUAL FRIENDS' live shares
+// (audience-respected, blocks filtered). Own shares are included and flagged
+// `is_own` so the client badges them "You" with read-only reaction counts and a
+// tap-through to the owner engagement surface. This REPLACES the legacy
+// auto-feed in a clean cut: only explicitly-shared tickets appear.
 
 import { AUDIENCE_MODES, NOW, ShareRow } from "./core";
 import { areFriends, listFriends } from "./friends";
@@ -25,13 +27,22 @@ export interface ShareOwner {
 
 /** A feed item: the immutable ticket snapshot + the owning friend + metadata.
  *  multiplier (returned/cost) is the win's odds framing — NO currency leaves the
- *  server for a win (congrats/comment counts + multiplier only). */
+ *  server for a win (congrats/comment counts + multiplier only).
+ *
+ *  `is_own` marks the viewer's own share (Item 4): own shares now appear in the
+ *  feed too, badged "You" on the client with read-only reaction counts and a
+ *  tap-through to the owner engagement surface (My Tickets detail). `ticket_id`
+ *  is exposed so that own-item tap-through can route to the ticket detail. */
 export interface FeedItem {
   id: string;
+  /** The shared ticket's id (the live tickets row), for own-item routing. */
+  ticket_id: string;
   ticket: Record<string, unknown> | null;
   owner: ShareOwner;
   audience_mode: AudienceMode;
   is_win: boolean;
+  /** True when this share is the viewer's own (always visible; client badges it). */
+  is_own: boolean;
   /** returned/cost for win items (odds framing); null otherwise. */
   multiplier: number | null;
   congrats_count: number;
@@ -316,9 +327,10 @@ export async function promoteShareWin(db: D1Database, ticketId: string, isWin: b
 // ---- feed ------------------------------------------------------------------
 
 /**
- * The friend feed: live shares by the viewer's MUTUAL FRIENDS that are visible
- * to the viewer (all_friends, or selected with viewer in the audience), excluding
- * blocked pairs and the viewer's own shares. Reverse-chronological, cap 100.
+ * The friend feed: the viewer's OWN live shares plus their mutual friends' live
+ * shares visible to the viewer (all_friends, or selected with viewer in the
+ * audience), excluding blocked pairs. Own shares are always visible (the owner
+ * is their own audience) and flagged `is_own`. Reverse-chronological, cap 100.
  *
  * Replaces the legacy auto-feed (clean cut): only explicitly-shared tickets.
  */
@@ -339,26 +351,32 @@ export async function buildShareFeed(db: D1Database, viewerId: string): Promise<
          LEFT JOIN congratulations cgme ON cgme.share_id = s.id AND cgme.user_id = ?
          LEFT JOIN (SELECT share_id, COUNT(*) AS n FROM comments WHERE deleted_at IS NULL GROUP BY share_id) cm ON cm.share_id = s.id
         WHERE s.retracted_at IS NULL
-          AND s.owner_id <> ?
-          AND s.owner_id IN (
-                SELECT target_id FROM social_edges
-                 WHERE source_id = ? AND type = 'friend' AND state = 'accepted')
-          AND s.owner_id IN (
-                SELECT source_id FROM social_edges
-                 WHERE target_id = ? AND type = 'friend' AND state = 'accepted')
-          AND (s.audience_mode = 'all_friends' OR EXISTS (
-                SELECT 1 FROM share_audience sa WHERE sa.share_id = s.id AND sa.user_id = ?))
-          AND NOT EXISTS (
-                SELECT 1 FROM blocks
-                 WHERE (blocker_id = ? AND blocked_id = s.owner_id)
-                    OR (blocker_id = s.owner_id AND blocked_id = ?))
+          AND (
+                s.owner_id = ?
+                OR (
+                  s.owner_id IN (
+                        SELECT target_id FROM social_edges
+                         WHERE source_id = ? AND type = 'friend' AND state = 'accepted')
+                  AND s.owner_id IN (
+                        SELECT source_id FROM social_edges
+                         WHERE target_id = ? AND type = 'friend' AND state = 'accepted')
+                  AND (s.audience_mode = 'all_friends' OR EXISTS (
+                        SELECT 1 FROM share_audience sa WHERE sa.share_id = s.id AND sa.user_id = ?))
+                  AND NOT EXISTS (
+                        SELECT 1 FROM blocks
+                         WHERE (blocker_id = ? AND blocked_id = s.owner_id)
+                            OR (blocker_id = s.owner_id AND blocked_id = ?))
+                )
+          )
         ORDER BY s.created_at DESC
         LIMIT 100`,
     )
-    // bind order: cgme.user_id, owner<>, mutual-source, mutual-target, share_audience, blocks×2 — all viewer.
+    // bind order: cgme.user_id (LEFT JOIN), own-share, mutual-source, mutual-target,
+    // share_audience, blocks×2 — all viewer. (7 binds, same arity as before: the
+    // former `owner_id <> ?` became `owner_id = ?` inside the OR.)
     .bind(viewerId, viewerId, viewerId, viewerId, viewerId, viewerId, viewerId)
     .all<FeedRow>();
-  return results.map((row) => decodeFeedItem(row));
+  return results.map((row) => decodeFeedItem(row, viewerId));
 }
 
 /** Detail view of a single share (deep-link target). Viewer must be in the
@@ -388,7 +406,7 @@ export async function getShareForViewer(
     .bind(viewerId, shareId)
     .first<FeedRow>();
   if (!row) return null;
-  return decodeFeedItem(row);
+  return decodeFeedItem(row, viewerId);
 }
 
 /** Does `viewerId` satisfy this share's audience? (owner always sees own share.) */
@@ -405,7 +423,7 @@ export async function shareVisibleTo(db: D1Database, share: ShareRow, viewerId: 
   return !!row;
 }
 
-function decodeFeedItem(row: FeedRow): FeedItem {
+function decodeFeedItem(row: FeedRow, viewerId: string): FeedItem {
   let ticket: Record<string, unknown> | null = null;
   try {
     ticket = JSON.parse(row.snapshot) as Record<string, unknown>;
@@ -420,6 +438,7 @@ function decodeFeedItem(row: FeedRow): FeedItem {
       : null;
   return {
     id: row.id,
+    ticket_id: row.ticket_id,
     ticket,
     owner: {
       id: row.owner_id,
@@ -428,6 +447,7 @@ function decodeFeedItem(row: FeedRow): FeedItem {
       avatar: row.owner_avatar,
     },
     audience_mode: row.audience_mode as AudienceMode,
+    is_own: row.owner_id === viewerId,
     is_win: isWin,
     multiplier,
     congrats_count: row.congrats_count ?? 0,

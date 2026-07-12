@@ -88,6 +88,11 @@ interface MyTicketsProps {
   userId: string | null;
   /** Resolves a fresh Clerk JWT; null when signed out / Clerk unavailable. */
   getToken: () => Promise<string | null>;
+  /** Item 4 — a ticket id to open in the detail (owner engagement surface) on
+   *  arrival, e.g. an own share tapped in the Friends feed. Cleared once opened. */
+  openTicketId: string | null;
+  /** Item 4 — callback once `openTicketId` has been consumed (opened or dropped). */
+  onTicketOpened: () => void;
 }
 
 // ADR-0007 Phase 1 / Session 2 — branches on auth: signed-out renders the
@@ -103,9 +108,13 @@ interface MyTicketsHomeProps {
    * re-reading localStorage itself.
    */
   impressions: ImpressionMap;
+  /** Item 4 — own-share tap-through target id (forwarded to MyTickets). */
+  openTicketId: string | null;
+  /** Item 4 — consumed-once callback (forwarded to MyTickets). */
+  onTicketOpened: () => void;
 }
 
-export function MyTicketsHome({ snap, impressions }: MyTicketsHomeProps) {
+export function MyTicketsHome({ snap, impressions, openTicketId, onTicketOpened }: MyTicketsHomeProps) {
   const { isSignedIn, userId, ageVerified, getToken } = useAuth();
 
   useEffect(() => {
@@ -132,7 +141,7 @@ export function MyTicketsHome({ snap, impressions }: MyTicketsHomeProps) {
 
   return ageVerified ? (
     <main className="app">
-      <MyTickets snap={snap} userId={userId} getToken={getToken} />
+      <MyTickets snap={snap} userId={userId} getToken={getToken} openTicketId={openTicketId} onTicketOpened={onTicketOpened} />
       <Footer />
     </main>
   ) : (
@@ -140,7 +149,7 @@ export function MyTicketsHome({ snap, impressions }: MyTicketsHomeProps) {
   );
 }
 
-function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
+function MyTickets({ snap, userId, getToken, openTicketId, onTicketOpened }: MyTicketsProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
 
@@ -723,6 +732,21 @@ function MyTickets({ snap, userId, getToken }: MyTicketsProps) {
       if (r.ok) setDetailShare(r.data);
     })();
   }
+
+  // Item 4 — open the owner engagement surface for an own share the viewer
+  // tapped in the Friends feed. MyTickets remounts on the tab switch, so this
+  // fires on arrival; it waits for the server-first ticket list, then opens the
+  // detail for the carried id (an own share's ticket is always the viewer's own,
+  // so it's in their list) and clears the id. A stale id (ticket gone) drops
+  // silently on the pass after the list loads.
+  useEffect(() => {
+    if (!openTicketId || !serverReady) return;
+    if (tickets.some((x) => x.id === openTicketId)) {
+      openDetail(openTicketId);
+    }
+    onTicketOpened();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openTicketId, serverReady, tickets]);
 
   /** Retract the open detail ticket's share. Silent per spec; comments hidden. */
   function retractDetail() {

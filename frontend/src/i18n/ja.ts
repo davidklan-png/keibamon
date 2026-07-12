@@ -280,6 +280,7 @@ export const ja = {
     shareWinHint: "友だちに見えるのはシェアしたときだけ。非公開のままもできます。",
     shareWinCta: "勝利をシェア",
     dismissWin: "非公開のまま",
+    you: "あなた",
   },
   // ADR-0007: 「マイ馬券」サーフェス。
   mine: {

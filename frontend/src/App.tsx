@@ -67,6 +67,10 @@ function App() {
   // Friend Interactions Phase 3: pending friend-request count for the Friends
   // tab badge (the Phase 4 bell later takes over notification duty).
   const [pendingFriends, setPendingFriends] = useState(0);
+  // Item 4 — own-share-in-feed tap-through: an own share tapped in the Friends
+  // feed routes here (switch to "mine" + carry the ticket id) so MyTickets
+  // opens the owner engagement surface (detail) for that exact ticket.
+  const [myTicketOpenId, setMyTicketOpenId] = useState<string | null>(null);
   // Social UX Fixes (Phase B): the signed-in viewer's @handle, used to gate
   // first-login onboarding. Tri-state: undefined = profile still loading
   // (render the shell normally); null = loaded and NO handle → blocking
@@ -568,9 +572,25 @@ function App() {
   // destination still lives inside its screen (e.g. MyTicketsHome).
   let body: ReactNode;
   if (view === "mine") {
-    body = <MyTicketsHome snap={snap} impressions={impressions} />;
+    body = (
+      <MyTicketsHome
+        snap={snap}
+        impressions={impressions}
+        openTicketId={myTicketOpenId}
+        onTicketOpened={() => setMyTicketOpenId(null)}
+      />
+    );
   } else if (view === "friends") {
-    body = <FriendsScreen getToken={getToken} onPendingChange={setPendingFriends} />;
+    body = (
+      <FriendsScreen
+        getToken={getToken}
+        onPendingChange={setPendingFriends}
+        onOpenMyTicket={(id) => {
+          setMyTicketOpenId(id);
+          setView("mine");
+        }}
+      />
+    );
   } else if (view === "reference") {
     body = <ReferenceScreen />;
   } else {

@@ -4710,6 +4710,12 @@ select:focus {
 .sc-congrats, .sc-comments { display: inline-flex; align-items: center; gap: 5px; background: transparent; border: 0; font-weight: 800; font-size: 14px; color: #555; }
 .sc-congrats.on { color: #B9780C; }
 .sc-congrats-label { font-size: 11px; font-weight: 600; }
+/* Item 4 — own share in the feed: "You" badge replaces the @handle, the
+ * congratulate count is read-only (server forbids self-congrats anyway). */
+.sc-you { padding: 2px 9px; border-radius: 999px; background: #eef4ef; color: #2f6b4a; border: 1px solid #cfe0d5; font-size: 11px; font-weight: 800; }
+.sc-congrats-readonly { display: inline-flex; align-items: center; gap: 5px; font-weight: 800; font-size: 14px; color: #9a9a9a; cursor: default; }
+/* Item 5 — race identity (venue · R# · date) under the race name. */
+.sc-race-meta { display: block; font-size: 11px; color: #9a9a9a; margin-top: 2px; }
 
 /* ---- comment thread ---- */
 .ct-thread { border-top: 1px solid var(--line); margin-top: 12px; padding-top: 10px; }

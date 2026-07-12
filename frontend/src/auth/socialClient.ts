@@ -374,12 +374,17 @@ export async function removeFriend(
 export type AudienceMode = "all_friends" | "selected";
 
 /** One item in the share-gated friend feed: an immutable ticket snapshot from a
- *  friend, plus owner + share metadata. is_win is false until Phase 3. */
+ *  friend (or your own share — Item 4), plus owner + share metadata. is_win is
+ *  false until Phase 3. `is_own` marks the viewer's own share (badged "You",
+ *  read-only reaction counts, tap-through to My Tickets detail). */
 export interface FeedItem {
   id: string;
+  /** The shared ticket's id; drives own-item tap-through to My Tickets detail. */
+  ticket_id: string;
   ticket: CommittedTicket | null;
   owner: { id: string; handle: string | null; display_name: string | null; avatar: string | null };
   audience_mode: AudienceMode;
+  is_own: boolean;
   is_win: boolean;
   /** Win multiplier (returned/cost) — odds framing, NOT currency. Null unless a win. */
   multiplier: number | null;
