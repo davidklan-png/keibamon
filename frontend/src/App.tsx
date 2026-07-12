@@ -45,6 +45,8 @@ import { BottomTabBar } from "./components/BottomTabBar";
 import { AppHeader } from "./components/AppHeader";
 import { RaceContextBar } from "./components/RaceContextBar";
 import type { NotificationView } from "./auth/socialClient";
+import { getShare } from "./auth/socialClient";
+import { notifDeepLinkTarget } from "./lib/notifDeepLink";
 
 type Step = "race" | "tickets";
 type View = "browse" | "mine" | "friends" | "reference";
@@ -71,16 +73,51 @@ function App() {
   // feed routes here (switch to "mine" + carry the ticket id) so MyTickets
   // opens the owner engagement surface (detail) for that exact ticket.
   const [myTicketOpenId, setMyTicketOpenId] = useState<string | null>(null);
+  // Notification deep-link: carry the tapped event's subject across the tab
+  // switch so the destination opens the specific item (a share's detail in the
+  // Friends pane, or a Friends-list focus for a request), not just the tab.
+  const [pendingShareId, setPendingShareId] = useState<string | null>(null);
+  const [friendsFocusSub, setFriendsFocusSub] = useState<"feed" | "list" | null>(null);
   // Social UX Fixes (Phase B): the signed-in viewer's @handle, used to gate
   // first-login onboarding. Tri-state: undefined = profile still loading
   // (render the shell normally); null = loaded and NO handle → blocking
   // HandleSetup; string = handle set → app is unlocked.
   const [viewerHandle, setViewerHandle] = useState<string | null | undefined>(undefined);
 
-  /** Friend Interactions Phase 4 — map a notification to the screen it deep-links
-   *  to. Most land on Friends; a congratulation lands the owner on My Tickets. */
-  function deepLinkNotif(n: NotificationView): View {
-    return n.type === "congratulation_received" ? "mine" : "friends";
+  /**
+   * Notification deep-link — open the SPECIFIC event the notification is about,
+   * not just its tab (notifDeepLinkTarget classifies; this performs the nav).
+   *   - ownerShare (your own congrats/comment): resolve share→ticket, then open
+   *     the My Tickets detail (owner engagement surface). Falls back to the
+   *     share-detail pane if the share can't be resolved.
+   *   - friendShare: open the Friends share-detail pane for subject_id.
+   *   - friendRequest: focus the Friends list (accept/see the person).
+   *   - fallback: switch to the Friends tab.
+   */
+  async function handleNotifDeepLink(n: NotificationView) {
+    const target = notifDeepLinkTarget(n);
+    if (target.kind === "ownerShare") {
+      const token = await getToken();
+      const r = token ? await getShare(token, target.subjectId) : null;
+      if (r?.ok && r.data.ticket_id) {
+        setMyTicketOpenId(r.data.ticket_id);
+        setView("mine");
+        return;
+      }
+      // Resolution failed (share gone?) — still show the event via share-detail.
+      setPendingShareId(target.subjectId);
+      setView("friends");
+      return;
+    }
+    if (target.kind === "friendShare") {
+      setPendingShareId(target.subjectId);
+      setView("friends");
+      return;
+    }
+    if (target.kind === "friendRequest") {
+      setFriendsFocusSub("list");
+    }
+    setView("friends");
   }
   const [step, setStep] = useState<Step>("race");
   const [runners, setRunners] = useState<Runner[]>([]);
@@ -589,6 +626,10 @@ function App() {
           setMyTicketOpenId(id);
           setView("mine");
         }}
+        openShareId={pendingShareId}
+        onShareOpened={() => setPendingShareId(null)}
+        focusSub={friendsFocusSub}
+        onFocusSub={() => setFriendsFocusSub(null)}
       />
     );
   } else if (view === "reference") {
@@ -769,7 +810,7 @@ function App() {
 
   return (
     <>
-      <AppHeader view={view} getToken={getToken} onDeepLink={(n) => setView(deepLinkNotif(n))} />
+      <AppHeader view={view} getToken={getToken} onDeepLink={handleNotifDeepLink} />
       {body}
       {invite.toast && (
         <div className="kbm-toast" role="status">

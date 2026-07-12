@@ -34,9 +34,23 @@ export interface FriendsScreenProps {
   onPendingChange: (n: number) => void;
   /** Item 4 — open the viewer's own ticket detail from an own share in the feed. */
   onOpenMyTicket: (ticketId: string) => void;
+  /** Notification deep-link — open this share's detail pane on arrival. */
+  openShareId?: string | null;
+  onShareOpened?: () => void;
+  /** Notification deep-link — focus a sub on arrival (friend-request → list). */
+  focusSub?: "feed" | "list" | null;
+  onFocusSub?: () => void;
 }
 
-export function FriendsScreen({ getToken, onPendingChange, onOpenMyTicket }: FriendsScreenProps) {
+export function FriendsScreen({
+  getToken,
+  onPendingChange,
+  onOpenMyTicket,
+  openShareId,
+  onShareOpened,
+  focusSub,
+  onFocusSub,
+}: FriendsScreenProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
   const [sub, setSub] = useState<Sub>("feed");
@@ -99,6 +113,23 @@ export function FriendsScreen({ getToken, onPendingChange, onOpenMyTicket }: Fri
     if (r.ok) setDetail(r.data);
     else setDetailMissing(true);
   }
+
+  // Notification deep-link: open the specific share the bell pointed at (works
+  // on fresh mount after a tab switch AND when already on the Friends tab).
+  useEffect(() => {
+    if (!openShareId) return;
+    void openDetail(openShareId);
+    onShareOpened?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openShareId]);
+
+  // Notification deep-link: focus a sub (friend-request → the list).
+  useEffect(() => {
+    if (!focusSub) return;
+    setSub(focusSub);
+    onFocusSub?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSub]);
 
   const hasFriends = (fr?.friends.length ?? 0) > 0 || (fr?.pending_incoming.length ?? 0) > 0;
 
