@@ -39,7 +39,6 @@ export const en = {
     raceDay: "Race day",
     runnersCount: "{count} runners",
     manual: "Sample card",
-    reload: "Reload odds",
     runners: "Runners",
     oddsLabel: "Win odds",
     noLive: "No live card available. Start with a sample card.",

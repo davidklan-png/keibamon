@@ -34,6 +34,18 @@ export default {
       return Response.redirect(redirect.toString(), 308);
     }
 
+    // /?friend=<handle> (splash) → /app/?friend=<handle>. Invite links built
+    // before the /app/ base fix land on the splash page and never reach the
+    // app's invite resolver (useInvite reads window.location.search). Forward
+    // them to the app shell, preserving the param exactly. 307 (temporary) so
+    // iteration can't get pinned by a browser permanent-redirect cache.
+    // `new URL(url)` keeps search + hash, so only the pathname changes.
+    if (url.pathname === "/" && url.searchParams.has("friend")) {
+      const redirect = new URL(url);
+      redirect.pathname = "/app/";
+      return Response.redirect(redirect.toString(), 307);
+    }
+
     if (url.pathname === "/helper") {
       return env.ASSETS.fetch(new Request(new URL("/helper.html", url), request));
     }

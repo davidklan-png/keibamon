@@ -25,6 +25,7 @@ import {
   type FeedItem,
   type FriendSummary,
 } from "../auth/socialClient";
+import { buildInviteUrl } from "../auth/inviteUrl";
 
 type Sub = "feed" | "list" | "add" | "detail";
 
@@ -268,7 +269,13 @@ function AddPane({ getToken, myHandle, onChange }: {
     void runSearch(q);
   }
 
-  const inviteUrl = myHandle ? `${window.location.origin}/?friend=${encodeURIComponent(myHandle)}` : null;
+  // Build the invite URL from the app base (origin + vite BASE_URL = "/app/"),
+  // not the site root — links built from `origin` alone land on the splash page
+  // and never reach the app's invite resolver. (Old root links are forwarded by
+  // the splash worker as a safety net.)
+  const inviteUrl = myHandle
+    ? buildInviteUrl(myHandle, import.meta.env.BASE_URL, window.location.origin)
+    : null;
 
   async function share() {
     if (!inviteUrl) return;

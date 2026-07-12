@@ -36,7 +36,6 @@ export const ja = {
     raceDay: "開催日",
     runnersCount: "{count}頭",
     manual: "サンプルカード",
-    reload: "オッズ再取得",
     runners: "出走馬",
     oddsLabel: "単勝オッズ",
     noLive: "ライブカードがありません。サンプルカードで始めます。",

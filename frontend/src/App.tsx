@@ -90,7 +90,6 @@ function App() {
   // miss silently and every Place-ticket tap bail with no POST, no toast.
   const [selectedRace, setSelectedRace] = useState<LiveRace | null>(null);
   const [snap, setSnap] = useState<LiveSnapshot | null>(null);
-  const [snapLoading, setSnapLoading] = useState(false);
   const [snapError, setSnapError] = useState<string>("");
   // ADR-0006: lifecycle of the selected race — "registered" (grayed, est odds),
   // "open" (live), "result", or "manual" (hand-entered).
@@ -117,7 +116,7 @@ function App() {
 
   // ---------- Live snapshot ----------
   useEffect(() => {
-    loadLive(true);
+    loadLive();
     // ADR-0006: poll in the background so newly REGISTERED races (and odds
     // going live) surface within ~45s without a reload. This only refreshes
     // the snapshot (race list + odds in the picker); it never re-applies a
@@ -139,8 +138,7 @@ function App() {
     }
   }
 
-  async function loadLive(silent: boolean) {
-    if (!silent) setSnapLoading(true);
+  async function loadLive() {
     try {
       const s = await fetchLiveSnapshot();
       setSnap(s);
@@ -167,8 +165,6 @@ function App() {
     } catch (e) {
       setSnapError(e instanceof Error ? e.message : String(e));
       if (runners.length === 0) seedManual();
-    } finally {
-      setSnapLoading(false);
     }
   }
 
@@ -697,12 +693,9 @@ function App() {
             runners={runners}
             raceLabel={raceLabel}
             snap={snap}
-            snapLoading={snapLoading}
             snapError={snapError}
             selectedRaceDate={selectedRaceDate}
             selectedRaceKey={selectedRaceKey}
-            onReload={() => loadLive(false)}
-            onSeedManual={() => seedManual()}
             onApplyRace={applyRace}
             onStandard={standardTickets}
             raceStatus={raceStatus}
