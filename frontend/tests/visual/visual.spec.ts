@@ -47,6 +47,11 @@ test.describe("visual regression", () => {
     await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
     // Let the auto-settle / drift effects fire once.
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
   }
 
   /**
@@ -67,6 +72,11 @@ test.describe("visual regression", () => {
     await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
     // Let the initial loadLive + auto-regen fire so all stepper buttons are enabled.
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
   }
 
   /**
@@ -110,6 +120,11 @@ test.describe("visual regression", () => {
     await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-empty")).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
     return { socialHits };
   }
 
@@ -136,6 +151,11 @@ test.describe("visual regression", () => {
     // Let each screen's mount effects (postMe / listFriends / feed) settle so
     // the snapshot isn't mid-loading.
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
   }
 
   for (const lang of LANGS) {
@@ -581,6 +601,11 @@ test.describe("ticket-detail structured modes", () => {
     await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
     await page.locator(".mt-card").nth(cardIndex).click();
     await expect(page.locator(".mt-detail")).toBeVisible();
     // Confirm we opened the intended mode before pinning the screenshot.
