@@ -5,8 +5,9 @@
 // reconciles by ticket id across the two lists.
 import React from "react";
 import type { CommittedTicket } from "../../lib/types";
-import { MT_MOOD_COLOR, mtSep, mtStateColor } from "../../lib/mytickets-view";
+import { MT_MOOD_COLOR, mtStateColor } from "../../lib/mytickets-view";
 import { yen } from "../../lib/format";
+import { TicketLines } from "../../components/TicketLines";
 import type { MtCtx } from "./ctx";
 
 export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
@@ -26,7 +27,6 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
     burstSpans,
   } = ctx;
   const open = tk.state === "open";
-  const sep = mtSep(tk.ticket.type);
   const topNum = Number(tk.ticket.lines[0]?.combo[0] ?? 0);
   const topR = tk.race.runners.find((r) => r.num === topNum);
   const d = driftView(topNum, tk, open);
@@ -114,13 +114,12 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
           <span className="mt-bet-label">
             {t(`betType.${tk.ticket.type}`)}
           </span>
-          <div className="mt-chips">
-            {tk.ticket.lines.slice(0, 4).map((ln, j) => (
-              <span key={j} className="mt-chip">
-                {ln.combo.join(sep)}
-              </span>
-            ))}
-          </div>
+          <TicketLines
+            ticket={tk.ticket}
+            unitStake={tk.unit}
+            compact
+            showPoints={false}
+          />
         </div>
 
         <div className="mt-metrics">

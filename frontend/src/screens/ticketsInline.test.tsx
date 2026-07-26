@@ -98,8 +98,9 @@ describe("TicketWhy (inline reasoning, was the Explain step)", () => {
     expect(html).toContain("Upside");
     expect(html).toContain("Fragility");
     expect(html).toContain("Cost");
-    // The combos render.
-    expect(html).toContain("combo-chip");
+    // The combos render. TicketWhy now mounts <TicketLines>; this 2-line
+    // non-box ticket takes the chip path, so the combos appear as tl-chip.
+    expect(html).toContain("tl-chip");
   });
 
   it("renders the math / house-edge disclosure", () => {

@@ -664,6 +664,9 @@ export const en = {
     allCombos: "All {n} combos",
     partners: "Partners",
     multi: "multi-axis",
+    // bracket_quinella box head tag: signals the tiles are BRACKETS, not horse
+    // numbers (a "3" tile reads as bracket 3, not horse 3).
+    brackets: "Brackets",
   },
   formation: {
     title: "Ordered boxes",

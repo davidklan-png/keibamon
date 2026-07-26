@@ -14,6 +14,7 @@ import { RET, type BetType } from "../lib/fairvalue";
 import type { Ticket, StyleState } from "../lib/types";
 import { moodKey } from "../lib/types";
 import { yen, fmt } from "../lib/format";
+import { TicketLines } from "../components/TicketLines";
 
 export interface TicketWhyProps {
   ticket: Ticket;
@@ -22,7 +23,6 @@ export interface TicketWhyProps {
 
 export function TicketWhy({ ticket }: TicketWhyProps) {
   const { t, tFmt } = useI18n();
-  const sep = ticket.type === "exacta" || ticket.type === "trifecta" ? " > " : " - ";
   const ev = ticket.expectedReturn;
   const edgePct = ((ev / Math.max(1, ticket.cost) - 1) * 100).toFixed(0);
   const fairForTicket = ticket.lines[0]?.fairOdds ?? Infinity;
@@ -77,13 +77,7 @@ export function TicketWhy({ ticket }: TicketWhyProps) {
           {yen(ticket.cost)} ({ticket.lines.length} × {yen(ticket.unit)})
         </dd>
       </dl>
-      <div className="combos">
-        {ticket.lines.slice(0, 12).map((ln, j) => (
-          <span key={j} className="combo-chip">
-            {ln.combo.join(sep)}
-          </span>
-        ))}
-      </div>
+      <TicketLines ticket={ticket} unitStake={ticket.unit} showPoints={false} />
       <details className="math-disclosure">
         <summary>{t("explain.mathSummary")}</summary>
         <div className="ev-line">

@@ -2780,6 +2780,16 @@ select:focus {
 }
 .tl-tile-sm { font-size: 14px; padding: 7px 9px; min-width: 28px; }
 .tl-tile-axis { background: var(--turf); color: #fff; border-color: transparent; }
+/* bracket_quinella: tiles carry BRACKET numbers (1-8), not umabans. Keibamon
+ * palette only — no JRA bracket colours. The solid soft fill clearly separates
+ * them from the light horse-number tiles, and the head's 枠/Brackets tag makes
+ * a "3" tile read as bracket 3, not horse 3. */
+.tl-tile-bracket { background: var(--soft); color: #fff; border-color: transparent; }
+.tl-bracket-tag {
+  font-size: 10px; font-weight: 800; letter-spacing: 0.04em;
+  padding: 2px 7px; border-radius: 5px;
+  background: var(--tint-2); color: var(--ink-2); border: 1px solid var(--line-2);
+}
 .tl-cols { display: flex; align-items: stretch; gap: 6px; flex-wrap: wrap; }
 .tl-col { flex: 1 1 0; min-width: 0; }
 .tl-col-label {

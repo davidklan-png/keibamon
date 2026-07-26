@@ -627,6 +627,8 @@ export const ja = {
     allCombos: "{n}点すべて",
     partners: "相手",
     multi: "軸複数",
+    // 枠連ボックスのヘッダータグ：タイルが馬番ではなく枠番であることを示す。
+    brackets: "枠",
   },
   formation: {
     title: "着順ボックス",

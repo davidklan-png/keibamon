@@ -2,8 +2,9 @@
 // Extracted from MyTickets' inner renderNew (2026-07-08 split — behavior
 // preserving; all state/actions come through MtCtx).
 import React from "react";
-import { MT_MOOD_COLOR, mtFmtDate, mtSep } from "../../lib/mytickets-view";
+import { MT_MOOD_COLOR, mtFmtDate } from "../../lib/mytickets-view";
 import { yen } from "../../lib/format";
+import { TicketLines } from "../../components/TicketLines";
 import type { MtCtx } from "./ctx";
 
 export function NewView({ ctx }: { ctx: MtCtx }) {
@@ -50,7 +51,6 @@ export function NewView({ ctx }: { ctx: MtCtx }) {
             <div className="mt-vibe-label">{t("mine.pickVibe")}</div>
             {options.map((o, i) => {
               const sel = selIdx === i;
-              const sep = mtSep(o.ticket.type);
               const descKey =
                 o.mood === "safer"
                   ? "mine.saferDesc"
@@ -83,13 +83,12 @@ export function NewView({ ctx }: { ctx: MtCtx }) {
                     )}
                   </div>
                   <div className="mt-option-desc">{t(descKey)}</div>
-                  <div className="mt-chips">
-                    {o.ticket.lines.slice(0, 4).map((ln, j) => (
-                      <span key={j} className="mt-chip">
-                        {ln.combo.join(sep)}
-                      </span>
-                    ))}
-                  </div>
+                  <TicketLines
+                    ticket={o.ticket}
+                    unitStake={o.ticket.unit}
+                    compact
+                    showPoints={false}
+                  />
                   <div className="mt-option-figures">
                     <div>
                       <span>{t("mine.cost")} </span>
