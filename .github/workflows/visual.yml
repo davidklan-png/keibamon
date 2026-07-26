@@ -19,20 +19,23 @@ name: Visual regression
 #   (b) parallel -linux set — two baseline sets forever; a maintenance trap.
 #       Rejected.
 #   (c) THIS — pin one Linux container image (mcr.microsoft.com/playwright at
-#       the locked @playwright/test version) and migrate the baselines into it
-#       once. Same image locally and in CI → same fonts/browser/OS → the suite
-#       is deterministic RUN-TO-RUN (two captures in one image are byte-
-#       identical). It is NOT bit-identical local-vs-CI: the host (macOS Docker
-#       vs ubuntu-latest) subtly shifts one text band's glyph AA on ~6 text-
-#       dense baselines, a stable ~94px (same 6, same 94px across runs — not
-#       jitter). The gate absorbs that with an ABSOLUTE pixel budget
-#       (maxDiffPixels in playwright.config.ts), not a ratio — see the comment
-#       there for why ratio is the wrong unit. Chosen.
-# The cost of (c): baselines can no longer be regenerated with a bare local
-# `npm run test:visual` (a Mac produces -chromium-darwin, which no longer
-# exists). Regenerate via `scripts/test-visual.sh --update`, which runs the
-# suite in this same image (node_modules in a named volume to dodge the macOS
-# Docker bind-mount penalty). @playwright/test is pinned exact in
+#       the locked @playwright/test version), pin its ARCH to linux/amd64
+#       (scripts/test-visual.sh --platform; this runner is amd64), and
+#       regenerate the baselines ON THIS RUNNER (the `regen` job below). Same
+#       image + same arch locally and in CI → same fonts/browser/OS/CPU-build →
+#       the suite is deterministic RUN-TO-RUN (two captures are byte-identical)
+#       AND across environments. The ~94px cross-env difference an earlier
+#       comment attributed to "the host subtly shifting glyph AA" was actually
+#       arm64-vs-amd64: the image is a multi-arch manifest, so a bare
+#       `docker run` on Apple Silicon pulled linux/arm64 while this runner is
+#       amd64. Pinning amd64 + regenerating baselines here collapses that 94px
+#       to ~0, so maxDiffPixels (playwright.config.ts) is sized to the ~0
+#       residual, not to the old 94px. Chosen.
+# Regen path: the `regen` job below (workflow_dispatch with regenerate=true),
+# which runs --update-snapshots here and commits the new -chromium-linux
+# baselines to the dispatch ref. A Mac can't do this itself without Rosetta
+# (off by default; enabling it restarts Docker), so CI is canonical — see
+# scripts/test-visual.sh. @playwright/test is pinned exact in
 # frontend/package.json (1.61.0) and the image tag matches.
 #
 # DOES NOT GATE DEPLOY. This is a separate workflow from deploy.yml, which is
@@ -44,7 +47,12 @@ on:
   pull_request:
   push:
     branches: [main]
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      regenerate:
+        description: "Regenerate -chromium-linux baselines (--update-snapshots) on this native-amd64 runner and commit them to the ref"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -80,3 +88,44 @@ jobs:
             frontend/test-results
             frontend/playwright-report
           if-no-files-found: ignore
+
+  # Regenerate baselines on the NATIVE amd64 runner and commit them to the
+  # dispatching ref. Trigger: `gh api .../actions/workflows/visual.yml/dispatches
+  # -f ref=<branch> -F regenerate=true` (see scripts/test-visual.sh). CI is the
+  # canonical regen path because a Mac would need Rosetta to match this arch.
+  # A GITHUB_TOKEN push does not re-trigger workflows, so no loop.
+  regen:
+    if: github.event_name == 'workflow_dispatch' && inputs.regenerate
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.61.0-jammy
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+
+      - name: Regenerate baselines (--update-snapshots)
+        run: npm run test:visual -- --update-snapshots
+        working-directory: frontend
+
+      - name: Commit regenerated baselines
+        # Run git from the repo root (where .git is), not working-directory:
+        # frontend — in a container job the subdir isn't seen as inside a repo.
+        # safe.directory handles the container's dubious-ownership check.
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/tests/visual
+          if git diff --cached --quiet; then
+            echo "No baseline changes — baselines already match amd64."
+          else
+            git commit -m "chore(visual): regenerate -chromium-linux baselines (amd64)"
+            git push
+          fi

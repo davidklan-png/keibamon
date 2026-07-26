@@ -18,26 +18,21 @@ export default defineConfig({
   testDir: "./tests/visual",
   timeout: 30_000,
   expect: {
-    // Visual regression gate. Absolute pixel budget, NOT a ratio. Two reasons
-    // a ratio is the wrong unit here:
-    //   1. Subpixel/AA differences scale with the amount of TEXT, not image
-    //      AREA. A ratio scales with area. So a ratio is loosest exactly where
-    //      a small regression is easiest to hide (big page captures) and
-    //      tightest on the surfaces that need it least (header strips).
-    //   2. The pinned Linux container makes the suite deterministic RUN-TO-RUN
-    //      (two captures in the same image are byte-identical, 0px). The only
-    //      residual is cross-ENVIRONMENT: the committed baselines (captured in
-    //      Docker on macOS) vs the CI container (ubuntu-latest) differ by a
-    //      STABLE ~94px on 6 text-dense baselines — same 6, same 94px across
-    //      two CI runs, not random jitter. (Same image; the host subtly shifts
-    //      one text band's glyph AA.)
-    // So: maxDiffPixels sized over that measured 94px ceiling. 200px = ~2.1x
-    // headroom over the worst observed baseline, and well under the smallest
-    // real regression this gate exists to catch — the b85f7ab class (an edit
-    // pencil / small control appearing or disappearing) is ~256px+, which
-    // exceeds 200 and fails. A 1px card-border change (~360px) fails. A
-    // whole-region drift (thousands of px) fails hard. Locally the budget
-    // never bites (0px); it only ever absorbs the CI cross-env 94px.
+    // Visual regression gate. Absolute pixel budget (maxDiffPixels), NOT a
+    // ratio. Subpixel/AA differences scale with the amount of TEXT, not image
+    // AREA, so a ratio is loosest exactly where a small regression hides (big
+    // page captures) and tightest on small surfaces that need it least.
+    //
+    // The ~94px cross-env difference this used to absorb was NOT jitter or "the
+    // host shifting glyph AA" — it was ARCHITECTURE. mcr.microsoft.com/playwright
+    // is a multi-arch manifest; baselines captured under linux/arm64 (Apple
+    // Silicon's default) vs CI on linux/amd64 differ by a stable, reproducible
+    // 94px on 6 text-dense baselines (same 6, same 94px across runs). The fix
+    // is at the source: scripts/test-visual.sh pins --platform linux/amd64 and
+    // visual.yml's regen job re-captures baselines on the native amd64 runner,
+    // collapsing the 94px to ~0. Until those amd64 baselines land this stays
+    // at 200 (the value that absorbed the 94px with ~2x headroom); the next
+    // commit tightens it to the measured residual.
     toHaveScreenshot: { maxDiffPixels: 200 },
   },
   fullyParallel: false,
