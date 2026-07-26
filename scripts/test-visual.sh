@@ -8,9 +8,9 @@
 # freetype/harfbuzz/Chromium. That arch split was a plausible suspect for a
 # ~94px cross-run difference an earlier batch reported, so --platform linux/amd64
 # pins it and removes arch as a variable. (Arch turned out NOT to be the cause:
-# regenerating the baselines as amd64 via the CI regen job changed zero files —
-# committed baselines already matched amd64. That ~94px is run-to-run AA jitter
-# on one text element, the version string "Keibamon v0.3.0", on 6 baselines; see
+# regenerating the baselines as amd64 via the CI regen job changed zero files.
+# The 94px was the footer version stamp .foot-version jittering on a composited
+# backdrop-filter layer — now hidden in the visual harness; see
 # playwright.config.ts.) The pin is preventive.
 #
 # HOW TO REGENERATE BASELINES — CI IS CANONICAL:

@@ -23,23 +23,22 @@ export default defineConfig({
     // AREA, so a ratio is loosest exactly where a small regression hides (big
     // page captures) and tightest on small surfaces that need it least.
     //
-    // The ~94px cross-run diff an earlier batch attributed to "arch" or "the
-    // host shifting glyph AA" is NEITHER. Regenerating all 53 baselines as
-    // native linux/amd64 in CI changed ZERO files (committed baselines already
-    // matched amd64) → not arch. And it reproduces at budget 0 → not stale.
-    // It is RUN-TO-RUN AA jitter on ONE text element: the version string
-    // "Keibamon v0.3.0", on the 6 baselines where it lands at a jitter-prone
-    // layout position (research-mode, signed-out-empty-{zero,marks}, EN+JA),
-    // ~92-99px each, the same 6 across runs. The other ~40 baselines are
-    // byte-stable run-to-run. ARCH stays pinned to linux/amd64
-    // (scripts/test-visual.sh --platform; CI regen job) — preventive, removes
-    // arch as a variable — but it did not fix the 94px (there was no arch diff
-    // to fix). 200 = ~2x over the 99px jitter ceiling, and well under the
-    // smallest real regression this gate catches (the b85f7ab edit-pencil class
-    // is ~256px > 200 → fails). CLEAN FIX (David's call, not done here): mask
-    // the version element in toHaveScreenshot — it is not a regression target
-    // and changes every release — which drops the global budget toward 0.
-    toHaveScreenshot: { maxDiffPixels: 200 },
+    // BUDGET 0 is viable because the one run-to-run jitter source is now
+    // excluded at the source. The ~94px that long sat under budget 200 was the
+    // footer version stamp <p class="foot-version"> (from main's splash-rebuild):
+    // 10px monospace + letter-spacing + opacity:0.7 inside a backdrop-filter
+    // footer → its subpixel AA drifts across CI runner instances, on the 6
+    // screens where the footer is inside the 844px capture. It is NOT time or
+    // randomness (content is static — __APP_VERSION__ define), NOT arch
+    // (regenerating as amd64 changed zero baselines), and NOT broad (the other
+    // ~40 baselines are byte-stable). visual.spec.ts's beforeEach now hides
+    // .foot-version (visibility:hidden — layout preserved) so its unstable
+    // pixels AND its per-release value churn are both out of scope. With that
+    // element excluded, every baseline is byte-stable run-to-run (image pinned
+    // to v1.61.0-jammy), so 0 catches any real pixel change. If a future
+    // ubuntu-latest roll ever shifts a glyph by a pixel, this flakes on an
+    // unchanged tree — bump it THEN, not preemptively.
+    toHaveScreenshot: { maxDiffPixels: 0 },
   },
   fullyParallel: false,
   retries: 0,

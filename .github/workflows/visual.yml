@@ -30,11 +30,15 @@ name: Visual regression
 #       removes it as a variable. The `regen` job confirmed arch is NOT the
 #       cause of the ~94px an earlier batch reported: regenerating all baselines
 #       as native amd64 here changed ZERO files (committed baselines already
-#       matched amd64). That 94px IS real — it is run-to-run AA jitter on one
-#       text element (the version string "Keibamon v0.3.0") on the 6 baselines
-#       where it lands at a jitter-prone position, the same 6 across runs; not
-#       arch, not host, not stale. The pin is preventive; maxDiffPixels
-#       (playwright.config.ts) is sized to that jitter.
+#       matched amd64). That 94px was run-to-run AA jitter on ONE element — the
+#       footer version stamp <p class="foot-version"> (10px monospace +
+#       letter-spacing + opacity:0.7 on a backdrop-filter layer), on the 6
+#       baselines where the footer is in the 844px capture. NOT time/random
+#       (content is a static __APP_VERSION__ define). visual.spec.ts's beforeEach
+#       now hides .foot-version (visibility:hidden) so its unstable pixels AND
+#       its per-release value churn are excluded; with that, baselines are
+#       byte-stable run-to-run and maxDiffPixels drops to 0. The arch pin is
+#       preventive regardless.
 # Regen path: the `regen` job below (workflow_dispatch with regenerate=true),
 # which runs --update-snapshots here and commits the new -chromium-linux
 # baselines to the dispatch ref. A Mac can't do this itself without Rosetta
