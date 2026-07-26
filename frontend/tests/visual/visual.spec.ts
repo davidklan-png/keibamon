@@ -647,9 +647,13 @@ test.describe("version stamp guard", () => {
     await page.waitForTimeout(600);
     const el = page.locator(".foot-version");
     await expect(el).toHaveCount(1);
-    // visibility:hidden / display:none hides (the exact past regression) fail here.
-    const vis = await el.evaluate((n) => (n as HTMLElement).style.visibility || getComputedStyle(n).visibility);
-    expect(vis).toBe("visible");
+    // toBeVisible covers display:none, visibility:hidden, and zero-size boxes
+    // in one assertion. (The hand-rolled getComputedStyle(el).visibility check
+    // this replaced missed display:none — visibility is independent of display,
+    // so a display:none element still reported "visible".) opacity:0 is still
+    // considered visible by Playwright; if that hide ever shows up, add an
+    // explicit opacity check here.
+    await expect(el).toBeVisible();
     await expect(el).toHaveText(/Keibamon v\d+\.\d+\.\d+/);
   });
 });
