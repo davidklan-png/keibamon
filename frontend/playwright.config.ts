@@ -46,14 +46,21 @@ export default defineConfig({
   reporter: [["list"]],
   use: {
     baseURL: BASE,
-    viewport: { width: 390, height: 844 },
     locale: "en-US",
     timezone: "Asia/Tokyo",
   },
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      // Phone-first capture. The app is a responsive SPA — no mobile-UA / touch
+      // branching, layout depends on viewport WIDTH only — so we keep the
+      // stable Desktop Chrome profile (DPR 1, desktop UA, the profile the
+      // baselines have always used) and override ONLY the viewport to 390x844
+      // (iPhone 12 width). A top-level use.viewport used to be set here too,
+      // but a project's use wins, so it was dead config and the suite was
+      // silently capturing at 1280x720 — pinning a desktop layout users never
+      // see. Now the viewport lives where it takes effect.
+      use: { ...devices["Desktop Chrome"], viewport: { width: 390, height: 844 } },
     },
   ],
   webServer: {
