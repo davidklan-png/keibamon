@@ -88,6 +88,15 @@ export function useFeedScrollRestore(view: MtView): void {
       const target = savedRef.current;
       savedRef.current = null;
       if (target == null) return; // nothing saved (e.g. deep-linked in) → leave it
+      // The restore is EXACT: jumpTo(target) sets scrollY to target. A trace
+      // (scrollY sampled for 12 frames + 700ms after the jump, with
+      // overflow-anchor both on and off) showed scrollY pinned to the jumpTo
+      // argument with scrollHeight constant — no scroll-anchoring adjustment,
+      // no late layout shift, no smooth-scroll resume. A prior "14px overshoot"
+      // turned out to be a measurement artifact of the manual check (it read
+      // scrollY *before* a Playwright click, whose scrollIntoView then nudged
+      // the feed before the save fired); real taps don't scrollIntoView, so the
+      // saved offset IS the user's actual scroll. No drift to fix.
       const raf = requestAnimationFrame(() => {
         const max = Math.max(
           0,
