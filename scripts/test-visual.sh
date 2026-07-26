@@ -6,12 +6,11 @@
 # Silicon a bare `docker run` resolves linux/arm64; GitHub's ubuntu-latest
 # runner resolves linux/amd64. Same tag, different-CPU builds of
 # freetype/harfbuzz/Chromium. That arch split was a plausible suspect for a
-# ~94px cross-run difference an earlier batch reported, so --platform linux/amd64
-# pins it and removes arch as a variable. (Arch turned out NOT to be the cause:
-# regenerating the baselines as amd64 via the CI regen job changed zero files.
-# The 94px was the footer version stamp .foot-version jittering on a composited
-# backdrop-filter layer — now hidden in the visual harness; see
-# playwright.config.ts.) The pin is preventive.
+# ~94px cross-run difference an earlier batch reported; it was NOT the cause
+# (the 94px was the branch being behind main — .foot-version present in CI's
+# merge checkout, absent from branch-only baselines). The --platform linux/amd64
+# pin is preventive: same image + same arch locally and in CI keeps the suite
+# deterministic run-to-run regardless.
 #
 # HOW TO REGENERATE BASELINES — CI IS CANONICAL:
 #   gh api -X POST repos/davidklan-png/keibamon/actions/workflows/visual.yml/dispatches \

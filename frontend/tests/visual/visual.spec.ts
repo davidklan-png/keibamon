@@ -17,22 +17,6 @@ import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS } from "
 
 const LANGS = ["en", "ja"] as const;
 
-// Exclude the per-release version stamp — <p class="foot-version"> from main's
-// splash-rebuild — from pixel comparison. Its CSS is a perfect storm for
-// cross-runner AA drift: font-size:10px ui-monospace + letter-spacing (subpixel
-// glyph positions) + opacity:0.7 (alpha-composited) inside a
-// .foot { backdrop-filter: blur(8px) } composited layer. The rest of the
-// footer (11.5px, opacity 1) is byte-stable; ONLY this line jitters (~92-99px
-// run-to-run) on the screens where the footer is inside the 844px capture. It
-// is also a value that changes every release (VERSION → __APP_VERSION__ define),
-// so pixel-pinning it would churn baselines per release regardless of AA.
-// DOM-named (CI elementFromPoint), not pixel-inferred. Hidden via addStyleTag
-// (page.addInitScript CSS injection is NOT honored in this app's load order;
-// addStyleTag after goto is). visibility:hidden preserves footer layout.
-async function hideVersionStamp(page: import("@playwright/test").Page): Promise<void> {
-  await page.addStyleTag({ content: ".foot-version{visibility:hidden!important}" });
-}
-
 test.describe("visual regression", () => {
   test.beforeEach(async ({ page }) => {
     await installApiMocks(page);
@@ -55,7 +39,6 @@ test.describe("visual regression", () => {
       // `setNow(Date.now())` now produce identical values.
     }, lang);
     await page.goto("/");
-    await hideVersionStamp(page);
     // Race-first UX (ADR-0012): `/` lands on the Races (browse) view. MyTickets
     // is now a top-level tab — click it before asserting the feed. (Social UX
     // Fixes Phase A: the old .mt-brand-name header row is gone — the shared
@@ -86,7 +69,6 @@ test.describe("visual regression", () => {
       Date.now = () => FROZEN;
     }, lang);
     await page.goto("/");
-    await hideVersionStamp(page);
     await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
     // Let the initial loadLive + auto-regen fire so all stepper buttons are enabled.
     await page.waitForTimeout(600);
@@ -134,7 +116,6 @@ test.describe("visual regression", () => {
       Date.now = () => FROZEN;
     }, [lang, seedImpressions ?? null] as const);
     await page.goto("/");
-    await hideVersionStamp(page);
     // Race-first landing: navigate to the MyTickets tab to reach the empty state.
     await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-empty")).toBeVisible({ timeout: 10_000 });
@@ -165,7 +146,6 @@ test.describe("visual regression", () => {
       Date.now = () => FROZEN;
     }, lang);
     await page.goto("/");
-    await hideVersionStamp(page);
     await page.getByTestId(tab).click();
     await expect(page.locator(anchor)).toBeVisible({ timeout: 10_000 });
     // Let each screen's mount effects (postMe / listFriends / feed) settle so
@@ -496,7 +476,6 @@ test.describe("visual regression", () => {
         Date.now = () => FROZEN;
       }, lang);
       await page.goto("/");
-      await hideVersionStamp(page);
       await expect(page.locator(".handle-setup-card")).toBeVisible({ timeout: 10_000 });
       // Seed prefilled from the bypass user's displayName "Playwright".
       await expect(page.locator(".handle-setup-input")).toHaveValue("playwright");
@@ -533,7 +512,6 @@ test.describe("visual regression", () => {
         Date.now = () => FROZEN;
       }, lang);
       await page.goto("/?friend=boss");
-      await hideVersionStamp(page);
       await expect(page.locator(".invite-card")).toBeVisible({ timeout: 10_000 });
       await expect(page.locator(".invite-handle")).toContainText("@boss");
       await expect(page.locator(".invite-cta")).toContainText(lang === "en" ? "Add" : "追加");
@@ -571,7 +549,6 @@ test.describe("visual regression", () => {
       Date.now = () => FROZEN;
     });
     await page.goto("/");
-    await hideVersionStamp(page);
     await expect(page.locator(".lane-segmented")).toBeVisible({ timeout: 10_000 });
     await page.locator(".lane-segmented button").nth(1).click(); // Research lane
     await expect(page.locator(".roundup-tab")).toBeVisible({ timeout: 10_000 });
@@ -621,7 +598,6 @@ test.describe("ticket-detail structured modes", () => {
       Date.now = () => Date.parse("2026-06-21T13:00:00+09:00");
     }, lang);
     await page.goto("/");
-    await hideVersionStamp(page);
     await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(600);
@@ -656,4 +632,24 @@ test.describe("ticket-detail structured modes", () => {
       await expect(page).toHaveScreenshot(`ticket-detail-wheel.${lang}.png`);
     });
   }
+});
+
+// Guard against the regression that bit this branch: hiding .foot-version in
+// the harness (addStyleTag visibility:hidden, or similar) to make a stale-
+// baseline CI run green. The footer version stamp is a real product element
+// (Footer.tsx → __APP_VERSION__); if it is worth rendering it is worth one
+// assertion that it is VISIBLE in the harnessed page. The companion component
+// test (Footer.test.tsx) only covers renderToStaticMarkup, not the harness.
+test.describe("version stamp guard", () => {
+  test(".foot-version is visible + non-empty in the harnessed page", async ({ page }) => {
+    await installApiMocks(page);
+    await page.goto("/");
+    await page.waitForTimeout(600);
+    const el = page.locator(".foot-version");
+    await expect(el).toHaveCount(1);
+    // visibility:hidden / display:none hides (the exact past regression) fail here.
+    const vis = await el.evaluate((n) => (n as HTMLElement).style.visibility || getComputedStyle(n).visibility);
+    expect(vis).toBe("visible");
+    await expect(el).toHaveText(/Keibamon v\d+\.\d+\.\d+/);
+  });
 });

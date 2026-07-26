@@ -23,20 +23,14 @@ export default defineConfig({
     // AREA, so a ratio is loosest exactly where a small regression hides (big
     // page captures) and tightest on small surfaces that need it least.
     //
-    // BUDGET 0 is viable because the one run-to-run jitter source is now
-    // excluded at the source. The ~94px that long sat under budget 200 was the
-    // footer version stamp <p class="foot-version"> (from main's splash-rebuild):
-    // 10px monospace + letter-spacing + opacity:0.7 inside a backdrop-filter
-    // footer → its subpixel AA drifts across CI runner instances, on the 6
-    // screens where the footer is inside the 844px capture. It is NOT time or
-    // randomness (content is static — __APP_VERSION__ define), NOT arch
-    // (regenerating as amd64 changed zero baselines), and NOT broad (the other
-    // ~40 baselines are byte-stable). visual.spec.ts's beforeEach now hides
-    // .foot-version (visibility:hidden — layout preserved) so its unstable
-    // pixels AND its per-release value churn are both out of scope. With that
-    // element excluded, every baseline is byte-stable run-to-run (image pinned
-    // to v1.61.0-jammy), so 0 catches any real pixel change. If a future
-    // ubuntu-latest roll ever shifts a glyph by a pixel, this flakes on an
+    // BUDGET 0: with the visual spec's clock frozen, fonts waited for, and the
+    // image pinned (v1.61.0-jammy), every baseline is byte-stable run-to-run —
+    // two consecutive green pull_request CI runs at 0 prove it. (The long-
+    // standing "~94px" that sat under budget 200 was NOT rasterization: the
+    // branch was behind main, so .foot-version existed in CI's merge checkout
+    // but not in the branch-only regen baselines — a constant presence/absence
+    // diff, misread as jitter. Merging main + rebaselining closed it.) If a
+    // future ubuntu-latest roll ever shifts a glyph by a pixel, 0 flakes on an
     // unchanged tree — bump it THEN, not preemptively.
     toHaveScreenshot: { maxDiffPixels: 0 },
   },
