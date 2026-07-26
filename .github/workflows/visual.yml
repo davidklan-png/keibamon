@@ -23,14 +23,18 @@ name: Visual regression
 #       (scripts/test-visual.sh --platform; this runner is amd64), and
 #       regenerate the baselines ON THIS RUNNER (the `regen` job below). Same
 #       image + same arch locally and in CI → same fonts/browser/OS/CPU-build →
-#       the suite is deterministic RUN-TO-RUN (two captures are byte-identical)
-#       AND across environments. The ~94px cross-env difference an earlier
-#       comment attributed to "the host subtly shifting glyph AA" was actually
-#       arm64-vs-amd64: the image is a multi-arch manifest, so a bare
-#       `docker run` on Apple Silicon pulled linux/arm64 while this runner is
-#       amd64. Pinning amd64 + regenerating baselines here collapses that 94px
-#       to ~0, so maxDiffPixels (playwright.config.ts) is sized to the ~0
-#       residual, not to the old 94px. Chosen.
+#       the suite is deterministic RUN-TO-RUN (two captures are byte-identical).
+#       ARCH was a plausible suspect for the ~94px cross-env difference an
+#       earlier batch reported (the image is multi-arch; a bare `docker run` on
+#       Apple Silicon pulls linux/arm64 while this runner is amd64), so the pin
+#       removes it as a variable. The `regen` job confirmed arch is NOT the
+#       cause of the ~94px an earlier batch reported: regenerating all baselines
+#       as native amd64 here changed ZERO files (committed baselines already
+#       matched amd64). That 94px IS real — it is run-to-run AA jitter on one
+#       text element (the version string "Keibamon v0.3.0") on the 6 baselines
+#       where it lands at a jitter-prone position, the same 6 across runs; not
+#       arch, not host, not stale. The pin is preventive; maxDiffPixels
+#       (playwright.config.ts) is sized to that jitter.
 # Regen path: the `regen` job below (workflow_dispatch with regenerate=true),
 # which runs --update-snapshots here and commits the new -chromium-linux
 # baselines to the dispatch ref. A Mac can't do this itself without Rosetta

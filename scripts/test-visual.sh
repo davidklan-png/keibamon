@@ -2,15 +2,16 @@
 # Run (or regenerate) the Playwright visual suite in the pinned Linux container,
 # FORCED to linux/amd64 so local + CI rasterize identically.
 #
-# WHY amd64 (the whole point): mcr.microsoft.com/playwright is a MULTI-ARCH
-# manifest. On Apple Silicon a bare `docker run` resolves linux/arm64; GitHub's
-# ubuntu-latest runner resolves linux/amd64. Same tag, different-CPU builds of
-# freetype/harfbuzz/Chromium, different glyph AA. That showed up as a STABLE
-# ~94px cross-env difference on the 6 text-dense baselines (same 6, same 94px
-# across runs) — not jitter, as an earlier comment guessed. Pinning
-# --platform linux/amd64 makes the Mac emulate the CI arch; the diff collapses
-# to 0 (run-to-run in one image is already byte-identical) and the
-# maxDiffPixels budget tightens accordingly (see playwright.config.ts).
+# WHY amd64: mcr.microsoft.com/playwright is a MULTI-ARCH manifest. On Apple
+# Silicon a bare `docker run` resolves linux/arm64; GitHub's ubuntu-latest
+# runner resolves linux/amd64. Same tag, different-CPU builds of
+# freetype/harfbuzz/Chromium. That arch split was a plausible suspect for a
+# ~94px cross-run difference an earlier batch reported, so --platform linux/amd64
+# pins it and removes arch as a variable. (Arch turned out NOT to be the cause:
+# regenerating the baselines as amd64 via the CI regen job changed zero files —
+# committed baselines already matched amd64. That ~94px is run-to-run AA jitter
+# on one text element, the version string "Keibamon v0.3.0", on 6 baselines; see
+# playwright.config.ts.) The pin is preventive.
 #
 # HOW TO REGENERATE BASELINES — CI IS CANONICAL:
 #   gh api -X POST repos/davidklan-png/keibamon/actions/workflows/visual.yml/dispatches \
