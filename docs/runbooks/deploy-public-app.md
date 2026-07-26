@@ -118,6 +118,39 @@ Expected for the current race picker: `Popular races`, `date-chip`, and
 do the in-browser sign-in check above — the curl checks can't see the
 Clerk-key regression.
 
+## Release ritual (versioning + updates page)
+
+A release is not done until the version number moves **and** the updates
+page says what changed. The repo-root `VERSION` file (e.g. `0.3.0`) is the
+single source of truth; everything else reads from it:
+
+- **`frontend/vite.config.ts`** reads `VERSION` and injects it via vite
+  `define` (`__APP_VERSION__`) → shown in the app Footer ("Keibamon v…").
+- **`scripts/stamp-version.mjs`** copies `VERSION` into the static splash
+  HTML — every element carrying `data-version-stamp` (the hero badge on
+  `splash/index.html`, the "current" marker on `splash/updates.html`).
+  Run `npm run stamp` locally; CI also runs it before the root Worker
+  deploy so a forgotten local stamp can never ship a stale badge.
+
+Scheme (semantic-style `0.MINOR.PATCH` during beta; `1.0.0` is an earned
+trust milestone, not a calendar rollover):
+
+- **MINOR** = a feature batch a user can see. Ships with an updates entry.
+- **PATCH** = fixes/polish between batches. Updates entry optional.
+
+Before merging a release:
+
+1. Bump `VERSION` (`MINOR` for a feature batch, `PATCH` for polish).
+2. Run `npm run stamp` so the splash badges match (CI will redo this, but
+   the committed files should already agree).
+3. Add a reverse-chronological entry to `splash/updates.html` — version,
+   date, and 2–5 plain sentences a non-technical racing fan understands,
+   in parallel English and 日本語. **No commit-speak** ("share tickets
+   with friends", not "implement share-gated feed"). A "for the curious"
+   detail line may follow the plain sentence; the plain sentence leads.
+4. Merge. CI deploys; verify the live splash badge + updates page reflect
+   the new version (the Definition-of-done rule above applies here too).
+
 ## Live race snapshot
 
 The app never reads the local lake. It only reads:

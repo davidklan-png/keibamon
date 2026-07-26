@@ -23,9 +23,9 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -103,6 +103,14 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+      # Stamp the repo-root VERSION into the static splash HTML (hero badge +
+      # updates page marker) before uploading. VERSION is the single source of
+      # truth; this guarantees the deployed splash can't lag a VERSION bump even
+      # if the committer forgot to run `npm run stamp` locally. See
+      # scripts/stamp-version.mjs.
+      - name: Stamp version into splash
+        run: npm run stamp
 
       # Deploy the root Worker + static assets (splash/ incl. the freshly built app).
       - name: Deploy root worker

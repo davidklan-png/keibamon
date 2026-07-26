@@ -43,4 +43,13 @@ describe("Footer", () => {
     ];
     for (const re of BANNED) expect(html).not.toMatch(re);
   });
+
+  // The build version (injected from the repo-root VERSION file via vite define)
+  // renders in the about strip so a user can always read what they're on. Match
+  // the shape, not the number — it moves every release.
+  it("renders the build version in the about strip", () => {
+    setLang("en");
+    const html = renderToStaticMarkup(<Footer />);
+    expect(html).toMatch(/Keibamon v\d+\.\d+\.\d+/);
+  });
 });

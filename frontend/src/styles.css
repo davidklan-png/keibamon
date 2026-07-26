@@ -1596,6 +1596,16 @@ select:focus {
   letter-spacing: 0.1em;
 }
 
+/* Build version, stamped from the repo-root VERSION file (vite define). Shown
+   unobtrusively in the about strip so a user can always read "what am I on". */
+.foot-version {
+  margin: 6px 0 0;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  opacity: 0.7;
+}
+
 /* ---------- Bottom tab bar (Session 1 UX refactor) ----------
    Persistent thumb-zone navigation across the three top-level destinations.
    Fixed to the viewport bottom, safe-area-inset aware (.app carries matching
