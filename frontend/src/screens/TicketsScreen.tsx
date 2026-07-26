@@ -179,7 +179,7 @@ export function TicketsScreen(props: TicketsScreenProps) {
                   <b>{yen(tk.avgPayout)}</b>
                 </div>
               </div>
-              <TicketLines ticket={tk} unitStake={tk.unit} showPoints={false} />
+              <TicketLines ticket={tk} unitStake={tk.unit} points="count" />
               {/* Session 3a: per-ticket reasoning, inline. Replaces the old
                   onExplain(id) navigation to a separate Why step. */}
               <details className="ticket-why-disclosure">

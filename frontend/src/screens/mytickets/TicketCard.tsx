@@ -118,7 +118,7 @@ export function TicketCard({ tk, ctx }: { tk: CommittedTicket; ctx: MtCtx }) {
             ticket={tk.ticket}
             unitStake={tk.unit}
             compact
-            showPoints={false}
+            points="count"
           />
         </div>
 

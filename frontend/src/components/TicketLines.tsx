@@ -34,11 +34,23 @@ export interface TicketLinesProps {
   /** Dense tiles for compact feed/share cards. Default false (detail size). */
   compact?: boolean;
   /**
-   * Render the "N combos × unit = cost" points line under box/formation/wheel.
-   * Default true. Suppress on hosts that already show cost + combo count
-   * (e.g. the detail card's pay panel) to avoid duplication.
+   * Which points line to render under the body (box/formation/wheel AND chips):
+   *
+   *   "full"  — "N combos × unit = cost" (default). DetailView/FriendsScreen/
+   *             ShareCard behaviour.
+   *   "count" — count only ("N combos" / "N点"), no unit, no cost. For hosts
+   *             that already show cost but NOT the combo count (the four list/
+   *             preview surfaces). Cost without count is a worse pair than the
+   *             chip wall it replaced, so restore the count — without
+   *             duplicating the cost the host already prints.
+   *   "none"  — no line. For hosts that already show BOTH cost and count
+   *             (DetailView's pay panel, TicketWhy's <dl>, the manual builder's
+   *             preview head).
+   *
+   * The count renders on the chips (legacy) path too — the count line is the
+   * one way the combo total is expressed, replacing the old compact "+N" chip.
    */
-  showPoints?: boolean;
+  points?: "full" | "count" | "none";
 }
 
 /** Ordered bet types — combos are sequences (a box expands to permutations). */
@@ -149,7 +161,7 @@ export function TicketLines({
   ticket,
   unitStake,
   compact = false,
-  showPoints = true,
+  points = "full",
 }: TicketLinesProps) {
   const { t, tFmt } = useI18n();
   const [expanded, setExpanded] = useState(false);
@@ -186,7 +198,14 @@ export function TicketLines({
   const rootCls = compact ? "tl tl-compact" : "tl";
 
   function PointsLine() {
-    if (!showPoints) return null;
+    if (points === "none") return null;
+    if (points === "count") {
+      // Count only — no unit, no cost (the host already shows cost). This is
+      // the one place the combo total is expressed on the dense list/preview
+      // cards; it also renders on the chips path so a legacy ticket states its
+      // total the same way a box/formation/wheel does.
+      return <div className="tl-points">{tFmt("ticketLines.count", { n: nCombos })}</div>;
+    }
     return (
       <div className="tl-points">
         {tFmt("ticketLines.points", {
@@ -312,15 +331,17 @@ export function TicketLines({
             {ln.combo.join(sep)}
           </span>
         ))}
+        {/* Non-compact offers an expander to reveal every chip. Compact no
+            longer carries a "+N" truncation chip: the count line below states
+            the combo total (the one way the count is expressed), so a dense
+            card reads "6 chips · 18 combos" instead of "+12". */}
         {!expanded && hidden > 0 && !compact && (
           <button type="button" className="tl-more" onClick={() => setExpanded(true)}>
             {tFmt("ticketLines.allCombos", { n: nCombos })}
           </button>
         )}
-        {!expanded && hidden > 0 && compact && (
-          <span className="tl-chip tl-chip-more">+{hidden}</span>
-        )}
       </div>
+      <PointsLine />
     </div>
   );
 }

@@ -87,7 +87,7 @@ export function NewView({ ctx }: { ctx: MtCtx }) {
                     ticket={o.ticket}
                     unitStake={o.ticket.unit}
                     compact
-                    showPoints={false}
+                    points="count"
                   />
                   <div className="mt-option-figures">
                     <div>

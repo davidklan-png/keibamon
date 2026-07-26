@@ -624,6 +624,8 @@ export const ja = {
   // TicketLines — 構造対応の馬券本体レンダラー (ticket-detail UX)。
   ticketLines: {
     points: "{n}点 × {unit} = {cost}",
+    // 点数のみのポイントライン（points="count"）：コスト既表示ホスト向け、単価もコストもなしの組数。
+    count: "{n}点",
     allCombos: "{n}点すべて",
     partners: "相手",
     multi: "軸複数",

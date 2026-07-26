@@ -105,7 +105,7 @@ export function ProfileView({ ctx }: { ctx: MtCtx }) {
                         ticket={tk.ticket}
                         unitStake={tk.unit}
                         compact
-                        showPoints={false}
+                        points="count"
                       />
                       <div className="mt-metrics">
                         <div>

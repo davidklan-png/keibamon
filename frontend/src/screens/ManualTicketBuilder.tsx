@@ -499,7 +499,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
             ticket={ticket}
             unitStake={ticket.unit}
             compact
-            showPoints={false}
+            points="none"
           />
           <div className="mt-manual-figures">
             <div>

@@ -9,7 +9,7 @@
 //   - SINGLE/legacy: capped chips, no structure badge.
 //   - Derivation: a legacy flat ticket that IS a full box expansion renders as
 //     Box; one that IS NOT (false-positive guard) stays on chips.
-//   - showPoints toggle; JA label set.
+//   - points variant (full/count/none), incl. the count on the chips path; JA label set.
 //
 // Pure presentational — renderToStaticMarkup (no jsdom, no fetch), like
 // FillGuide.test.tsx.
@@ -94,13 +94,45 @@ describe("TicketLines", () => {
     expect(html).not.toContain("tl-chip");
   });
 
-  it("box: showPoints={false} suppresses the points line", () => {
+  it("box: points=\"none\" suppresses the points line", () => {
     const ticket = buildBoxTicket("trio", ["1", "2", "3", "4"], p, allUmas, 100, "tl");
     const html = renderToStaticMarkup(
-      <TicketLines ticket={ticket!} unitStake={100} showPoints={false} />,
+      <TicketLines ticket={ticket!} unitStake={100} points="none" />,
     );
     expect(html).toContain("BOX");
     expect(html).not.toContain("tl-points");
+  });
+
+  it("box: points=\"count\" renders the combo total with no unit/cost", () => {
+    // C(4,2)=6 quinella combos over {1,2,3,4}. The count line states the total
+    // without duplicating the cost a host already prints.
+    const ticket = buildBoxTicket("quinella", ["1", "2", "3", "4"], p, allUmas, 100, "tl");
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} points="count" />,
+    );
+    expect(html).toContain("tl-points");
+    expect(html).toContain("6 combos");
+    // No unit, no cost, no "×" framing — count only.
+    expect(html).not.toContain("¥100");
+    expect(html).not.toMatch(/×.*=/);
+  });
+
+  it("chips: points=\"count\" renders the total on the legacy chip path (no +N)", () => {
+    // A flat non-box ticket (3 of P(5,3)) takes the chip path. The count line
+    // now renders there too, and the compact "+N" truncation chip is gone —
+    // the count line is the one way the combo total is expressed.
+    const ticket = flatTicket("trifecta", [
+      ["1", "2", "3"],
+      ["1", "2", "4"],
+      ["1", "3", "4"],
+    ]);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} points="count" />,
+    );
+    expect(html).toContain("tl-chip");
+    expect(html).toContain("tl-points");
+    expect(html).toContain("3 combos");
+    expect(html).not.toContain("tl-chip-more"); // the old "+N" chip is gone
   });
 
   // ---- FORMATION -------------------------------------------------------

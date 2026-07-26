@@ -77,7 +77,7 @@ export function TicketWhy({ ticket }: TicketWhyProps) {
           {yen(ticket.cost)} ({ticket.lines.length} × {yen(ticket.unit)})
         </dd>
       </dl>
-      <TicketLines ticket={ticket} unitStake={ticket.unit} showPoints={false} />
+      <TicketLines ticket={ticket} unitStake={ticket.unit} points="none" />
       <details className="math-disclosure">
         <summary>{t("explain.mathSummary")}</summary>
         <div className="ev-line">
