@@ -163,6 +163,20 @@ function MyTickets({ snap, userId, getToken, openTicketId, onTicketOpened }: MyT
   useEffect(() => {
     if (view !== "detail") prevViewRef.current = view;
   }, [view]);
+  // Opening a sub-view (detail / profile / manual / new) from a scrolled feed
+  // used to land mid-card: setView doesn't reset scroll, so the viewport carried
+  // the feed's scroll offset into the new view. Scroll to top on every view
+  // change. `scroll-behavior: smooth` on <html> means a programmatic
+  // scrollIntoView (Playwright's click-into-view, or any in-page jump) can leave
+  // an in-flight smooth animation that resumes past a plain scrollTo, so defeat
+  // it for the reset and restore the stylesheet value after.
+  useEffect(() => {
+    const el = document.documentElement;
+    const prev = el.style.scrollBehavior;
+    el.style.scrollBehavior = "auto";
+    window.scrollTo(0, 0);
+    el.style.scrollBehavior = prev;
+  }, [view]);
   // Phase 3 — social state.
   const [selectedProfileHandle, setSelectedProfileHandle] = useState<string | null>(null);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
