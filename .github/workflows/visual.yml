@@ -20,8 +20,14 @@ name: Visual regression
 #       Rejected.
 #   (c) THIS — pin one Linux container image (mcr.microsoft.com/playwright at
 #       the locked @playwright/test version) and migrate the baselines into it
-#       once. Same image locally and in CI → identical fonts/browser/OS → the
-#       strict ratio:0 gate holds. Chosen.
+#       once. Same image locally and in CI → same fonts/browser/OS → the suite
+#       is deterministic RUN-TO-RUN (two captures in one image are byte-
+#       identical). It is NOT bit-identical local-vs-CI: the host (macOS Docker
+#       vs ubuntu-latest) subtly shifts one text band's glyph AA on ~6 text-
+#       dense baselines, a stable ~94px (same 6, same 94px across runs — not
+#       jitter). The gate absorbs that with an ABSOLUTE pixel budget
+#       (maxDiffPixels in playwright.config.ts), not a ratio — see the comment
+#       there for why ratio is the wrong unit. Chosen.
 # The cost of (c): baselines can no longer be regenerated with a bare local
 # `npm run test:visual` (a Mac produces -chromium-darwin, which no longer
 # exists). Regenerate via `scripts/test-visual.sh --update`, which runs the

@@ -18,16 +18,27 @@ export default defineConfig({
   testDir: "./tests/visual",
   timeout: 30_000,
   expect: {
-    // Visual regression gate. The suite runs in a pinned Linux container
-    // (mcr.microsoft.com/playwright) so CI and local share one render
-    // environment — that eliminates cross-MACHINE variance (the macOS CJK-font
-    // gap that broke a macos-15 runner). It does NOT eliminate cross-RUN
-    // subpixel jitter: even two runs of the same image differ by ~0.01% of
-    // pixels (a single text band's glyph AA) on a handful of baselines. A 0
-    // ratio flakes on that; 0.1% absorbs it with ~10x headroom while still
-    // catching real regressions (the ticket-renderer batch's smallest real
-    // drift was ~4%). Scales with baseline size, so small surfaces stay tight.
-    toHaveScreenshot: { maxDiffPixelRatio: 0.001 },
+    // Visual regression gate. Absolute pixel budget, NOT a ratio. Two reasons
+    // a ratio is the wrong unit here:
+    //   1. Subpixel/AA differences scale with the amount of TEXT, not image
+    //      AREA. A ratio scales with area. So a ratio is loosest exactly where
+    //      a small regression is easiest to hide (big page captures) and
+    //      tightest on the surfaces that need it least (header strips).
+    //   2. The pinned Linux container makes the suite deterministic RUN-TO-RUN
+    //      (two captures in the same image are byte-identical, 0px). The only
+    //      residual is cross-ENVIRONMENT: the committed baselines (captured in
+    //      Docker on macOS) vs the CI container (ubuntu-latest) differ by a
+    //      STABLE ~94px on 6 text-dense baselines — same 6, same 94px across
+    //      two CI runs, not random jitter. (Same image; the host subtly shifts
+    //      one text band's glyph AA.)
+    // So: maxDiffPixels sized over that measured 94px ceiling. 200px = ~2.1x
+    // headroom over the worst observed baseline, and well under the smallest
+    // real regression this gate exists to catch — the b85f7ab class (an edit
+    // pencil / small control appearing or disappearing) is ~256px+, which
+    // exceeds 200 and fails. A 1px card-border change (~360px) fails. A
+    // whole-region drift (thousands of px) fails hard. Locally the budget
+    // never bites (0px); it only ever absorbs the CI cross-env 94px.
+    toHaveScreenshot: { maxDiffPixels: 200 },
   },
   fullyParallel: false,
   retries: 0,
