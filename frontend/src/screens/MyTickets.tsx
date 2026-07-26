@@ -67,6 +67,7 @@ import {
 } from "../lib/mytickets-view";
 import { Footer } from "../components/Footer";
 import type { MtCtx } from "./mytickets/ctx";
+import { useFeedScrollRestore } from "./mytickets/useFeedScrollRestore";
 import { FeedView } from "./mytickets/FeedView";
 import { NewView } from "./mytickets/NewView";
 import { ManualView } from "./mytickets/ManualView";
@@ -163,20 +164,12 @@ function MyTickets({ snap, userId, getToken, openTicketId, onTicketOpened }: MyT
   useEffect(() => {
     if (view !== "detail") prevViewRef.current = view;
   }, [view]);
-  // Opening a sub-view (detail / profile / manual / new) from a scrolled feed
-  // used to land mid-card: setView doesn't reset scroll, so the viewport carried
-  // the feed's scroll offset into the new view. Scroll to top on every view
-  // change. `scroll-behavior: smooth` on <html> means a programmatic
-  // scrollIntoView (Playwright's click-into-view, or any in-page jump) can leave
-  // an in-flight smooth animation that resumes past a plain scrollTo, so defeat
-  // it for the reset and restore the stylesheet value after.
-  useEffect(() => {
-    const el = document.documentElement;
-    const prev = el.style.scrollBehavior;
-    el.style.scrollBehavior = "auto";
-    window.scrollTo(0, 0);
-    el.style.scrollBehavior = prev;
-  }, [view]);
+  // Direction-aware scroll restoration: forward into a sub-view (detail /
+  // profile / manual / new) jumps to top; returning to the feed restores the
+  // offset the user left from, so Back from a ticket doesn't lose their place
+  // in the list. (The first cut scrolled to top on every view change, which
+  // clobbered the feed position on the way back.)
+  useFeedScrollRestore(view);
   // Phase 3 — social state.
   const [selectedProfileHandle, setSelectedProfileHandle] = useState<string | null>(null);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
