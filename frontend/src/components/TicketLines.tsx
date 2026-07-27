@@ -41,6 +41,14 @@ export interface TicketLinesProps {
    * one way the combo total is expressed, replacing the old compact "+N" chip.
    */
   points?: "full" | "count" | "none";
+  /**
+   * Suppress the `.tl-head` structure-badge row. For hosts that already label
+   * the structure themselves — FillGuide's header carries the bet type + a
+   * structure badge, so mounting TicketLines for the body must not duplicate
+   * the badge. Default false: every existing mount (detail / share / feed)
+   * shows the badge.
+   */
+  badge?: boolean;
 }
 
 export function TicketLines({
@@ -48,6 +56,7 @@ export function TicketLines({
   unitStake,
   compact = false,
   points = "full",
+  badge = true,
 }: TicketLinesProps) {
   const { t, tFmt } = useI18n();
   const [expanded, setExpanded] = useState(false);
@@ -84,12 +93,14 @@ export function TicketLines({
     const bracketTileCls = view.isBracket ? `${tileCls} tl-tile-bracket` : tileCls;
     return (
       <div className={rootCls}>
-        <div className="tl-head">
-          <span className="tl-badge tl-badge-box">{t("fillGuide.box")}</span>
-          {view.isBracket && (
-            <span className="tl-bracket-tag">{t("ticketLines.brackets")}</span>
-          )}
-        </div>
+        {badge && (
+          <div className="tl-head">
+            <span className="tl-badge tl-badge-box">{t("fillGuide.box")}</span>
+            {view.isBracket && (
+              <span className="tl-bracket-tag">{t("ticketLines.brackets")}</span>
+            )}
+          </div>
+        )}
         <div className="tl-tiles" role="list">
           {view.set.map((u) => (
             <span key={u} className={bracketTileCls} role="listitem">
@@ -109,9 +120,11 @@ export function TicketLines({
     const posLabels = [t("fillGuide.pos1"), t("fillGuide.pos2"), t("fillGuide.pos3")];
     return (
       <div className={rootCls}>
-        <div className="tl-head">
-          <span className="tl-badge tl-badge-form">{t("fillGuide.formation")}</span>
-        </div>
+        {badge && (
+          <div className="tl-head">
+            <span className="tl-badge tl-badge-form">{t("fillGuide.formation")}</span>
+          </div>
+        )}
         <div className="tl-cols">
           {positions.map((posSet, i) => (
             <Fragment key={i}>
@@ -145,10 +158,12 @@ export function TicketLines({
     const axisLabel = posLabels[axisPosition - 1] ?? `#${axisPosition}`;
     return (
       <div className={rootCls}>
-        <div className="tl-head">
-          <span className="tl-badge tl-badge-wheel">{t("fillGuide.wheel")}</span>
-          {axis.length > 1 && <span className="tl-multi">{t("ticketLines.multi")}</span>}
-        </div>
+        {badge && (
+          <div className="tl-head">
+            <span className="tl-badge tl-badge-wheel">{t("fillGuide.wheel")}</span>
+            {axis.length > 1 && <span className="tl-multi">{t("ticketLines.multi")}</span>}
+          </div>
+        )}
         <div className="tl-cols">
           <div className="tl-col">
             <div className="tl-col-label">

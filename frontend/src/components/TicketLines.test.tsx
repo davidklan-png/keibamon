@@ -103,6 +103,38 @@ describe("TicketLines", () => {
     expect(html).not.toContain("tl-points");
   });
 
+  // ---- badge={false} (FillGuide mounts TicketLines badge-suppressed) ------
+  it("badge={false}: suppresses the structure-badge head (body still renders)", () => {
+    const ticket = buildBoxTicket("quinella", ["1", "2", "3"], p, allUmas, 100, "tl");
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} badge={false} />,
+    );
+    expect(html).not.toContain("tl-head");
+    expect(html).not.toContain("tl-badge-box");
+    // The body still renders (the set as tiles).
+    expect(html).toContain("tl-tile");
+  });
+
+  it("badge={false}: also suppresses the wheel's multi-axis head tag", () => {
+    const ticket = buildWheelTicket(
+      "trifecta",
+      ["1", "2"],
+      ["3", "4"],
+      1,
+      p,
+      allUmas,
+      100,
+      "tl",
+    );
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} badge={false} />,
+    );
+    expect(html).not.toContain("tl-head");
+    expect(html).not.toContain("tl-multi");
+    // Axis + partners columns still render.
+    expect(html).toContain("tl-col");
+  });
+
   it("box: points=\"count\" renders the combo total with no unit/cost", () => {
     // C(4,2)=6 quinella combos over {1,2,3,4}. The count line states the total
     // without duplicating the cost a host already prints.
