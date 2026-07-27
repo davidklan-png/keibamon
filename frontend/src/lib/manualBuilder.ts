@@ -160,7 +160,13 @@ export function buildManualTicket(
   const combos = ordered ? kPerms(arr, k) : kCombos(arr, k);
   const { lines } = priceLines(type, combos, p, allUmas, unit);
   if (lines.length === 0) return null;
-  return finalizeTicket(type, lines, unit, p, allUmas);
+  // Tag the box explicitly. Without this the ticket is structure-less and
+  // FillGuide/TicketLines fall back to deriveBoxSet, which DELIBERATELY rejects
+  // a single-combination box (a 2-horse quinella or 3-horse trio = C(n,k)=1) as
+  // ambiguous — so a minimum-size box would render a combo chip instead of the
+  // numbered field grid/tile set. The explicit structure makes every box render
+  // as a box regardless of combo count (matches studio buildBoxTicket).
+  return { ...finalizeTicket(type, lines, unit, p, allUmas), structure: "box", structurePayload: { set: arr } };
 }
 
 function cartesianProduct<T>(arrays: T[][]): T[][] {

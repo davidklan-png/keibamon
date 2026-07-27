@@ -68,10 +68,14 @@ export interface Runner {
   jockey_id?: string | null;
   jockey_name?: string | null;
   /**
-   * ADR-0011 Phase 3a: bracket (枠) number, 1-8. Absent on the live path
-   * (LiveRunner doesn't carry it yet) → SetFamilyView omits the 枠連 row via
-   * bracketQuinellaAgg returning null. Present on the roundup/weekly path.
-   * The pricing engine ignores this; only the structural aggregation reads it.
+   * ADR-0011 Phase 3a: bracket (枠) number, 1-8. Present on BOTH the live and
+   * roundup/weekly paths once entries finalise — on the live path the shutuba
+   * scrape parses it from the Waku cell (netkeiba_entries._extract_wakuban →
+   * snapshot.py build_runner), so LiveRunner carries it from Thursday/Friday
+   * when the barrier draw is published. null BEFORE that (the pre-entries
+   * shutuba has empty 枠 cells the parser yields None for) → bracketQuinellaAgg
+   * returns null and SetFamilyView omits the 枠連 row. The pricing engine
+   * ignores this; only the structural aggregation reads it.
    */
   gate?: number | null;
 }

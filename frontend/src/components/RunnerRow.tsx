@@ -14,11 +14,12 @@
 // glyph. It writes nothing and toggles nothing — mark-setting stays on
 // RaceScreen (RunnerMark / ADR-0016 inline-mark).
 //
-// bracketStripe is a HOOK only: `waku`/gate is absent on /api/live
-// (fairvalue.ts:71-73), so a bracket colour stripe cannot render on the live
-// path. The slot is rendered only when provided; do NOT add waku to a fixture
-// to make one appear. (Phase 3b correction: the netkeiba stripe was specified
-// without confirming the data — we don't carry it where it would matter.)
+// bracketStripe is a HOOK for the bracket (waku/枠) colour stripe. gate IS
+// carried on /api/live once entries finalise (netkeiba_entries._extract_wakuban
+// → snapshot.py build_runner → LiveRunner.gate) — the earlier "gate absent on
+// /api/live" note was wrong, built on a stale comment without checking the
+// producer. The slot renders only when a stripe node is provided; null gate
+// (pre-entries) → no stripe.
 // ============================================================================
 import type { ReactNode } from "react";
 import { useI18n } from "../i18n";
@@ -36,7 +37,8 @@ export interface RunnerRowProps {
    *  full RunnerMark chip strip beside the row. null/absent → "—" placeholder. */
   mark?: IntuitionState | null;
   layout: "race" | "matrix";
-  /** Hook for the bracket colour stripe — empty today (waku absent on /api/live). */
+  /** Hook for the bracket colour stripe (a React node). Rendered when provided;
+   *  null/undefined → no stripe (e.g. a pre-entries race with no gate yet). */
   bracketStripe?: ReactNode;
 }
 

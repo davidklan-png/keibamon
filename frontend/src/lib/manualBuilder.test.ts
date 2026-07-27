@@ -376,3 +376,33 @@ describe("manualBuilder — isFullBox", () => {
     expect(isFullBox("quinella", combos(5), ["1", "2", "3", "4"])).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// structure:"box" on the generic box path. Codex review of PR #25: a minimum-
+// size box (2-horse quinella, 3-horse trio — C(n,k)=1 combo) must still carry
+// structure:"box", or FillGuide falls back to deriveBoxSet which DELIBERATELY
+// rejects a single-combo box (ticketStructure.ts:108-111) and renders a chip
+// instead of the numbered field grid. The manual-fillcard-box baseline had
+// pinned that chip; these pin the fix.
+// ---------------------------------------------------------------------------
+describe("manualBuilder — box tickets are tagged structure:box", () => {
+  it("a minimum 2-horse quinella (C(2,2)=1) carries structure:box + the set", () => {
+    const { p, allUmas } = priced();
+    const t = buildManualTicket("quinella", new Set(["3", "6"]), new Set(), RUNNERS, p, allUmas, 100);
+    expect(t).not.toBeNull();
+    if (!t) return;
+    expect(t.structure).toBe("box");
+    expect(t.structurePayload).toEqual({ set: ["3", "6"] });
+    expect(t.lines).toHaveLength(1); // C(2,2)=1 — the case that used to render a chip
+  });
+
+  it("a minimum 3-horse trio (C(3,3)=1) carries structure:box + the set", () => {
+    const { p, allUmas } = priced();
+    const t = buildManualTicket("trio", new Set(["3", "4", "6"]), new Set(), RUNNERS, p, allUmas, 100);
+    expect(t).not.toBeNull();
+    if (!t) return;
+    expect(t.structure).toBe("box");
+    expect(t.structurePayload).toEqual({ set: ["3", "4", "6"] });
+    expect(t.lines).toHaveLength(1); // C(3,3)=1
+  });
+});

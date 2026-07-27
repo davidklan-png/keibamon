@@ -112,6 +112,29 @@
      clearance rule is declared once rather than re-derived per element. Call
      sites add an explicit +Npx breathing room on top of it. */
   --bottom-bar-h: 57px;
+
+  /* 枠 (waku/bracket) palette — the ONE source for every bracket-coloured
+     element: the manual builder's 枠連 selection cells (.mt-manual-cell.bracket-
+     N.on), FillGuide's 1-8 grid (.fillguide-cell.bracket-N), and RunnerRow's
+     bracket stripe (.bracket-stripe.bracket-N).
+     The NAMES are JRA's 帽色 (helmet-colour) convention — 1白 2黒 3赤 4青 5黄 6緑
+     7橙 8桃 — and that mapping is the whole point: a user maps colour→bracket by
+     muscle memory at the track, so the colour IS the bracket (information, the
+     same class as silks), not an imitation of JRA's visual identity (which
+     requirements-ticket-detail-ux.md still rules out elsewhere). The HEXES are
+     ours — JRA publishes the convention, not a colour spec; these are screen-
+     tuned (pure primaries are harsh at phone size). --waku-N-ink is the legible
+     text colour on each (dark ink on the light brackets 1/5/7/8, white on the
+     dark 2/3/4/6); contrast verified ≥4.5:1 (green darkened from #218900→#1c7600
+     to clear the bar). */
+  --waku-1: #ffffff;  --waku-1-ink: var(--ink);   /* 白 white */
+  --waku-2: #16241c;  --waku-2-ink: #ffffff;      /* 黒 black  (near-black --ink family) */
+  --waku-3: #e61717;  --waku-3-ink: #ffffff;      /* 赤 red    (white 4.7:1) */
+  --waku-4: #0066cc;  --waku-4-ink: #ffffff;      /* 青 blue   (white 5.6:1) */
+  --waku-5: #f0c518;  --waku-5-ink: var(--ink);   /* 黄 yellow (ink 9.7:1) */
+  --waku-6: #1c7600;  --waku-6-ink: #ffffff;      /* 緑 green  (white 5.7:1; darkened from #218900) */
+  --waku-7: #ff9500;  --waku-7-ink: var(--ink);   /* 橙 orange (ink 7.3:1; white fails 2.2:1) */
+  --waku-8: #f38abd;  --waku-8-ink: var(--ink);   /* 桃 pink   (ink 7.1:1; white fails 2.3:1) */
 }
 
 /* ADR-0007 keyframes (My Tickets surface). */
@@ -2736,15 +2759,46 @@ select:focus {
 /* 枠 (bracket) coloring — reuse JRA's standard convention. The .on state
  * keeps the per-bracket background so a same-bracket pair is visually
  * coherent with FillGuide's bracket row. */
-.mt-manual-cell.bracket-1 { border-color: var(--ink); }
-.mt-manual-cell.bracket-1.on { background: #fff; color: var(--ink); border-color: var(--ink); }
-.mt-manual-cell.bracket-2.on { background: #000; color: #fff; border-color: #000; }
-.mt-manual-cell.bracket-3.on { background: var(--turf); color: #fff; border-color: var(--turf-deep); }
-.mt-manual-cell.bracket-4.on { background: var(--sky); color: #fff; border-color: var(--sky); }
-.mt-manual-cell.bracket-5.on { background: var(--gold); color: var(--gold-ink); border-color: var(--gold-deep); }
-.mt-manual-cell.bracket-6.on { background: var(--turf-deep); color: #fff; border-color: var(--turf-deep); }
-.mt-manual-cell.bracket-7.on { background: var(--gold-amber); color: var(--gold-ink); border-color: var(--gold-deep); }
-.mt-manual-cell.bracket-8.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.mt-manual-cell.bracket-1 { border-color: var(--waku-1-ink); }
+.mt-manual-cell.bracket-1.on { background: var(--waku-1); color: var(--waku-1-ink); border-color: var(--waku-1-ink); }
+.mt-manual-cell.bracket-2.on { background: var(--waku-2); color: var(--waku-2-ink); border-color: var(--waku-2-ink); }
+.mt-manual-cell.bracket-3.on { background: var(--waku-3); color: var(--waku-3-ink); border-color: var(--waku-3-ink); }
+.mt-manual-cell.bracket-4.on { background: var(--waku-4); color: var(--waku-4-ink); border-color: var(--waku-4-ink); }
+.mt-manual-cell.bracket-5.on { background: var(--waku-5); color: var(--waku-5-ink); border-color: var(--waku-5-ink); }
+.mt-manual-cell.bracket-6.on { background: var(--waku-6); color: var(--waku-6-ink); border-color: var(--waku-6-ink); }
+.mt-manual-cell.bracket-7.on { background: var(--waku-7); color: var(--waku-7-ink); border-color: var(--waku-7-ink); }
+.mt-manual-cell.bracket-8.on { background: var(--waku-8); color: var(--waku-8-ink); border-color: var(--waku-8-ink); }
+
+/* RunnerRow bracket (waku/枠) stripe — a thin coloured left-edge bar identifying
+   each runner's bracket. Anchored position:absolute over the row's left edge so
+   it never enters the flow (the race row is a 2-col grid, the matrix runner a
+   flex column) — both hosts just gain position:relative to anchor it. Colour
+   from the shared --waku-N vars. The stripe is the data, not chrome: it renders
+   only when gate is present (BracketStripe returns null otherwise), so a
+   pre-entries race before the barrier draw has no stripe. */
+.runner,
+.mt-matrix-runner {
+  position: relative;
+}
+.bracket-stripe {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  border-radius: 8px 0 0 8px;
+}
+.mt-matrix-runner .bracket-stripe {
+  border-radius: 0; /* the matrix runner cell isn't rounded */
+}
+.bracket-stripe.bracket-1 { background: var(--waku-1); box-shadow: inset 1px 0 0 var(--waku-1-ink); }
+.bracket-stripe.bracket-2 { background: var(--waku-2); }
+.bracket-stripe.bracket-3 { background: var(--waku-3); }
+.bracket-stripe.bracket-4 { background: var(--waku-4); }
+.bracket-stripe.bracket-5 { background: var(--waku-5); }
+.bracket-stripe.bracket-6 { background: var(--waku-6); }
+.bracket-stripe.bracket-7 { background: var(--waku-7); }
+.bracket-stripe.bracket-8 { background: var(--waku-8); }
 
 .mt-manual-preview {
   background: #fff;
@@ -2752,6 +2806,28 @@ select:focus {
   border-radius: 16px;
   padding: 14px;
   margin-bottom: 14px;
+}
+/* Fill-guide toggle + mounted fill card (ADR-0011 parity with TicketStudio).
+   The toggle sits between the fair-value preview and the FillGuide card; the
+   card itself is FillGuide's own .fillguide styling. */
+.mt-manual-fillcard-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+  background: var(--tint);
+  color: var(--soft);
+  font: 700 12px/1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.mt-manual-fillcard-chev {
+  font-size: 10px;
 }
 .mt-manual-preview-head {
   display: flex;
@@ -4217,6 +4293,13 @@ select:focus {
 .kbm-modal-card {
   width: 100%;
   max-width: 520px;
+  /* The studio is a bottom sheet (align-items: flex-end on .kbm-modal). Cap it
+     at the viewport and scroll internally so a tall card can't overflow the top
+     edge — SetFamilyView grows a 枠連 row once gate flows on /api/live, which
+     pushed the first row off-screen and unreachable. Without this the top rows
+     are un-tappable for users AND for the visual gate (click timeout). */
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -4414,14 +4497,14 @@ select:focus {
 
 /* Forward-compatible bracket coloring (3b): when a 枠連 ticket reaches the
  * fill guide, the grid colors by bracket instead of a flat "on" highlight. */
-.fillguide-cell.bracket-1 { background: #fff; border-color: var(--ink); color: var(--ink); }
-.fillguide-cell.bracket-2 { background: #000; border-color: #000; color: #fff; }
-.fillguide-cell.bracket-3 { background: var(--turf); border-color: var(--turf-deep); color: #fff; }
-.fillguide-cell.bracket-4 { background: var(--sky); border-color: var(--sky); color: #fff; }
-.fillguide-cell.bracket-5 { background: var(--gold); border-color: var(--gold-deep); color: var(--gold-ink); }
-.fillguide-cell.bracket-6 { background: var(--turf-deep); border-color: var(--turf-deep); color: #fff; }
-.fillguide-cell.bracket-7 { background: var(--gold-amber); border-color: var(--gold-deep); color: var(--gold-ink); }
-.fillguide-cell.bracket-8 { background: var(--ink); border-color: var(--ink); color: #fff; }
+.fillguide-cell.bracket-1 { background: var(--waku-1); border-color: var(--waku-1-ink); color: var(--waku-1-ink); }
+.fillguide-cell.bracket-2 { background: var(--waku-2); border-color: var(--waku-2-ink); color: var(--waku-2-ink); }
+.fillguide-cell.bracket-3 { background: var(--waku-3); border-color: var(--waku-3-ink); color: var(--waku-3-ink); }
+.fillguide-cell.bracket-4 { background: var(--waku-4); border-color: var(--waku-4-ink); color: var(--waku-4-ink); }
+.fillguide-cell.bracket-5 { background: var(--waku-5); border-color: var(--waku-5-ink); color: var(--waku-5-ink); }
+.fillguide-cell.bracket-6 { background: var(--waku-6); border-color: var(--waku-6-ink); color: var(--waku-6-ink); }
+.fillguide-cell.bracket-7 { background: var(--waku-7); border-color: var(--waku-7-ink); color: var(--waku-7-ink); }
+.fillguide-cell.bracket-8 { background: var(--waku-8); border-color: var(--waku-8-ink); color: var(--waku-8-ink); }
 
 .fillguide-summary {
   display: grid;
