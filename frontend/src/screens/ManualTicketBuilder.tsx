@@ -75,6 +75,11 @@ function isOrderedType(type: BetType): boolean {
   return type === "exacta" || type === "trifecta";
 }
 
+/** i18n key for the (i+1)th finishing-position label (1着 / 2着 / 3着). */
+function posKeyFor(posIndex: number): string {
+  return posIndex === 0 ? "fillGuide.pos1" : posIndex === 1 ? "fillGuide.pos2" : "fillGuide.pos3";
+}
+
 function emptyPositions(type: BetType): string[][] {
   const k = isOrderedType(type) ? K_BY_TYPE[type] : 2;
   return Array.from({ length: k }, () => []);
@@ -415,26 +420,49 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           )}
         </div>
         {isFormationMode ? (
-          <div className="mt-manual-formation">
-            {Array.from({ length: k }, (_, posIndex) => {
-              const selected = new Set(formationPositions[posIndex] ?? []);
-              const posKey =
-                posIndex === 0
-                  ? "fillGuide.pos1"
-                  : posIndex === 1
-                    ? "fillGuide.pos2"
-                    : "fillGuide.pos3";
+          // Phase 3a — runners × positions matrix: the field appears ONCE as
+          // rows, one selection column per finishing position (k = 2 exacta,
+          // 3 trifecta). Replaces k stacked full-field grids (54 cells + three
+          // scrolls of the same field on an 18-horse trifecta). Box mode stays
+          // the compact number grid below — different selection, different
+          // layout. Sticky column headers hook on .mt-matrix-head (Phase 3c).
+          <div className="mt-manual-matrix" role="list">
+            <div className="mt-matrix-head" role="presentation">
+              <span className="mt-matrix-corner" />
+              {Array.from({ length: k }, (_, posIndex) => (
+                <span key={posIndex} className="mt-matrix-colhead">
+                  {t(posKeyFor(posIndex))}
+                </span>
+              ))}
+            </div>
+            {umaCells.map((u) => {
+              const runner = runnerByUma.get(u);
+              const odds = runner?.odds ?? 0;
+              const oddsLabel = odds > 0 ? `${odds.toFixed(1)}×` : "—";
               return (
-                <div className="mt-manual-position" key={posIndex}>
-                  <div className="mt-manual-position-head">
-                    <span>{t(posKey)}</span>
-                    <span>{selected.size}</span>
-                  </div>
-                  <div className="mt-manual-grid" role="list">
-                    {umaCells.map((u) =>
-                      horseCell(u, selected.has(u), () => toggleFormationUma(posIndex, u), `${t(posKey)} `),
-                    )}
-                  </div>
+                <div className="mt-matrix-row" key={u} role="listitem">
+                  <span className="mt-matrix-runner">
+                    <span className="mt-manual-horse-num">{u}</span>
+                    <span className="mt-manual-horse-odds">{oddsLabel}</span>
+                  </span>
+                  {Array.from({ length: k }, (_, posIndex) => {
+                    const selected = (formationPositions[posIndex] ?? []).includes(u);
+                    const pk = posKeyFor(posIndex);
+                    return (
+                      <button
+                        key={posIndex}
+                        type="button"
+                        className={`mt-matrix-cell${selected ? " on" : ""}`}
+                        data-mt-pos={posIndex}
+                        data-mt-uma={u}
+                        onClick={() => toggleFormationUma(posIndex, u)}
+                        aria-pressed={selected}
+                        aria-label={`${t(pk)} ${u} · ${t("manual.currentOdds")} ${oddsLabel}${selected ? " (selected)" : ""}`}
+                      >
+                        {selected ? "✓" : ""}
+                      </button>
+                    );
+                  })}
                 </div>
               );
             })}

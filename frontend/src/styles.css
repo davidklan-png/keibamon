@@ -2541,24 +2541,66 @@ select:focus {
   grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
   gap: 6px;
 }
-.mt-manual-formation {
-  display: grid;
-  gap: 12px;
-}
-.mt-manual-position {
+/* ---- Formation matrix (Phase 3a): the field ONCE as rows, one selection
+ * column per finishing position. Replaces the k stacked full-field grids
+ * (54 cells + three scrolls of the same field on an 18-horse trifecta).
+ * Sticky column headers hook on .mt-matrix-head (Phase 3c). ---- */
+.mt-manual-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
+  padding: 6px;
   background: #fff;
 }
-.mt-manual-position-head {
+.mt-matrix-head,
+.mt-matrix-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+/* Fixed-width runner column so the header labels and every row's cells line
+ * up; the position columns share the remaining width equally. */
+.mt-matrix-corner,
+.mt-matrix-runner {
+  flex: 0 0 92px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 11px;
+  gap: 6px;
+  padding: 0 4px;
+}
+.mt-matrix-colhead {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-size: 10px;
   font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.mt-matrix-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  padding: 0;
+}
+.mt-matrix-cell.on {
+  border-color: var(--turf);
+  background: var(--turf);
+  color: #fff;
 }
 .mt-manual-cell {
   min-height: 58px;

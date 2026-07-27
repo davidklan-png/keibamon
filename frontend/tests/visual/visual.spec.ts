@@ -816,7 +816,7 @@ test.describe("manual builder (current design)", () => {
         .locator(".mt-manual-type")
         .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
         .click();
-      await expect(page.locator(".mt-manual-formation")).toBeVisible();
+      await expect(page.locator(".mt-manual-matrix")).toBeVisible();
       await page.waitForTimeout(200);
       await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-8.${lang}.png`);
     });
@@ -838,8 +838,8 @@ test.describe("manual builder (current design)", () => {
         .locator(".mt-manual-type")
         .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
         .click();
-      // Trifecta formation = 3 stacked per-position grids (the 54-cell problem).
-      await expect(page.locator(".mt-manual-position").nth(2)).toBeVisible();
+      // Trifecta formation matrix = 3 position columns (was 3 stacked grids).
+      await expect(page.locator(".mt-matrix-colhead").nth(2)).toBeVisible();
       await page.evaluate(() => document.fonts.ready);
       await page.waitForTimeout(200);
       await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-18.${lang}.png`);

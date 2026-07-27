@@ -90,10 +90,11 @@ function clickType(container: HTMLElement, label: string): void {
 }
 
 function clickPositionCell(container: HTMLElement, positionIndex: number, uma: string): void {
-  const positions = container.querySelectorAll(".mt-manual-position");
-  expect(positions.length).toBeGreaterThan(positionIndex);
-  const cell = Array.from(positions[positionIndex].querySelectorAll(".mt-manual-cell")).find(
-    (b) => b.querySelector(".mt-manual-horse-num")?.textContent === uma,
+  // Phase 3a matrix: each selection cell is a .mt-matrix-cell carrying its
+  // position index + uma as data attributes (the field is now rows × columns,
+  // not k stacked grids).
+  const cell = container.querySelector(
+    `.mt-matrix-cell[data-mt-pos="${positionIndex}"][data-mt-uma="${uma}"]`,
   );
   expect(cell, `position ${positionIndex + 1} uma cell ${uma} should exist`).toBeTruthy();
   act(() => {
@@ -226,7 +227,7 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     const { container, onRegister } = mount();
 
     clickType(container, "Trifecta");
-    expect(container.querySelectorAll(".mt-manual-position")).toHaveLength(3);
+    expect(container.querySelectorAll(".mt-matrix-colhead")).toHaveLength(3);
 
     clickPositionCell(container, 0, "6");
     clickPositionCell(container, 1, "3");
@@ -256,6 +257,27 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     expect(ticket.cost).toBe(600);
   });
 
+  it("matrix contract: toggling a horse into position 2 records it in structurePayload.positions[1]", () => {
+    // Phase 3a contract — selection behaviour is logic, not pixels: toggling a
+    // horse in the 2nd position column lands in positions[1] of the built
+    // ticket, and ONLY there. Register needs every position non-empty, so fill
+    // 1st + 3rd minimally; the assertion is about position 2.
+    const { container, onRegister } = mount();
+    clickType(container, "Trifecta");
+    clickPositionCell(container, 1, "4"); // ← the position-2 toggle under test
+    clickPositionCell(container, 0, "2");
+    clickPositionCell(container, 2, "5");
+    clickCta(container);
+
+    expect(onRegister).toHaveBeenCalledTimes(1);
+    const { ticket } = onRegister.mock.calls[0][0] as { ticket: Ticket };
+    expect(ticket.structure).toBe("formation");
+    const positions = (ticket.structurePayload as { positions: string[][] }).positions;
+    expect(positions[1]).toEqual(["4"]); // position 2 holds exactly the toggled horse
+    expect(positions[0]).toEqual(["2"]);
+    expect(positions[2]).toEqual(["5"]);
+  });
+
   it("reopens a saved formation with its position payload intact", () => {    const initial: ManualTicketInitial = {
       id: "kb-formation",
       type: "trifecta",
@@ -275,7 +297,7 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     };
     const { container, onRegister } = mount({ initial });
 
-    expect(container.querySelectorAll(".mt-manual-position")).toHaveLength(3);
+    expect(container.querySelectorAll(".mt-matrix-colhead")).toHaveLength(3);
     clickCta(container);
 
     expect(onRegister).toHaveBeenCalledTimes(1);
