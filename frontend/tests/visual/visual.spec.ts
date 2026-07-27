@@ -261,6 +261,46 @@ test.describe("visual regression", () => {
       await expect(page).toHaveScreenshot(`legacy-race.${lang}.png`);
     });
 
+    // legacy-race captures the page at REST, where the first .runner sits below
+    // the 844px fold — so the runner rows (names, odds, pending-odds, ADR-0016
+    // marks, and now the bracket stripe) were never pinned by any baseline. The
+    // 3b "legacy-race unchanged ⇒ RunnerRow extraction was byte-faithful" check
+    // was vacuous: the rows were never in the capture. This scrolls .runners
+    // into view and pins them, with a seeded anchor mark so the is-anchor row
+    // tint + the RunnerMark chip are pinned too.
+    test(`legacy race runner rows (${lang})`, async ({ page }) => {
+      // Seed an anchor (horse 1) + a like (horse 3) — same keying pattern as the
+      // studio batch (race_id|normalizeName, NFKC+strip, NO lowercase).
+      await page.addInitScript(
+        ([l, seed]) => {
+          try {
+            window.localStorage.setItem("keibamon.lang", l);
+            window.localStorage.setItem("kbm.impressions.v1", JSON.stringify(seed));
+          } catch {
+            /* ignore */
+          }
+          Date.now = () => Date.parse("2026-06-21T13:00:00+09:00");
+        },
+        [
+          lang,
+          {
+            "jra-20260621-05-11|CroixduNord": { mark: "anchor", umaban: 1, odds_when_marked: 2.4, odds_snapshot_at: null, formed_at: 100 },
+            "jra-20260621-05-11|PegasusSeiya": { mark: "like", umaban: 3, odds_when_marked: 7.2, odds_snapshot_at: null, formed_at: 200 },
+          },
+        ] as const,
+      );
+      await landOnLegacyRace(page, lang);
+      // The rows sit below the fold — scroll them into view before capturing.
+      await page.locator(".runners").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+      // Durable assertions (not just a baseline): the anchor row tint + a
+      // bracket stripe actually render in this view.
+      await expect(page.locator(".runner-row.is-anchor")).toBeVisible();
+      await expect(page.locator(".runner .bracket-stripe").first()).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator(".runners")).toHaveScreenshot(`legacy-race-runners.${lang}.png`);
+    });
+
     // ---- Tickets step (collapsed builder, nth(1) now) ----
     // Captures the Refine panel + per-ticket Why disclosures in their COLLAPSED
     // state, so the expanded variants below show a deterministic delta.
