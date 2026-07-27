@@ -634,6 +634,131 @@ test.describe("ticket-detail structured modes", () => {
   }
 });
 
+// ============================================================================
+// Ticket-studio (ADR-0011 structural surface) — SetFamilyView + FormationView
+// + WheelView + FillGuide. This whole surface had ZERO visual coverage until
+// this block: it is only reachable via the "Box these N horses" CTA, which no
+// test opened (grep for TicketStudio|fillguide|SetFamily|FormationView|WheelView
+// in this file returned 0). Captures the studio LIST layer + FillGuide in box
+// / formation / wheel. The formation/wheel FillGuide bodies are the shared
+// <TicketLines> after ticket-structure-unify Phase 2.
+//
+// 枠連 (bracket) FillGuide is NOT captured here: SetFamilyView's bracket row is
+// display-only (no Ticket representation) and the live path carries no `gate`,
+// so no studio path produces a bracket_quinella FillGuide. That render is
+// pinned only by the FillGuide unit test (bracketBoxTicket → 1-8 waku grid).
+//
+// Driven by 3 seeded impressions on the fixture G1 (1 anchor + 2 includes) →
+// markedSet=[1,3,6], anchor=1 → the CTA + all three list layers (Wheel needs
+// the anchor). Each FillGuide mode opens the studio fresh and taps its row, so
+// there's no fragile back-button navigation between captures. EN + JA.
+// ============================================================================
+test.describe("ticket-studio structural surface", () => {
+  // horse_key = normalizeName(name): NFKC + drop ALL whitespace (no lowercase).
+  // "Croix du Nord"→"CroixduNord", "Pegasus Seiya"→"PegasusSeiya",
+  // "Ho O Biscay"→"HoOBiscay".
+  const STUDIO_IMPRESSIONS: Record<string, Record<string, unknown>> = {
+    "jra-20260621-05-11|CroixduNord": {
+      mark: "anchor",
+      umaban: 1,
+      odds_when_marked: 2.4,
+      odds_snapshot_at: null,
+      formed_at: 100,
+    },
+    "jra-20260621-05-11|PegasusSeiya": {
+      mark: "like",
+      umaban: 3,
+      odds_when_marked: 7.2,
+      odds_snapshot_at: null,
+      formed_at: 200,
+    },
+    "jra-20260621-05-11|HoOBiscay": {
+      mark: "priceHorse",
+      umaban: 6,
+      odds_when_marked: 5.1,
+      odds_snapshot_at: null,
+      formed_at: 300,
+    },
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await installApiMocks(page);
+  });
+
+  async function openStudio(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+  ): Promise<void> {
+    await page.addInitScript(([l, seed]) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+        window.localStorage.setItem("kbm.impressions.v1", JSON.stringify(seed));
+      } catch {
+        /* ignore */
+      }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, [lang, STUDIO_IMPRESSIONS] as const);
+    await page.goto("/");
+    await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
+    // The CTA appears once ≥2 include-marks resolve AND a market exists. Let the
+    // initial loadLive settle so the button is enabled.
+    await page.waitForTimeout(600);
+    await expect(page.getByTestId("studio-cta")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("studio-cta").click();
+    await expect(page.locator(".kbm-modal")).toBeVisible();
+    await expect(page.locator(".setfamily-view")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  for (const lang of LANGS) {
+    test(`studio list layer (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      // All three list layers render — Wheel is gated on the seeded anchor.
+      await expect(page.locator(".setfamily-view")).toBeVisible();
+      await expect(page.locator(".formation-view")).toBeVisible();
+      await expect(page.locator(".wheel-view")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".kbm-modal-card")).toHaveScreenshot(`studio-list.${lang}.png`);
+    });
+
+    test(`studio FillGuide box (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      await page.locator(".setfamily-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Box = the field grid (highlighted cells), NOT the TicketLines columns.
+      await expect(page.locator(".fillguide-cell.on").first()).toBeVisible();
+      // Compliance element: present AND visible — an assertion, not just a
+      // baseline. A baseline can be regenerated around a regression; this can't
+      // (the exportTicketCard gate asserts on exactly this element, and its
+      // failure is silent — doShare swallows MissingNotAdvice).
+      await expect(page.locator(".fillguide [data-not-advice]")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-box.${lang}.png`);
+    });
+
+    test(`studio FillGuide formation (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      await page.locator(".formation-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Formation body = the shared TicketLines columns (post-Phase-2).
+      await expect(page.locator(".tl-cols")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-formation.${lang}.png`);
+    });
+
+    test(`studio FillGuide wheel (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      await page.locator(".wheel-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Wheel body = TicketLines axis + partners, axis tagged on its slot.
+      await expect(page.locator(".tl-axis-tag")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-wheel.${lang}.png`);
+    });
+  }
+});
+
 // Guard against the regression that bit this branch: hiding .foot-version in
 // the harness (addStyleTag visibility:hidden, or similar) to make a stale-
 // baseline CI run green. The footer version stamp is a real product element

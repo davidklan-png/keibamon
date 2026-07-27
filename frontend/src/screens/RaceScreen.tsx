@@ -470,6 +470,7 @@ export function RaceScreen(props: RaceScreenProps) {
       {markedSet.length >= 2 && hasMarket && (
         <button
           className="btn gold"
+          data-testid="studio-cta"
           style={{ width: "100%", marginTop: 8 }}
           onClick={() => setBoxOpen(true)}
         >
