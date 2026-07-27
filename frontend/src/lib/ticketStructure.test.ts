@@ -57,6 +57,18 @@ function flatTicket(type: Ticket["type"], combos: string[][], unit = 100): Ticke
   };
 }
 
+/** All 6 permutations of {1,2,3} — a full trifecta box (P(3,3)=6). Used to prove
+ * the degenerate-payload guard is load-bearing: these lines alone WOULD derive
+ * a box, so only the guard keeps an ordered-structured ticket off the box path. */
+const FULL_TRIFECTA_BOX: string[][] = [
+  ["1", "2", "3"],
+  ["1", "3", "2"],
+  ["2", "1", "3"],
+  ["2", "3", "1"],
+  ["3", "1", "2"],
+  ["3", "2", "1"],
+];
+
 describe("interpretTicket", () => {
   // ---- Formation ---------------------------------------------------------
   it("formation: carries the per-position contender sets", () => {
@@ -226,6 +238,30 @@ describe("interpretTicket", () => {
       "x",
     );
     expect(interpretTicket(ticket!).mode).toBe("wheel");
+  });
+
+  // ---- Degenerate ordered-structure payload → chips (never-mis-render guard)
+  // A persisted/shared ticket can carry structure:"formation"|"wheel" with a
+  // payload the renderer can't use (empty positions, or a null wheel payload).
+  // Such a ticket is ambiguous → chips, NOT a box derivation of the flat lines.
+  it("guard: structure='formation' with empty positions → chips, never box-derived", () => {
+    // Lines ARE a full trifecta box — without the guard, deriveBoxSet returns
+    // ["1","2","3"] and this mis-renders as a BOX. The guard must force chips.
+    const ticket: Ticket = {
+      ...flatTicket("trifecta", FULL_TRIFECTA_BOX),
+      structure: "formation",
+      structurePayload: { positions: [] },
+    };
+    expect(interpretTicket(ticket).mode).toBe("chips");
+  });
+
+  it("guard: structure='wheel' with a null payload → chips, never box-derived", () => {
+    const ticket: Ticket = {
+      ...flatTicket("trifecta", FULL_TRIFECTA_BOX),
+      structure: "wheel",
+      structurePayload: null,
+    };
+    expect(interpretTicket(ticket).mode).toBe("chips");
   });
 });
 

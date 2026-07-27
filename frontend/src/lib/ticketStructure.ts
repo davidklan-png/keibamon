@@ -191,6 +191,21 @@ export function interpretTicket(ticket: Ticket): TicketStructureView {
     };
   }
 
+  // ---- Degenerate formation/wheel payload → chips (never box-derive). ------
+  // The social worker keeps `structure` as its own flat column and the payload
+  // as opaque JSON, so the two can disagree on a persisted/shared ticket —
+  // e.g. structure:"formation" with positions:[], or structure:"wheel" with a
+  // null payload. We already failed to match those branches above; reaching
+  // here means an explicitly ordered-structured ticket whose payload is
+  // unusable. Such a ticket is ambiguous by definition, and the "never
+  // mis-render: when detection is ambiguous, use chips" constraint
+  // (docs/requirements-ticket-detail-ux.md) says render as chips — NOT
+  // box-derive the flat lines (which could turn a wheel into a BOX). This
+  // restores the guard the inline TicketLines logic carried.
+  if (structure === "formation" || structure === "wheel") {
+    return { mode: "chips" };
+  }
+
   // ---- Box: explicit payload wins, else derive from flat lines. ----------
   const explicitSet = boxPayload?.set;
   const boxSet =

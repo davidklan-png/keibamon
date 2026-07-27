@@ -64,6 +64,13 @@ export function FillGuide(props: FillGuideProps) {
   const positions =
     view.mode === "formation" || view.mode === "wheel" ? view.positions : null;
   const axisPosition = view.mode === "wheel" ? view.axisPosition : 0; // 0 = none; 1..k = wheel anchor
+  // NOTE: the grid highlight set is now DERIVATION-driven (view.mode === "box",
+  // which can be a derived legacy box) rather than the old declarative
+  // `ticket.structure === "box"`. So a structure-less ticket whose lines happen
+  // to be a full box expansion now highlights cells where before none were.
+  // Unreachable in practice — FillGuide is only mounted from TicketStudio with
+  // explicitly-structured tickets — but flagged so the next person doesn't
+  // rediscover it.
   const set = new Set(view.mode === "box" ? view.set : []);
   const maxUmaban = runners.reduce((m, r) => {
     const n = Number(r.uma);
