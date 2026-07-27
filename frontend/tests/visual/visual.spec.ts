@@ -892,6 +892,60 @@ test.describe("manual builder (current design)", () => {
       await expect(page).toHaveScreenshot(`manual-builder-formation-18-midscroll.${lang}.png`);
     });
   }
+
+  // Phase 3 close-out — the cost bar must never cover the last runner row.
+  // The sticky cost bar sits AFTER the matrix in flow and reserves its space,
+  // so no row can slide under it — but the genuine risk is at the BOTTOM of an
+  // 18-runner list, where the last row and the sticky bar compete for the same
+  // viewport pixels. A baseline can't see that, so this is a bounding-box
+  // check: scroll to the end and assert the last row's bottom edge sits at/above
+  // the cost bar's top edge. Language-independent (geometry only) — EN once.
+  test("manual builder cost bar clears last row at list end", async ({ page }) => {
+    await page.unroute("**/api/live");
+    await page.route("**/api/live", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT),
+      }),
+    );
+    await openBuilder(page, "en");
+    await page
+      .locator(".mt-manual-type")
+      .filter({ hasText: "Trifecta" })
+      .click();
+    await expect(page.locator(".mt-matrix-colhead").nth(2)).toBeVisible();
+    // Pick horses per position so a ticket builds — the sticky bar is
+    // {ticket && isFormationMode}; empty picks → no ticket → no bar.
+    const picks: Array<[number, string]> = [
+      [0, "1"], [0, "2"], [0, "3"],
+      [1, "4"], [1, "5"],
+      [2, "6"],
+    ];
+    for (const [pos, uma] of picks) {
+      await page.locator(`.mt-matrix-cell[data-mt-pos="${pos}"][data-mt-uma="${uma}"]`).click();
+    }
+    await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    // Scroll to the END of the list (the failure case), then compare boxes.
+    await page.evaluate(() => window.scrollTo(0, Number.MAX_SAFE_INTEGER));
+    await page.waitForTimeout(300);
+    const geo = await page.evaluate(() => {
+      const rows = document.querySelectorAll(".mt-matrix-row");
+      const last = rows[rows.length - 1] as HTMLElement | undefined;
+      const cost = document.querySelector("[data-mt-sticky-cost]") as HTMLElement | null;
+      if (!last || !cost) return null;
+      return {
+        lastBottom: Math.round(last.getBoundingClientRect().bottom),
+        costTop: Math.round(cost.getBoundingClientRect().top),
+      };
+    });
+    expect(geo, "last row and sticky cost bar both present").not.toBeNull();
+    expect(
+      geo!.lastBottom,
+      "last runner row bottom must sit at/above the sticky cost bar top at the end of the 18-runner list",
+    ).toBeLessThanOrEqual(geo!.costTop);
+  });
 });
 
 // Guard against the regression that bit this branch: hiding .foot-version in
