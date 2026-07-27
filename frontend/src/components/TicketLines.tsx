@@ -45,7 +45,7 @@ export interface TicketLinesProps {
    * Suppress the `.tl-head` structure-badge row. For hosts that already label
    * the structure themselves — FillGuide's header carries the bet type + a
    * structure badge, so mounting TicketLines for the body must not duplicate
-   * the badge. Default false: every existing mount (detail / share / feed)
+   * the badge. Default true: every existing mount (detail / share / feed)
    * shows the badge.
    */
   badge?: boolean;
