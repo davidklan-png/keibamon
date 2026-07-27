@@ -50,6 +50,57 @@ export const FIXTURE_SNAPSHOT: LiveSnapshot = {
   ],
 };
 
+// LAYOUT_FIELD_18 — a SYNTHETIC 18-runner field for layout validation at
+// production field size. NOT a plausible race: its only meaning is "18 rows of
+// realistic-width horse names" so the manual builder's matrix / name-wrap /
+// scroll depth get tested at the size real JRA fields actually run (16-18),
+// not the 8-runner fixture every other baseline uses. Realistic-length JA
+// names because NAME WRAP is the actual layout risk — 2-char placeholders
+// would prove nothing. Opt-in per test via the /api/live override below; the
+// default FIXTURE_SNAPSHOT stays 8 runners so nothing else moves.
+const LAYOUT_FIELD_18_RUNNERS = [
+  { umaban: 1, name: "クロワデュノール", win_odds: 2.4, odds_is_live: true },
+  { umaban: 2, name: "シュネルマイスター", win_odds: 5.1, odds_is_live: true },
+  { umaban: 3, name: "エフフォーリア", win_odds: 7.2, odds_is_live: true },
+  { umaban: 4, name: "タイトルホルダー", win_odds: 9.7, odds_is_live: true },
+  { umaban: 5, name: "ステラヴェローチェ", win_odds: 12.0, odds_is_live: true },
+  { umaban: 6, name: "ボルドグフーシュ", win_odds: 6.3, odds_is_live: true },
+  { umaban: 7, name: "アスクビクターモア", win_odds: 14.5, odds_is_live: true },
+  { umaban: 8, name: "ジャスティンパレス", win_odds: 18.8, odds_is_live: true },
+  { umaban: 9, name: "ハーツコンチェルト", win_odds: 23.9, odds_is_live: true },
+  { umaban: 10, name: "ドウデュース", win_odds: 3.8, odds_is_live: true },
+  { umaban: 11, name: "イクイノックス", win_odds: 4.2, odds_is_live: true },
+  { umaban: 12, name: "スターズオンアース", win_odds: 8.5, odds_is_live: true },
+  { umaban: 13, name: "ヴェラアズール", win_odds: 11.6, odds_is_live: true },
+  { umaban: 14, name: "ヒシミガロリ", win_odds: 27.4, odds_is_live: true },
+  { umaban: 15, name: "サッカーボーイ", win_odds: 33.0, odds_is_live: true },
+  { umaban: 16, name: "ナミュール", win_odds: 41.2, odds_is_live: true },
+  { umaban: 17, name: "カルリーノ", win_odds: 51.7, odds_is_live: true },
+  { umaban: 18, name: "ダノンザキッド", win_odds: 68.3, odds_is_live: true },
+];
+
+/** Single-race snapshot carrying LAYOUT_FIELD_18. Override /api/live with this
+ *  in a layout test (unroute the default first) — never add it to the default
+ *  snapshot, or every other baseline sees an 18-runner field. */
+export const LAYOUT_FIELD_18_SNAPSHOT: LiveSnapshot = {
+  meta: { status: "ok", updated_at: "2026-06-21T13:00:00+09:00", date: "20260621" },
+  races: [
+    {
+      date: "20260621",
+      race_no: 9,
+      race_id: "jra-layout-field-18",
+      name: "Layout field 18 (synthetic)",
+      grade_label: "",
+      post_time: "15:40",
+      venue: "Tokyo",
+      surface: "turf",
+      distance_m: 2000,
+      status: "open",
+      runners: LAYOUT_FIELD_18_RUNNERS,
+    },
+  ],
+};
+
 const RUNNERS_SNAPSHOT = RACE_RUNNERS.map((r) => ({
   num: r.umaban,
   en: r.name ?? "",

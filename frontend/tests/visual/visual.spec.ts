@@ -13,7 +13,7 @@
 // Language:         set via `keibamon.lang` localStorage before each visit.
 // ============================================================================
 import { test, expect } from "@playwright/test";
-import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS } from "./fixtures";
+import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS, LAYOUT_FIELD_18_SNAPSHOT } from "./fixtures";
 
 const LANGS = ["en", "ja"] as const;
 
@@ -755,6 +755,94 @@ test.describe("ticket-studio structural surface", () => {
       await expect(page.locator(".tl-axis-tag")).toBeVisible();
       await page.waitForTimeout(200);
       await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-wheel.${lang}.png`);
+    });
+  }
+});
+
+// ============================================================================
+// Manual builder (current design) — the open ManualTicketBuilder had ZERO
+// visual coverage (mytickets-new-manual-entry only scrolls the CTA into view;
+// it never opens the builder). This block opens it and captures TODAY's design
+// at two field sizes: the 8-runner fixture (box + formation) and a synthetic
+// 18-runner field (formation). The 18-runner formation capture is the one that
+// shows the three-stacked-grids problem ticket-structure-unify Phase 3a exists
+// to fix — it is the BEFORE image for 3a's handback.
+//
+// The 18-runner field is opt-in (an /api/live override with LAYOUT_FIELD_18);
+// the default 8-runner snapshot is unchanged so no other baseline moves.
+// ============================================================================
+test.describe("manual builder (current design)", () => {
+  test.beforeEach(async ({ page }) => {
+    await installApiMocks(page);
+  });
+
+  async function openBuilder(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+  ): Promise<void> {
+    await page.addInitScript((l) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+      } catch {
+        /* ignore */
+      }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, lang);
+    await page.goto("/");
+    await page.getByTestId("tab-mine").click();
+    await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(400);
+    await page.locator(".mt-fab").click();
+    await expect(page.locator(".mt-new")).toBeVisible();
+    await page.locator(".mt-manual-entry").click();
+    await expect(page.locator(".mt-manual")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  for (const lang of LANGS) {
+    test(`manual builder box 8-runner (${lang})`, async ({ page }) => {
+      await openBuilder(page, lang);
+      // Default is quinella / box mode (the compact number grid).
+      await expect(page.locator(".mt-manual-grid")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-box-8.${lang}.png`);
+    });
+
+    test(`manual builder formation 8-runner (${lang})`, async ({ page }) => {
+      await openBuilder(page, lang);
+      // Switch to an ordered bet type → formation mode (stacked per-position grids).
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
+        .click();
+      await expect(page.locator(".mt-manual-formation")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-8.${lang}.png`);
+    });
+
+    test(`manual builder formation 18-runner (${lang})`, async ({ page }) => {
+      // Override /api/live with the synthetic 18-runner field (opt-in; default
+      // snapshot unchanged). unroute the beforeEach route first so the override
+      // is in place before goto.
+      await page.unroute("**/api/live");
+      await page.route("**/api/live", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT),
+        }),
+      );
+      await openBuilder(page, lang);
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
+        .click();
+      // Trifecta formation = 3 stacked per-position grids (the 54-cell problem).
+      await expect(page.locator(".mt-manual-position").nth(2)).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-18.${lang}.png`);
     });
   }
 });
