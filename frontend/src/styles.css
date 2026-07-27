@@ -116,20 +116,25 @@
   /* 枠 (waku/bracket) palette — the ONE source for every bracket-coloured
      element: the manual builder's 枠連 selection cells (.mt-manual-cell.bracket-
      N.on), FillGuide's 1-8 grid (.fillguide-cell.bracket-N), and RunnerRow's
-     bracket stripe (.bracket-stripe.bracket-N). Reuses JRA's waku convention
-     (the colour IS the bracket's identity at the track — the waku board, the
-     saddle cloth) through Keibamon's tokens, so it reads as information rather
-     than imitated identity; defined once here so the three surfaces cannot drift
-     apart. (Approximation, not exact JRA hex — e.g. 3 is turf/green not red, 8
-     is ink not pink; consistency across the app matters more than exact match.) */
-  --waku-1: #ffffff;
-  --waku-2: #000000;
-  --waku-3: var(--turf);
-  --waku-4: var(--sky);
-  --waku-5: var(--gold);
-  --waku-6: var(--turf-deep);
-  --waku-7: var(--gold-amber);
-  --waku-8: var(--ink);
+     bracket stripe (.bracket-stripe.bracket-N).
+     The NAMES are JRA's 帽色 (helmet-colour) convention — 1白 2黒 3赤 4青 5黄 6緑
+     7橙 8桃 — and that mapping is the whole point: a user maps colour→bracket by
+     muscle memory at the track, so the colour IS the bracket (information, the
+     same class as silks), not an imitation of JRA's visual identity (which
+     requirements-ticket-detail-ux.md still rules out elsewhere). The HEXES are
+     ours — JRA publishes the convention, not a colour spec; these are screen-
+     tuned (pure primaries are harsh at phone size). --waku-N-ink is the legible
+     text colour on each (dark ink on the light brackets 1/5/7/8, white on the
+     dark 2/3/4/6); contrast verified ≥4.5:1 (green darkened from #218900→#1c7600
+     to clear the bar). */
+  --waku-1: #ffffff;  --waku-1-ink: var(--ink);   /* 白 white */
+  --waku-2: #16241c;  --waku-2-ink: #ffffff;      /* 黒 black  (near-black --ink family) */
+  --waku-3: #e61717;  --waku-3-ink: #ffffff;      /* 赤 red    (white 4.7:1) */
+  --waku-4: #0066cc;  --waku-4-ink: #ffffff;      /* 青 blue   (white 5.6:1) */
+  --waku-5: #f0c518;  --waku-5-ink: var(--ink);   /* 黄 yellow (ink 9.7:1) */
+  --waku-6: #1c7600;  --waku-6-ink: #ffffff;      /* 緑 green  (white 5.7:1; darkened from #218900) */
+  --waku-7: #ff9500;  --waku-7-ink: var(--ink);   /* 橙 orange (ink 7.3:1; white fails 2.2:1) */
+  --waku-8: #f38abd;  --waku-8-ink: var(--ink);   /* 桃 pink   (ink 7.1:1; white fails 2.3:1) */
 }
 
 /* ADR-0007 keyframes (My Tickets surface). */
@@ -2754,15 +2759,15 @@ select:focus {
 /* 枠 (bracket) coloring — reuse JRA's standard convention. The .on state
  * keeps the per-bracket background so a same-bracket pair is visually
  * coherent with FillGuide's bracket row. */
-.mt-manual-cell.bracket-1 { border-color: var(--ink); }
-.mt-manual-cell.bracket-1.on { background: var(--waku-1); color: var(--ink); border-color: var(--ink); }
-.mt-manual-cell.bracket-2.on { background: var(--waku-2); color: #fff; border-color: #000; }
-.mt-manual-cell.bracket-3.on { background: var(--waku-3); color: #fff; border-color: var(--turf-deep); }
-.mt-manual-cell.bracket-4.on { background: var(--waku-4); color: #fff; border-color: var(--sky); }
-.mt-manual-cell.bracket-5.on { background: var(--waku-5); color: var(--gold-ink); border-color: var(--gold-deep); }
-.mt-manual-cell.bracket-6.on { background: var(--waku-6); color: #fff; border-color: var(--turf-deep); }
-.mt-manual-cell.bracket-7.on { background: var(--waku-7); color: var(--gold-ink); border-color: var(--gold-deep); }
-.mt-manual-cell.bracket-8.on { background: var(--waku-8); color: #fff; border-color: var(--ink); }
+.mt-manual-cell.bracket-1 { border-color: var(--waku-1-ink); }
+.mt-manual-cell.bracket-1.on { background: var(--waku-1); color: var(--waku-1-ink); border-color: var(--waku-1-ink); }
+.mt-manual-cell.bracket-2.on { background: var(--waku-2); color: var(--waku-2-ink); border-color: var(--waku-2-ink); }
+.mt-manual-cell.bracket-3.on { background: var(--waku-3); color: var(--waku-3-ink); border-color: var(--waku-3-ink); }
+.mt-manual-cell.bracket-4.on { background: var(--waku-4); color: var(--waku-4-ink); border-color: var(--waku-4-ink); }
+.mt-manual-cell.bracket-5.on { background: var(--waku-5); color: var(--waku-5-ink); border-color: var(--waku-5-ink); }
+.mt-manual-cell.bracket-6.on { background: var(--waku-6); color: var(--waku-6-ink); border-color: var(--waku-6-ink); }
+.mt-manual-cell.bracket-7.on { background: var(--waku-7); color: var(--waku-7-ink); border-color: var(--waku-7-ink); }
+.mt-manual-cell.bracket-8.on { background: var(--waku-8); color: var(--waku-8-ink); border-color: var(--waku-8-ink); }
 
 /* RunnerRow bracket (waku/枠) stripe — a thin coloured left-edge bar identifying
    each runner's bracket. Anchored position:absolute over the row's left edge so
@@ -2786,7 +2791,7 @@ select:focus {
 .mt-matrix-runner .bracket-stripe {
   border-radius: 0; /* the matrix runner cell isn't rounded */
 }
-.bracket-stripe.bracket-1 { background: var(--waku-1); box-shadow: inset 1px 0 0 var(--line); }
+.bracket-stripe.bracket-1 { background: var(--waku-1); box-shadow: inset 1px 0 0 var(--waku-1-ink); }
 .bracket-stripe.bracket-2 { background: var(--waku-2); }
 .bracket-stripe.bracket-3 { background: var(--waku-3); }
 .bracket-stripe.bracket-4 { background: var(--waku-4); }
@@ -4492,14 +4497,14 @@ select:focus {
 
 /* Forward-compatible bracket coloring (3b): when a 枠連 ticket reaches the
  * fill guide, the grid colors by bracket instead of a flat "on" highlight. */
-.fillguide-cell.bracket-1 { background: var(--waku-1); border-color: var(--ink); color: var(--ink); }
-.fillguide-cell.bracket-2 { background: var(--waku-2); border-color: #000; color: #fff; }
-.fillguide-cell.bracket-3 { background: var(--waku-3); border-color: var(--turf-deep); color: #fff; }
-.fillguide-cell.bracket-4 { background: var(--waku-4); border-color: var(--sky); color: #fff; }
-.fillguide-cell.bracket-5 { background: var(--waku-5); border-color: var(--gold-deep); color: var(--gold-ink); }
-.fillguide-cell.bracket-6 { background: var(--waku-6); border-color: var(--turf-deep); color: #fff; }
-.fillguide-cell.bracket-7 { background: var(--waku-7); border-color: var(--gold-deep); color: var(--gold-ink); }
-.fillguide-cell.bracket-8 { background: var(--waku-8); border-color: var(--ink); color: #fff; }
+.fillguide-cell.bracket-1 { background: var(--waku-1); border-color: var(--waku-1-ink); color: var(--waku-1-ink); }
+.fillguide-cell.bracket-2 { background: var(--waku-2); border-color: var(--waku-2-ink); color: var(--waku-2-ink); }
+.fillguide-cell.bracket-3 { background: var(--waku-3); border-color: var(--waku-3-ink); color: var(--waku-3-ink); }
+.fillguide-cell.bracket-4 { background: var(--waku-4); border-color: var(--waku-4-ink); color: var(--waku-4-ink); }
+.fillguide-cell.bracket-5 { background: var(--waku-5); border-color: var(--waku-5-ink); color: var(--waku-5-ink); }
+.fillguide-cell.bracket-6 { background: var(--waku-6); border-color: var(--waku-6-ink); color: var(--waku-6-ink); }
+.fillguide-cell.bracket-7 { background: var(--waku-7); border-color: var(--waku-7-ink); color: var(--waku-7-ink); }
+.fillguide-cell.bracket-8 { background: var(--waku-8); border-color: var(--waku-8-ink); color: var(--waku-8-ink); }
 
 .fillguide-summary {
   display: grid;
