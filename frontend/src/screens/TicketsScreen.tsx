@@ -16,6 +16,7 @@ import type { Runner } from "../lib/fairvalue";
 import { MARK_GLYPH, markClass } from "./RunnerMark";
 import { RefinePanel } from "./RefinePanel";
 import { TicketWhy } from "./TicketWhy";
+import { TicketLines } from "../components/TicketLines";
 
 export interface TicketsScreenProps {
   tickets: Ticket[];
@@ -153,8 +154,6 @@ export function TicketsScreen(props: TicketsScreenProps) {
       )}
       <div className="tickets">
         {tickets.map((tk, i) => {
-          const sep = tk.type === "exacta" || tk.type === "trifecta" ? " > " : " - ";
-          const shownLines = tk.lines.slice(0, 9);
           const mood = moodKey(tk);
           return (
             <article
@@ -180,18 +179,7 @@ export function TicketsScreen(props: TicketsScreenProps) {
                   <b>{yen(tk.avgPayout)}</b>
                 </div>
               </div>
-              <div className="combos">
-                {shownLines.map((ln, j) => (
-                  <span key={j} className="combo-chip">
-                    {ln.combo.join(sep)}
-                  </span>
-                ))}
-                {tk.lines.length > shownLines.length && (
-                  <span className="combo-chip">
-                    +{tk.lines.length - shownLines.length}
-                  </span>
-                )}
-              </div>
+              <TicketLines ticket={tk} unitStake={tk.unit} points="count" />
               {/* Session 3a: per-ticket reasoning, inline. Replaces the old
                   onExplain(id) navigation to a separate Why step. */}
               <details className="ticket-why-disclosure">

@@ -184,9 +184,9 @@ export function DetailView({ ctx }: { ctx: MtCtx }) {
             </div>
 
             {/* Ticket-detail UX — structure-aware body (Box / Formation / Wheel
-                tiles, or capped chips for legacy). showPoints is off here: the
-                pay panel below already shows cost + combo count. */}
-            <TicketLines ticket={tk.ticket} unitStake={tk.unit} showPoints={false} />
+                tiles, or capped chips for legacy). points="none" here: the pay
+                panel below already shows cost + combo count. */}
+            <TicketLines ticket={tk.ticket} unitStake={tk.unit} points="none" />
 
             <div className="mt-pay-panel">
               <div>

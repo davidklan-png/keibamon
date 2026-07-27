@@ -47,6 +47,11 @@ test.describe("visual regression", () => {
     await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
     // Let the auto-settle / drift effects fire once.
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
   }
 
   /**
@@ -67,6 +72,11 @@ test.describe("visual regression", () => {
     await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
     // Let the initial loadLive + auto-regen fire so all stepper buttons are enabled.
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
   }
 
   /**
@@ -110,6 +120,11 @@ test.describe("visual regression", () => {
     await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-empty")).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
     return { socialHits };
   }
 
@@ -136,6 +151,11 @@ test.describe("visual regression", () => {
     // Let each screen's mount effects (postMe / listFriends / feed) settle so
     // the snapshot isn't mid-loading.
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
   }
 
   for (const lang of LANGS) {
@@ -581,6 +601,11 @@ test.describe("ticket-detail structured modes", () => {
     await page.getByTestId("tab-mine").click();
     await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
     await page.waitForTimeout(600);
+    // Wait for webfonts before any screenshot — font-load timing is the one
+    // residual non-determinism in a pinned container, and at maxDiffPixelRatio:0
+    // even one unready glyph flakes (a ~160px text band differed between two
+    // runs of the same image before this).
+    await page.evaluate(() => document.fonts.ready);
     await page.locator(".mt-card").nth(cardIndex).click();
     await expect(page.locator(".mt-detail")).toBeVisible();
     // Confirm we opened the intended mode before pinning the screenshot.
@@ -607,4 +632,28 @@ test.describe("ticket-detail structured modes", () => {
       await expect(page).toHaveScreenshot(`ticket-detail-wheel.${lang}.png`);
     });
   }
+});
+
+// Guard against the regression that bit this branch: hiding .foot-version in
+// the harness (addStyleTag visibility:hidden, or similar) to make a stale-
+// baseline CI run green. The footer version stamp is a real product element
+// (Footer.tsx → __APP_VERSION__); if it is worth rendering it is worth one
+// assertion that it is VISIBLE in the harnessed page. The companion component
+// test (Footer.test.tsx) only covers renderToStaticMarkup, not the harness.
+test.describe("version stamp guard", () => {
+  test(".foot-version is visible + non-empty in the harnessed page", async ({ page }) => {
+    await installApiMocks(page);
+    await page.goto("/");
+    await page.waitForTimeout(600);
+    const el = page.locator(".foot-version");
+    await expect(el).toHaveCount(1);
+    // toBeVisible covers display:none, visibility:hidden, and zero-size boxes
+    // in one assertion. (The hand-rolled getComputedStyle(el).visibility check
+    // this replaced missed display:none — visibility is independent of display,
+    // so a display:none element still reported "visible".) opacity:0 is still
+    // considered visible by Playwright; if that hide ever shows up, add an
+    // explicit opacity check here.
+    await expect(el).toBeVisible();
+    await expect(el).toHaveText(/Keibamon v\d+\.\d+\.\d+/);
+  });
 });

@@ -661,9 +661,16 @@ export const en = {
   // TicketLines — structure-aware ticket-body renderer (ticket-detail UX).
   ticketLines: {
     points: "{n} combos × {unit} = {cost}",
+    // Count-only points line (points="count"): the combo total with no unit /
+    // cost, for hosts that already print cost. Matches the "combos" term used
+    // by `points` above.
+    count: "{n} combos",
     allCombos: "All {n} combos",
     partners: "Partners",
     multi: "multi-axis",
+    // bracket_quinella box head tag: signals the tiles are BRACKETS, not horse
+    // numbers (a "3" tile reads as bracket 3, not horse 3).
+    brackets: "Brackets",
   },
   formation: {
     title: "Ordered boxes",

@@ -2,8 +2,9 @@
 // Extracted from MyTickets' inner renderProfile (2026-07-08 split — behavior
 // preserving; all state/actions come through MtCtx).
 import React from "react";
-import { avatarColor, mtSep, mtStateColor } from "../../lib/mytickets-view";
+import { avatarColor, mtStateColor } from "../../lib/mytickets-view";
 import { yen } from "../../lib/format";
+import { TicketLines } from "../../components/TicketLines";
 import type { MtCtx } from "./ctx";
 
 export function ProfileView({ ctx }: { ctx: MtCtx }) {
@@ -67,7 +68,6 @@ export function ProfileView({ ctx }: { ctx: MtCtx }) {
                 <p className="empty">{t("profile.noTickets")}</p>
               )}
               {(p.tickets ?? []).map((tk) => {
-                const sep = mtSep(tk.ticket.type);
                 const payLabel =
                   tk.state === "won" ? t("mine.returned") : t("mine.ifHits");
                 const payValue =
@@ -101,13 +101,12 @@ export function ProfileView({ ctx }: { ctx: MtCtx }) {
                         </div>
                         <div className="mt-card-race">{runnerRaceName(tk)}</div>
                       </div>
-                      <div className="mt-chips">
-                        {tk.ticket.lines.slice(0, 4).map((ln, j) => (
-                          <span key={j} className="mt-chip">
-                            {ln.combo.join(sep)}
-                          </span>
-                        ))}
-                      </div>
+                      <TicketLines
+                        ticket={tk.ticket}
+                        unitStake={tk.unit}
+                        compact
+                        points="count"
+                      />
                       <div className="mt-metrics">
                         <div>
                           <div className="mt-metric-label">{t("mine.cost")}</div>

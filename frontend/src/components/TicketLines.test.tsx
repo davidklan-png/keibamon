@@ -9,7 +9,7 @@
 //   - SINGLE/legacy: capped chips, no structure badge.
 //   - Derivation: a legacy flat ticket that IS a full box expansion renders as
 //     Box; one that IS NOT (false-positive guard) stays on chips.
-//   - showPoints toggle; JA label set.
+//   - points variant (full/count/none), incl. the count on the chips path; JA label set.
 //
 // Pure presentational — renderToStaticMarkup (no jsdom, no fetch), like
 // FillGuide.test.tsx.
@@ -94,13 +94,45 @@ describe("TicketLines", () => {
     expect(html).not.toContain("tl-chip");
   });
 
-  it("box: showPoints={false} suppresses the points line", () => {
+  it("box: points=\"none\" suppresses the points line", () => {
     const ticket = buildBoxTicket("trio", ["1", "2", "3", "4"], p, allUmas, 100, "tl");
     const html = renderToStaticMarkup(
-      <TicketLines ticket={ticket!} unitStake={100} showPoints={false} />,
+      <TicketLines ticket={ticket!} unitStake={100} points="none" />,
     );
     expect(html).toContain("BOX");
     expect(html).not.toContain("tl-points");
+  });
+
+  it("box: points=\"count\" renders the combo total with no unit/cost", () => {
+    // C(4,2)=6 quinella combos over {1,2,3,4}. The count line states the total
+    // without duplicating the cost a host already prints.
+    const ticket = buildBoxTicket("quinella", ["1", "2", "3", "4"], p, allUmas, 100, "tl");
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} points="count" />,
+    );
+    expect(html).toContain("tl-points");
+    expect(html).toContain("6 combos");
+    // No unit, no cost, no "×" framing — count only.
+    expect(html).not.toContain("¥100");
+    expect(html).not.toMatch(/×.*=/);
+  });
+
+  it("chips: points=\"count\" renders the total on the legacy chip path (no +N)", () => {
+    // A flat non-box ticket (3 of P(5,3)) takes the chip path. The count line
+    // now renders there too, and the compact "+N" truncation chip is gone —
+    // the count line is the one way the combo total is expressed.
+    const ticket = flatTicket("trifecta", [
+      ["1", "2", "3"],
+      ["1", "2", "4"],
+      ["1", "3", "4"],
+    ]);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} points="count" />,
+    );
+    expect(html).toContain("tl-chip");
+    expect(html).toContain("tl-points");
+    expect(html).toContain("3 combos");
+    expect(html).not.toContain("tl-chip-more"); // the old "+N" chip is gone
   });
 
   // ---- FORMATION -------------------------------------------------------
@@ -257,6 +289,66 @@ describe("TicketLines", () => {
     expect(countClass(html, "tl-tile")).toBe(3);
   });
 
+  // ---- bracket_quinella (枠連) -----------------------------------------
+  // Brackets are a SEPARATE number space from umabans: a "3" tile must read as
+  // bracket 3, not horse 3 (bet-type-aware tile treatment), and the box
+  // derivation must tolerate same-bracket ゾロ目 lines (3-3) that the umaban
+  // "no repeat within a combo" guard would reject. The false-positive guard
+  // (a hand-picked partial bracket selection must NOT render as a box) is the
+  // critical correctness property.
+  it("bracket box: renders the bracket SET as labelled tiles (not umabans)", () => {
+    // 3 brackets {3,7,8} → C(3,2)=3 cross pairs. A full bracket box.
+    const ticket = flatTicket("bracket_quinella", [
+      ["3", "7"],
+      ["3", "8"],
+      ["7", "8"],
+    ]);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} />,
+    );
+    expect(html).toContain("BOX");
+    // Bracket tiles carry the bet-type-aware class (multi-class, so count via
+    // regex, not the exact-match countClass helper) + the head tag labels them.
+    expect((html.match(/tl-tile-bracket/g) || []).length).toBe(3);
+    expect(html).toContain("tl-bracket-tag");
+    expect(html).toContain("Brackets");
+    // The 3-bracket SET as tiles, not 3 chips.
+    expect(html).not.toContain("tl-chip");
+  });
+
+  it("bracket box: a same-bracket ゾロ目 line (3-3) does NOT degrade to chips", () => {
+    // {3,7,8} full cross expansion + a legal 3-3 ゾロ目 (bracket 3 fields ≥2
+    // horses). The umaban repeat-guard would reject 3-3 and fall back to chips;
+    // the bracket path permits it and still renders the SET.
+    const ticket = flatTicket("bracket_quinella", [
+      ["3", "7"],
+      ["3", "8"],
+      ["7", "8"],
+      ["3", "3"],
+    ]);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} />,
+    );
+    expect(html).toContain("BOX");
+    expect((html.match(/tl-tile-bracket/g) || []).length).toBe(3);
+    expect(html).not.toContain("tl-chip");
+  });
+
+  it("bracket FALSE-POSITIVE GUARD: a partial bracket selection must NOT render as Box", () => {
+    // Only 2 of the 3 cross pairs of {3,7,8} — a hand-picked subset, NOT a
+    // full bracket box. Must render as chips so it can't be mistaken for one.
+    const ticket = flatTicket("bracket_quinella", [
+      ["3", "7"],
+      ["3", "8"],
+    ]);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} />,
+    );
+    expect(html).not.toContain("BOX");
+    expect(html).not.toContain("tl-tile-bracket");
+    expect(html).toContain("tl-chip");
+  });
+
   // ---- deriveBoxSet direct ---------------------------------------------
   it("deriveBoxSet: full ordered box → set; partial → null; single → null", () => {
     expect(
@@ -281,6 +373,40 @@ describe("TicketLines", () => {
     ).toBeNull();
     // A single combination (2-horse quinella = C(2,2)=1) is not a multi-way box.
     expect(deriveBoxSet(flatTicket("quinella", [["1", "2"]]))).toBeNull();
+  });
+
+  it("deriveBoxSet: bracket full cross-box → set; with ゾロ目 → set; partial → null", () => {
+    // 3 brackets {3,7,8}: C(3,2)=3 cross pairs → the bracket set.
+    expect(
+      deriveBoxSet(
+        flatTicket("bracket_quinella", [
+          ["3", "7"],
+          ["3", "8"],
+          ["7", "8"],
+        ]),
+      ),
+    ).toEqual(["3", "7", "8"]);
+    // Same full cross-box PLUS a legal 3-3 ゾロ目 line — still the bracket set
+    // (same-bracket pairs are permitted, not required).
+    expect(
+      deriveBoxSet(
+        flatTicket("bracket_quinella", [
+          ["3", "7"],
+          ["3", "8"],
+          ["7", "8"],
+          ["3", "3"],
+        ]),
+      ),
+    ).toEqual(["3", "7", "8"]);
+    // Only 2 of 3 cross pairs → null (false-positive guard).
+    expect(
+      deriveBoxSet(
+        flatTicket("bracket_quinella", [
+          ["3", "7"],
+          ["3", "8"],
+        ]),
+      ),
+    ).toBeNull();
   });
 
   // ---- Old share snapshot (no structure) -------------------------------
@@ -320,5 +446,20 @@ describe("TicketLines", () => {
     );
     expect(html).toContain("ボックス"); // BOX
     expect(html).toContain("点"); // combo counter (点)
+  });
+
+  it("JA: bracket box head tag localizes to 枠", () => {
+    setLang("ja");
+    const ticket = flatTicket("bracket_quinella", [
+      ["3", "7"],
+      ["3", "8"],
+      ["7", "8"],
+    ]);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} />,
+    );
+    expect(html).toContain("ボックス"); // BOX
+    expect(html).toContain("tl-bracket-tag");
+    expect(html).toContain("枠"); // Brackets → 枠
   });
 });

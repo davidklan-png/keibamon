@@ -37,6 +37,7 @@ import {
   runnersByBracket,
 } from "../lib/manualBuilder";
 import type { FormationPayload, Ticket } from "../lib/types";
+import { TicketLines } from "../components/TicketLines";
 
 export interface ManualTicketInitial {
   id?: string;
@@ -494,18 +495,12 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
               {tFmt("manual.linesCount", { n: ticket.lines.length })}
             </span>
           </div>
-          <div className="mt-chips mt-manual-preview-chips">
-            {ticket.lines.slice(0, 6).map((ln, j) => (
-              <span key={j} className="mt-chip">
-                {ln.combo.join("-")}
-              </span>
-            ))}
-            {ticket.lines.length > 6 && (
-              <span className="mt-chip mt-chip-more">
-                +{ticket.lines.length - 6}
-              </span>
-            )}
-          </div>
+          <TicketLines
+            ticket={ticket}
+            unitStake={ticket.unit}
+            compact
+            points="none"
+          />
           <div className="mt-manual-figures">
             <div>
               <div className="mt-metric-label">{t("mine.cost")}</div>

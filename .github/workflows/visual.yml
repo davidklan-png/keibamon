@@ -1,0 +1,135 @@
+name: Visual regression
+
+# Playwright visual suite as a CI gate. The repo's process rule — UI-changing
+# commits regenerate affected baselines in the SAME commit (the b85f7ab lesson)
+# — was enforced by nobody but David running the suite locally; six baselines
+# went red during the ticket-renderer batch and could have merged silently.
+#
+# RUNNER STRATEGY: containerized Linux, not a macOS runner. This is the crux.
+# Baselines must rasterize identically wherever they're compared. A first cut
+# used a macos-15 runner (matching the -chromium-darwin baselines captured on
+# David's Mac), but it FAILED at ratio:0 — David's Mac and the macos-15 image
+# are not the same machine: Japanese text rendered by the system CJK font
+# differs by up to 4.6% of pixels between them (median 0.12%, EN sub-1%), so
+# maxDiffPixelRatio:0 is impossible across macOS instances. A tolerance big
+# enough to absorb that (~5%) is too loose to catch real regressions — the
+# ticket-renderer batch's smallest real drift was ~4%. So:
+#   (a) macOS runner — broken at ratio:0 by CJK variance; +loose tolerance = a
+#       gate that misses the regressions it exists to catch. Rejected.
+#   (b) parallel -linux set — two baseline sets forever; a maintenance trap.
+#       Rejected.
+#   (c) THIS — pin one Linux container image (mcr.microsoft.com/playwright at
+#       the locked @playwright/test version), pin its ARCH to linux/amd64
+#       (scripts/test-visual.sh --platform; this runner is amd64), and
+#       regenerate the baselines ON THIS RUNNER (the `regen` job below). Same
+#       image + same arch locally and in CI → same fonts/browser/OS/CPU-build →
+#       the suite is deterministic RUN-TO-RUN (two captures are byte-identical).
+#       ARCH was a plausible suspect for the ~94px cross-env difference an
+#       earlier batch reported (the image is multi-arch; a bare `docker run` on
+#       Apple Silicon pulls linux/arm64 while this runner is amd64), so the pin
+#       removes it as a variable. The `regen` job confirmed arch is NOT the
+#       cause of the ~94px an earlier batch reported: regenerating as native
+#       amd64 here changed ZERO files. (That 94px was later traced to the branch
+#       being behind main — .foot-version existed in CI's merge checkout but not
+#       in the branch-only regen baselines, a constant presence/absence diff —
+#       NOT arch, NOT rasterization. Merging main + rebaselining closed it.) The
+#       arch pin is preventive: same image + same arch locally and in CI keeps
+#       the suite deterministic run-to-run.
+# Regen path: the `regen` job below (workflow_dispatch with regenerate=true),
+# which runs --update-snapshots here and commits the new -chromium-linux
+# baselines to the dispatch ref. A Mac can't do this itself without Rosetta
+# (off by default; enabling it restarts Docker), so CI is canonical — see
+# scripts/test-visual.sh. @playwright/test is pinned exact in
+# frontend/package.json (1.61.0) and the image tag matches.
+#
+# DOES NOT GATE DEPLOY. This is a separate workflow from deploy.yml, which is
+# unchanged: a red visual run on main will not block a hotfix deploy. Visual
+# drift is review signal, not a release blocker; deploy.yml's own
+# vitest/tsc/pytest gate still stands.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      regenerate:
+        description: "Regenerate -chromium-linux baselines (--update-snapshots) on this native-amd64 runner and commit them to the ref"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.61.0-jammy
+    steps:
+      - uses: actions/checkout@v5
+
+      # The image ships Node + the Chromium build for @playwright/test 1.61.0 +
+      # system fonts (incl. CJK), so no setup-node / playwright-install is
+      # needed — only the project's npm deps.
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+
+      # playwright.config.ts boots its own vite dev server with
+      # VITE_PLAYWRIGHT_BYPASS_AUTH=1, so no secrets are needed here.
+      - name: Visual regression
+        run: npm run test:visual
+        working-directory: frontend
+
+      # Diff images + the HTML report so a red run is diagnosable from the PR
+      # without re-running locally.
+      - name: Upload diff artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: visual-diff
+          path: |
+            frontend/test-results
+            frontend/playwright-report
+          if-no-files-found: ignore
+
+  # Regenerate baselines on the NATIVE amd64 runner and commit them to the
+  # dispatching ref. Trigger: `gh api .../actions/workflows/visual.yml/dispatches
+  # -f ref=<branch> -F regenerate=true` (see scripts/test-visual.sh). CI is the
+  # canonical regen path because a Mac would need Rosetta to match this arch.
+  # A GITHUB_TOKEN push does not re-trigger workflows, so no loop.
+  regen:
+    if: github.event_name == 'workflow_dispatch' && inputs.regenerate
+    runs-on: ubuntu-latest
+    container: mcr.microsoft.com/playwright:v1.61.0-jammy
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install frontend deps
+        run: npm ci
+        working-directory: frontend
+
+      - name: Regenerate baselines (--update-snapshots)
+        run: npm run test:visual -- --update-snapshots
+        working-directory: frontend
+
+      - name: Commit regenerated baselines
+        # Run git from the repo root (where .git is), not working-directory:
+        # frontend — in a container job the subdir isn't seen as inside a repo.
+        # safe.directory handles the container's dubious-ownership check.
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/tests/visual
+          if git diff --cached --quiet; then
+            echo "No baseline changes — baselines already match amd64."
+          else
+            git commit -m "chore(visual): regenerate -chromium-linux baselines (amd64)"
+            git push
+          fi
