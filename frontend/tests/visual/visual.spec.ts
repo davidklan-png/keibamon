@@ -893,14 +893,15 @@ test.describe("manual builder (current design)", () => {
     });
   }
 
-  // Phase 3 close-out — the cost bar must never cover the last runner row.
-  // The sticky cost bar sits AFTER the matrix in flow and reserves its space,
-  // so no row can slide under it — but the genuine risk is at the BOTTOM of an
-  // 18-runner list, where the last row and the sticky bar compete for the same
-  // viewport pixels. A baseline can't see that, so this is a bounding-box
-  // check: scroll to the end and assert the last row's bottom edge sits at/above
-  // the cost bar's top edge. Language-independent (geometry only) — EN once.
-  test("manual builder cost bar clears last row at list end", async ({ page }) => {
+  // Phase 3 close-out — two bounding-box invariants a baseline cannot see. The
+  // sticky cost bar must never (a) overlap the matrix row it reports on, and
+  // (b) slide under the fixed bottom tab bar. (b) is the one that degrades under
+  // type scaling: --bottom-bar-h was measured at DEFAULT type size, and the tab
+  // bar's height grows with text size, so the cost bar's clearance has to absorb
+  // that growth — which is why it is +15px, not the bare minimum. The tab bar
+  // also paints ABOVE the cost bar (z-index 50 vs 6), so an overlap is SILENT;
+  // this check is the only thing that would go red. Language-independent — EN.
+  test("manual builder cost bar clears last row + tab bar", async ({ page }) => {
     await page.unroute("**/api/live");
     await page.route("**/api/live", (route) =>
       route.fulfill({
@@ -927,10 +928,13 @@ test.describe("manual builder (current design)", () => {
     }
     await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
     await page.evaluate(() => document.fonts.ready);
-    // Scroll to the END of the list (the failure case), then compare boxes.
+
+    // (a) At the END of the list, the last row sits above the cost bar in flow
+    //     (the netkeiba-badge mistake was a FIXED bar floating over the rows —
+    //     sticky + flow order makes that impossible; this pins the invariant).
     await page.evaluate(() => window.scrollTo(0, Number.MAX_SAFE_INTEGER));
     await page.waitForTimeout(300);
-    const geo = await page.evaluate(() => {
+    const atEnd = await page.evaluate(() => {
       const rows = document.querySelectorAll(".mt-matrix-row");
       const last = rows[rows.length - 1] as HTMLElement | undefined;
       const cost = document.querySelector("[data-mt-sticky-cost]") as HTMLElement | null;
@@ -940,11 +944,34 @@ test.describe("manual builder (current design)", () => {
         costTop: Math.round(cost.getBoundingClientRect().top),
       };
     });
-    expect(geo, "last row and sticky cost bar both present").not.toBeNull();
+    expect(atEnd, "last row + sticky cost bar present").not.toBeNull();
     expect(
-      geo!.lastBottom,
-      "last runner row bottom must sit at/above the sticky cost bar top at the end of the 18-runner list",
-    ).toBeLessThanOrEqual(geo!.costTop);
+      atEnd!.lastBottom,
+      "last runner row bottom must sit at/above the sticky cost bar top at list end",
+    ).toBeLessThanOrEqual(atEnd!.costTop);
+
+    // (b) With the cost bar PINNED — scroll the last row to the viewport bottom,
+    //     which keeps the cost bar stuck just above the tab bar — it must clear
+    //     the tab bar's top edge. This is the type-scaling-sensitive invariant.
+    await page.evaluate(() => {
+      const rows = document.querySelectorAll(".mt-matrix-row");
+      rows[rows.length - 1]?.scrollIntoView({ block: "end" });
+    });
+    await page.waitForTimeout(300);
+    const pinned = await page.evaluate(() => {
+      const cost = document.querySelector("[data-mt-sticky-cost]") as HTMLElement | null;
+      const tab = document.querySelector(".bottom-tabbar") as HTMLElement | null;
+      if (!cost || !tab) return null;
+      return {
+        costBottom: Math.round(cost.getBoundingClientRect().bottom),
+        tabTop: Math.round(tab.getBoundingClientRect().top),
+      };
+    });
+    expect(pinned, "sticky cost bar + bottom tab bar present").not.toBeNull();
+    expect(
+      pinned!.costBottom,
+      "sticky cost bar must clear the bottom tab bar (the type-scaling invariant)",
+    ).toBeLessThanOrEqual(pinned!.tabTop);
   });
 });
 

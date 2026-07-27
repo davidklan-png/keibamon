@@ -2656,14 +2656,21 @@ select:focus {
 }
 
 /* Sticky cost bar: pins to the viewport bottom, clearing the fixed .bottom-
- * tabbar (ADR-0012: --bottom-bar-h + 3px + safe area), so points + cost +
+ * tabbar (ADR-0012: --bottom-bar-h + 15px + safe area), so points + cost +
  * if-it-hits stay visible WHILE picking. Placed AFTER the matrix in flow → it
  * never overlays a row (every row is above it), and it is sticky not fixed so
  * it RESERVES its flow space — it never covers the checkboxes it reports on
- * (the netkeiba-badge mistake). */
+ * (the netkeiba-badge mistake). +15px (not the bare minimum) matches the
+ * breathing room .app and .mt-fab use, so one clearance value governs all
+ * three — and gives tolerance: --bottom-bar-h was measured at default type
+ * size, and the tab bar is 1px border + 6px + 44px button + 6px, most of which
+ * GROWS if the user raises text size. At +3px the cost bar slid under the tab
+ * bar almost immediately — and because the tab bar paints above it (z-index 50
+ * vs 6), that overlap was SILENT. +15px keeps it clear of the bar through that
+ * growth. */
 .mt-sticky-cost {
   position: sticky;
-  bottom: calc(var(--bottom-bar-h) + 3px + env(safe-area-inset-bottom));
+  bottom: calc(var(--bottom-bar-h) + 15px + env(safe-area-inset-bottom));
   z-index: 6;
   display: flex;
   justify-content: space-between;
