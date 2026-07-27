@@ -4288,6 +4288,13 @@ select:focus {
 .kbm-modal-card {
   width: 100%;
   max-width: 520px;
+  /* The studio is a bottom sheet (align-items: flex-end on .kbm-modal). Cap it
+     at the viewport and scroll internally so a tall card can't overflow the top
+     edge — SetFamilyView grows a 枠連 row once gate flows on /api/live, which
+     pushed the first row off-screen and unreachable. Without this the top rows
+     are un-tappable for users AND for the visual gate (click timeout). */
+  max-height: calc(100dvh - 24px);
+  overflow-y: auto;
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 16px;
