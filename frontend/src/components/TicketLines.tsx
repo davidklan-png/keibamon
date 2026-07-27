@@ -93,9 +93,18 @@ export function TicketLines({
     const bracketTileCls = view.isBracket ? `${tileCls} tl-tile-bracket` : tileCls;
     return (
       <div className={rootCls}>
-        {badge && (
+        {/* The BOX badge asserts a multi-way box. A minimum-size box (2-horse
+            quinella, 3-horse trio — C(n,k)=1) is a single combination, i.e. the
+            same bet as a straight, so the badge carries no information there
+            (deriveBoxSet's own reasoning: "a single combination isn't a multi-
+            way box"). Suppress it at 1 line; the tiles still show the selection.
+            The 枠連 bracket tag is kept regardless — it labels the tiles as
+            bracket numbers, which is informative at any combo count. */}
+        {badge && (nCombos > 1 || view.isBracket) && (
           <div className="tl-head">
-            <span className="tl-badge tl-badge-box">{t("fillGuide.box")}</span>
+            {nCombos > 1 && (
+              <span className="tl-badge tl-badge-box">{t("fillGuide.box")}</span>
+            )}
             {view.isBracket && (
               <span className="tl-bracket-tag">{t("ticketLines.brackets")}</span>
             )}

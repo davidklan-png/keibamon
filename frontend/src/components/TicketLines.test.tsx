@@ -436,4 +436,56 @@ describe("TicketLines", () => {
     expect(html).toContain("tl-bracket-tag");
     expect(html).toContain("枠"); // Brackets → 枠
   });
+
+  // ---- Min-size box: suppress the BOX badge at 1 line (PR #25 follow-up) ----
+  // A minimum-size box (C(n,k)=1) is a single combination — the same bet as a
+  // straight — so the BOX badge asserts a multi-way structure that isn't there
+  // (deriveBoxSet's own reasoning). Tiles still render (the selection); only the
+  // badge is dropped. A multi-line box keeps it (control). The 枠連 bracket tag
+  // is kept regardless (it labels the tiles as bracket numbers).
+  it("min-size box: a 2-horse quinella (C(2,2)=1) renders tiles, no BOX badge", () => {
+    const ticket = buildBoxTicket("quinella", ["1", "3"], p, allUmas, 100, "tl");
+    expect(ticket).not.toBeNull();
+    expect(ticket!.lines).toHaveLength(1); // C(2,2)=1 — the case in question
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} />,
+    );
+    expect(countClass(html, "tl-tile")).toBe(2); // the SET {1,3} as tiles
+    expect(html).not.toContain("tl-badge-box"); // no BOX badge at 1 line
+    expect(html).toContain("tl-points"); // body still renders
+  });
+
+  it("min-size box: a 3-horse trio (C(3,3)=1) renders tiles, no BOX badge", () => {
+    const ticket = buildBoxTicket("trio", ["1", "2", "3"], p, allUmas, 100, "tl");
+    expect(ticket).not.toBeNull();
+    expect(ticket!.lines).toHaveLength(1); // C(3,3)=1
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} />,
+    );
+    expect(countClass(html, "tl-tile")).toBe(3); // the SET {1,2,3}
+    expect(html).not.toContain("tl-badge-box");
+  });
+
+  it("control: a multi-line box (C(3,2)=3) still shows the BOX badge", () => {
+    const ticket = buildBoxTicket("quinella", ["1", "2", "3"], p, allUmas, 100, "tl");
+    expect(ticket).not.toBeNull();
+    expect(ticket!.lines).toHaveLength(3);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} />,
+    );
+    expect(countClass(html, "tl-tile")).toBe(3);
+    expect(html).toContain("tl-badge-box"); // badge present at >1 line
+  });
+
+  it("min-size 枠連: a 2-bracket box (C(2,2)=1) keeps the bracket tag, drops the BOX badge", () => {
+    // Structure-less bracket ticket → deriveBoxSet's bracket branch accepts a
+    // 2-bracket set (n<2 guard, not expected<2) → box + isBracket at 1 line.
+    const ticket = flatTicket("bracket_quinella", [["3", "7"]]);
+    expect(ticket.lines).toHaveLength(1);
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket} unitStake={100} />,
+    );
+    expect(html).not.toContain("tl-badge-box"); // BOX badge suppressed at 1 line
+    expect(html).toContain("tl-bracket-tag"); // bracket tag kept (informative)
+  });
 });
