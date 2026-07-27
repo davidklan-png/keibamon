@@ -16,6 +16,7 @@ import { FormPanel } from "./FormPanel";
 import { TicketStudio } from "./TicketStudio";
 import { RunnerMark } from "./RunnerMark";
 import { RunnerRow } from "../components/RunnerRow";
+import { BracketStripe } from "../components/BracketStripe";
 
 // ---------------------------------------------------------------------------
 // Grade ladder — one source for both the badge render and the popularScore
@@ -430,6 +431,7 @@ export function RaceScreen(props: RaceScreenProps) {
                         name={r.name ?? null}
                         odds={r.odds}
                         oddsPending={pending}
+                        bracketStripe={<BracketStripe gate={r.gate} />}
                       />
                     </button>
                     <RunnerMark

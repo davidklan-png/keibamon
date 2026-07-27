@@ -39,6 +39,7 @@ import {
 import type { FormationPayload, IntuitionState, Ticket } from "../lib/types";
 import { TicketLines } from "../components/TicketLines";
 import { RunnerRow } from "../components/RunnerRow";
+import { BracketStripe } from "../components/BracketStripe";
 
 export interface ManualTicketInitial {
   id?: string;
@@ -454,6 +455,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
                     name={runner?.name ?? null}
                     odds={odds}
                     mark={marks?.[u] ?? null}
+                    bracketStripe={<BracketStripe gate={runner?.gate ?? null} />}
                   />
                   {Array.from({ length: k }, (_, posIndex) => {
                     const selected = (formationPositions[posIndex] ?? []).includes(u);

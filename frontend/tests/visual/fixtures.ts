@@ -9,14 +9,14 @@ import type { CommittedTicket } from "../../src/lib/types";
 import type { FeedItem } from "../../src/auth/socialClient";
 
 const RACE_RUNNERS = [
-  { umaban: 1, name: "Croix du Nord", win_odds: 2.4, odds_is_live: true },
-  { umaban: 2, name: "Shin Tsubaki", win_odds: 11.6, odds_is_live: true },
-  { umaban: 3, name: "Pegasus Seiya", win_odds: 7.2, odds_is_live: true },
-  { umaban: 4, name: "Meiner Sapphire", win_odds: 18.8, odds_is_live: true },
-  { umaban: 5, name: "Sekifu", win_odds: 23.9, odds_is_live: true },
-  { umaban: 6, name: "Ho O Biscay", win_odds: 5.1, odds_is_live: true },
-  { umaban: 7, name: "Solar Apex", win_odds: 9.7, odds_is_live: true },
-  { umaban: 8, name: "Kitasan Magic", win_odds: 14.3, odds_is_live: true },
+  { umaban: 1, name: "Croix du Nord", win_odds: 2.4, odds_is_live: true, gate: 1 },
+  { umaban: 2, name: "Shin Tsubaki", win_odds: 11.6, odds_is_live: true, gate: 2 },
+  { umaban: 3, name: "Pegasus Seiya", win_odds: 7.2, odds_is_live: true, gate: 3 },
+  { umaban: 4, name: "Meiner Sapphire", win_odds: 18.8, odds_is_live: true, gate: 4 },
+  { umaban: 5, name: "Sekifu", win_odds: 23.9, odds_is_live: true, gate: 5 },
+  { umaban: 6, name: "Ho O Biscay", win_odds: 5.1, odds_is_live: true, gate: 6 },
+  { umaban: 7, name: "Solar Apex", win_odds: 9.7, odds_is_live: true, gate: 7 },
+  { umaban: 8, name: "Kitasan Magic", win_odds: 14.3, odds_is_live: true, gate: 8 },
 ];
 
 const RACE_KEY = "20260621|Tokyo|11|Tokyo Takarazuka (G1)";
@@ -61,24 +61,24 @@ export const FIXTURE_SNAPSHOT: LiveSnapshot = {
 // via the /api/live override below; the default FIXTURE_SNAPSHOT stays 8
 // runners so nothing else moves.
 const LAYOUT_FIELD_18_RUNNERS = [
-  { umaban: 1, name: "アオバコンチェルト", win_odds: 2.4, odds_is_live: true },
-  { umaban: 2, name: "キンザンクイーン", win_odds: 5.1, odds_is_live: true },
-  { umaban: 3, name: "シュンサイタル", win_odds: 7.2, odds_is_live: true },
-  { umaban: 4, name: "テイエムレジェ", win_odds: 9.7, odds_is_live: true },
-  { umaban: 5, name: "ナムラメテオ", win_odds: 12.0, odds_is_live: true },
-  { umaban: 6, name: "マチカネフウウ", win_odds: 6.3, odds_is_live: true },
-  { umaban: 7, name: "ヒロボーワンダー", win_odds: 14.5, odds_is_live: true },
-  { umaban: 8, name: "サクラメモリア", win_odds: 18.8, odds_is_live: true },
-  { umaban: 9, name: "ハツコイソング", win_odds: 23.9, odds_is_live: true },
-  { umaban: 10, name: "カネショウマリ", win_odds: 3.8, odds_is_live: true },
-  { umaban: 11, name: "タニノアルゴス", win_odds: 4.2, odds_is_live: true },
-  { umaban: 12, name: "イナズマキラリ", win_odds: 8.5, odds_is_live: true },
-  { umaban: 13, name: "ヴェラアルダ", win_odds: 11.6, odds_is_live: true },
-  { umaban: 14, name: "ヤマニンシエル", win_odds: 27.4, odds_is_live: true },
-  { umaban: 15, name: "コスモヴァンク", win_odds: 33.0, odds_is_live: true },
-  { umaban: 16, name: "エイシンバレン", win_odds: 41.2, odds_is_live: true },
-  { umaban: 17, name: "スズカフェスタ", win_odds: 51.7, odds_is_live: true },
-  { umaban: 18, name: "グランドブリッジ", win_odds: 68.3, odds_is_live: true },
+  { umaban: 1, name: "アオバコンチェルト", win_odds: 2.4, odds_is_live: true, gate: 1 },
+  { umaban: 2, name: "キンザンクイーン", win_odds: 5.1, odds_is_live: true, gate: 1 },
+  { umaban: 3, name: "シュンサイタル", win_odds: 7.2, odds_is_live: true, gate: 2 },
+  { umaban: 4, name: "テイエムレジェ", win_odds: 9.7, odds_is_live: true, gate: 2 },
+  { umaban: 5, name: "ナムラメテオ", win_odds: 12.0, odds_is_live: true, gate: 3 },
+  { umaban: 6, name: "マチカネフウウ", win_odds: 6.3, odds_is_live: true, gate: 3 },
+  { umaban: 7, name: "ヒロボーワンダー", win_odds: 14.5, odds_is_live: true, gate: 4 },
+  { umaban: 8, name: "サクラメモリア", win_odds: 18.8, odds_is_live: true, gate: 4 },
+  { umaban: 9, name: "ハツコイソング", win_odds: 23.9, odds_is_live: true, gate: 5 },
+  { umaban: 10, name: "カネショウマリ", win_odds: 3.8, odds_is_live: true, gate: 5 },
+  { umaban: 11, name: "タニノアルゴス", win_odds: 4.2, odds_is_live: true, gate: 6 },
+  { umaban: 12, name: "イナズマキラリ", win_odds: 8.5, odds_is_live: true, gate: 6 },
+  { umaban: 13, name: "ヴェラアルダ", win_odds: 11.6, odds_is_live: true, gate: 7 },
+  { umaban: 14, name: "ヤマニンシエル", win_odds: 27.4, odds_is_live: true, gate: 7 },
+  { umaban: 15, name: "コスモヴァンク", win_odds: 33.0, odds_is_live: true, gate: 7 },
+  { umaban: 16, name: "エイシンバレン", win_odds: 41.2, odds_is_live: true, gate: 8 },
+  { umaban: 17, name: "スズカフェスタ", win_odds: 51.7, odds_is_live: true, gate: 8 },
+  { umaban: 18, name: "グランドブリッジ", win_odds: 68.3, odds_is_live: true, gate: 8 },
 ];
 
 /** Single-race snapshot carrying LAYOUT_FIELD_18. Override /api/live with this
