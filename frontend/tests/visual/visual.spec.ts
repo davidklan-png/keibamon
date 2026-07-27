@@ -891,6 +891,49 @@ test.describe("manual builder (current design)", () => {
       await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
       await expect(page).toHaveScreenshot(`manual-builder-formation-18-midscroll.${lang}.png`);
     });
+
+    // Manual-builder fill card (ADR-0011 parity with TicketStudio). A manually
+    // built ticket now gets the same JRA-style fill card a studio-built one
+    // does — toggled from the preview, mounted WITHOUT onSave/onShare (the
+    // builder's Register/Share CTA is the commit path; the card is a copy-view
+    // + share-as-image). The 枠連 capture had never been reachable by a user
+    // until gate flowed on /api/live, so it had never been pinned by a baseline.
+    test(`manual builder fill card box (${lang})`, async ({ page }) => {
+      await openBuilder(page, lang);
+      // Default quinella/box; pick two horses → 1 combo.
+      await page.locator(".mt-manual-cell").first().click();
+      await page.locator(".mt-manual-cell").nth(2).click();
+      await expect(page.locator(".mt-manual-preview")).toBeVisible();
+      await page.locator(".mt-manual-fillcard-toggle").click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Export gate: [data-not-advice] MUST render in this mount or
+      // exportTicketCard throws + the download silently fails. The studio
+      // coverage batch asserted this for its mount; this extends it here.
+      await expect(page.locator(".fillguide [data-not-advice]")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`manual-fillcard-box.${lang}.png`);
+    });
+
+    test(`manual builder fill card bracket (${lang})`, async ({ page }) => {
+      await openBuilder(page, lang);
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Bracket quinella" : "枠連" })
+        .click();
+      await expect(page.locator(".mt-manual-grid")).toBeVisible();
+      // 枠連 (bracket quinella): pick 3 brackets → C(3,2) = 3 combos.
+      await page.locator(".mt-manual-cell.bracket-1").click();
+      await page.locator(".mt-manual-cell.bracket-2").click();
+      await page.locator(".mt-manual-cell.bracket-3").click();
+      await expect(page.locator(".mt-manual-preview")).toBeVisible();
+      await page.locator(".mt-manual-fillcard-toggle").click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      await expect(page.locator(".fillguide [data-not-advice]")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`manual-fillcard-bracket.${lang}.png`);
+    });
   }
 
   // Phase 3 close-out — two bounding-box invariants a baseline cannot see. The

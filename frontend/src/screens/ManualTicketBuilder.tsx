@@ -40,6 +40,7 @@ import type { FormationPayload, IntuitionState, Ticket } from "../lib/types";
 import { TicketLines } from "../components/TicketLines";
 import { RunnerRow } from "../components/RunnerRow";
 import { BracketStripe } from "../components/BracketStripe";
+import { FillGuide } from "./FillGuide";
 
 export interface ManualTicketInitial {
   id?: string;
@@ -181,6 +182,13 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   // rebuilding the full box" note. Stays false for tickets that were never
   // locked (new / full-box edits).
   const [unlockedFromLock, setUnlockedFromLock] = useState(false);
+  // Fill-guide (JRA-style fill card) view of the in-progress ticket. Toggled
+  // from the preview; the manual builder's own Register/Share (the CTA wrap)
+  // stays the commit path, so the mounted FillGuide omits onSave/onShare and
+  // shows the image-export Share — the card is a copy-view for filling the
+  // physical slip at OTB, plus share-as-image. (ADR-0011 parity: a manual
+  // ticket now gets the same artefact a studio-built one does.)
+  const [showFillCard, setShowFillCard] = useState(false);
 
   const isBracket = type === "bracket_quinella";
   const canUseFormation = isOrderedType(type);
@@ -548,6 +556,7 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
 
       {/* Live fair-value preview */}
       {ticket && (
+        <>
         <div className="mt-manual-preview">
           <div className="mt-manual-preview-head">
             <span className="mt-manual-preview-type">
@@ -589,6 +598,27 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
             </p>
           )}
         </div>
+        {/* Fill-guide toggle: show the JRA-style fill card for the in-progress
+            ticket (ADR-0011 parity with TicketStudio). The card is a copy-view
+            for the OTB slip + share-as-image; the builder's Register/Share CTA
+            stays the commit path, so FillGuide is mounted WITHOUT onSave/onShare
+            (it renders its image-export Share). [data-not-advice] is always
+            present inside FillGuide, so the export gate holds. */}
+        <button
+          type="button"
+          className="mt-manual-fillcard-toggle"
+          aria-expanded={showFillCard}
+          onClick={() => setShowFillCard((v) => !v)}
+        >
+          {t("fillGuide.title")}
+          <span className="mt-manual-fillcard-chev" aria-hidden="true">
+            {showFillCard ? " ▲" : " ▼"}
+          </span>
+        </button>
+        {showFillCard && (
+          <FillGuide ticket={ticket} runners={runners} unitStake={ticket.unit} />
+        )}
+        </>
       )}
 
       {/* Actions */}

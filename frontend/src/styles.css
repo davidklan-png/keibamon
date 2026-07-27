@@ -2802,6 +2802,28 @@ select:focus {
   padding: 14px;
   margin-bottom: 14px;
 }
+/* Fill-guide toggle + mounted fill card (ADR-0011 parity with TicketStudio).
+   The toggle sits between the fair-value preview and the FillGuide card; the
+   card itself is FillGuide's own .fillguide styling. */
+.mt-manual-fillcard-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin-bottom: 12px;
+  padding: 10px;
+  border: 1px dashed var(--line-2);
+  border-radius: 12px;
+  background: var(--tint);
+  color: var(--soft);
+  font: 700 12px/1 ui-monospace, monospace;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+.mt-manual-fillcard-chev {
+  font-size: 10px;
+}
 .mt-manual-preview-head {
   display: flex;
   justify-content: space-between;
