@@ -13,17 +13,20 @@
 // No parallel export path — reuses the existing gate.
 //
 // Pure presentational — "not an OMR replica" per task, just a legible mobile
-// card. Driven by a Ticket's `structure` + `structurePayload`:
-//   - box       → number grid (highlight structurePayload.set)
-//   - formation → position columns (structurePayload.positions)
-//   - wheel     → position columns reconstructed from axis/opponents/position
+// card. Structural interpretation is shared with TicketLines via
+// lib/ticketStructure.ts (`interpretTicket`); this file renders that view as a
+// fill card:
+//   - box       → number grid (highlight the interpreted set)
+//   - formation → position columns
+//   - wheel     → position columns (axis tagged on its anchored slot)
 // ============================================================================
 import { Fragment, useRef } from "react";
 import { useI18n } from "../i18n";
 import { yen } from "../lib/format";
 import { exportTicketCard } from "../lib/share";
+import { interpretTicket } from "../lib/ticketStructure";
 import type { Runner } from "../lib/fairvalue";
-import type { Ticket, FormationPayload, WheelPayload } from "../lib/types";
+import type { Ticket } from "../lib/types";
 
 export interface FillGuideProps {
   /** A structured ticket from buildBoxTicket / buildFormationTicket / buildWheelTicket. */
@@ -48,33 +51,20 @@ export function FillGuide(props: FillGuideProps) {
   const { ticket, runners, unitStake, onSave, onShare } = props;
   const rootRef = useRef<HTMLElement | null>(null);
 
-  const isBox = ticket.structure === "box";
-  const isFormation = ticket.structure === "formation";
-  const isWheel = ticket.structure === "wheel";
+  const view = interpretTicket(ticket);
+  const isBox = view.mode === "box";
+  const isFormation = view.mode === "formation";
+  const isWheel = view.mode === "wheel";
   const isOrdered = isFormation || isWheel;
 
-  // ---- Ordered path: resolve the position columns. -------------------------
-  // Formation reads positions directly; wheel reconstructs them from
-  // axis@position + opponents (axis pinned to `position`, opponents elsewhere).
-  const k = ticket.type === "trifecta" ? 3 : 2;
-  let positions: string[][] | null = null;
-  let axisPosition = 0; // 0 = none (formation/box); 1..k = wheel anchor slot
-  if (isFormation && ticket.structurePayload) {
-    positions = (ticket.structurePayload as FormationPayload).positions;
-  } else if (isWheel && ticket.structurePayload) {
-    const wp = ticket.structurePayload as WheelPayload;
-    positions = Array.from({ length: k }, (_, i) =>
-      i + 1 === wp.position ? wp.axis : wp.opponents,
-    );
-    axisPosition = wp.position;
-  }
-
-  // ---- Box path: number grid setup (unchanged from 3a). -------------------
-  const set = new Set(
-    isBox && ticket.structurePayload
-      ? (ticket.structurePayload as { set: string[] }).set
-      : [],
-  );
+  // Ordered position columns come straight from the interpreter (formation
+  // reads them directly; wheel reconstructs axis@position → opponents). The
+  // box grid highlights the interpreted set. Inline narrowing on `view.mode`
+  // so the discriminated union types check without a cast.
+  const positions =
+    view.mode === "formation" || view.mode === "wheel" ? view.positions : null;
+  const axisPosition = view.mode === "wheel" ? view.axisPosition : 0; // 0 = none; 1..k = wheel anchor
+  const set = new Set(view.mode === "box" ? view.set : []);
   const maxUmaban = runners.reduce((m, r) => {
     const n = Number(r.uma);
     return Number.isFinite(n) && n > m ? n : m;
