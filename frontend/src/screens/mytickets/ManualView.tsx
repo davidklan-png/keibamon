@@ -5,6 +5,9 @@ import React, { useMemo, useState } from "react";
 import { ManualTicketBuilder, type ManualTicketInitial } from "../ManualTicketBuilder";
 import type { MtCtx } from "./ctx";
 import { mtRaceKey, mtRunnersOf, snapshotRace } from "../../lib/mytickets-view";
+import { impressionsByRace } from "../../lib/impressions";
+import { normalizeName } from "../../lib/normalizeName";
+import type { IntuitionState } from "../../lib/types";
 
 export function ManualView({ ctx }: { ctx: MtCtx }) {
   const {
@@ -22,6 +25,7 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
     setUnit,
     commitManual,
     shareManual,
+    impressions,
   } = ctx;
   // Edit-in-place: when manualEditId is set, prefill the builder from that
   // existing OPEN ticket and reuse its id on Register (POST upserts on
@@ -62,6 +66,20 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
     : selectedRace
       ? mtRunnersOf(selectedRace)
       : featRunners;
+  // READ-ONLY marks for the builder's matrix glyph (Phase 3b): resolve the
+  // selected race's impressions to a uma → mark map. The builder renders these
+  // as a read-only 印 glyph; it never writes (mark-setting stays on RaceScreen).
+  const marks = useMemo<Record<string, IntuitionState>>(() => {
+    const raceId = selectedRace?.race_id ?? (selectedRace ? mtRaceKey(selectedRace, fallbackDate) : "");
+    const byHorseKey = impressionsByRace(impressions ?? {}, raceId);
+    const m: Record<string, IntuitionState> = {};
+    for (const r of builderRunners) {
+      const hk = normalizeName(r.name);
+      const mk = hk ? byHorseKey[hk]?.mark ?? null : null;
+      if (mk) m[r.uma] = mk;
+    }
+    return m;
+  }, [impressions, selectedRace, builderRunners, fallbackDate]);
   const raceSnapshot = editTk?.race ?? (selectedRace ? snapshotRace(selectedRace, fallbackDate) : null);
   const builderKey = editTk?.id ?? (selectedRace ? mtRaceKey(selectedRace, fallbackDate) : "manual-no-race");
 
@@ -115,6 +133,7 @@ export function ManualView({ ctx }: { ctx: MtCtx }) {
             unit={unit}
             onUnitChange={setUnit}
             initial={initial}
+            marks={marks}
             onRegister={(built) => commitManual(built.ticket, built.id, selectedRace ?? undefined)}
             onShare={(built) => shareManual(built.ticket, selectedRace ?? undefined)}
             onCancel={() => setView("new")}

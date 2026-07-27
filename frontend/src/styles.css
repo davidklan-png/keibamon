@@ -2561,14 +2561,41 @@ select:focus {
   gap: 2px;
 }
 /* Fixed-width runner column so the header labels and every row's cells line
- * up; the position columns share the remaining width equally. */
+ * up; the position columns share the remaining width equally. 148px fits a
+ * realistic JA name on its own line at 11px (the 18-runner fixture's 5-8 char
+ * names land intact) and leaves ~65px per selection cell at k=3 (>44px tap). */
 .mt-matrix-corner,
 .mt-matrix-runner {
-  flex: 0 0 92px;
+  flex: 0 0 148px;
+  min-width: 0;
+}
+.mt-matrix-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 4px;
+}
+.mt-matrix-runner-name {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mt-matrix-runner-meta {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 0 4px;
+  gap: 5px;
+}
+/* Read-only 印 glyph (Phase 3b). Display-only — no tap target. */
+.runner-mark-glyph {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--gold-deep);
+  min-width: 14px;
+  text-align: center;
 }
 .mt-matrix-colhead {
   flex: 1 1 0;

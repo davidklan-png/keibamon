@@ -36,8 +36,9 @@ import {
   priceLines,
   runnersByBracket,
 } from "../lib/manualBuilder";
-import type { FormationPayload, Ticket } from "../lib/types";
+import type { FormationPayload, IntuitionState, Ticket } from "../lib/types";
 import { TicketLines } from "../components/TicketLines";
+import { RunnerRow } from "../components/RunnerRow";
 
 export interface ManualTicketInitial {
   id?: string;
@@ -56,6 +57,12 @@ export interface ManualTicketBuilderProps {
   onUnitChange: (n: number) => void;
   /** When present, opens the builder pre-filled (edit-in-place). */
   initial?: ManualTicketInitial;
+  /**
+   * READ-ONLY intuition marks keyed by uma (Phase 3b) — drives the read-only
+   * 印 glyph in the matrix row. The builder never writes; this is a memory aid
+   * showing marks set elsewhere (RaceScreen). Mark-setting stays there.
+   */
+  marks?: Record<string, IntuitionState>;
   /** Built-ticket callback. Parent decides POST vs PATCH path. */
   onRegister: (built: { ticket: Ticket; id?: string }) => void;
   /** Friend Interactions Phase 3 — Share (opens FriendPicker). Optional. */
@@ -100,7 +107,7 @@ function initialFormationPositions(initial?: ManualTicketInitial): string[][] | 
 
 export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   const { t, tFmt } = useI18n();
-  const { runners, unit, onUnitChange, initial, onRegister, onCancel, onShare } = props;
+  const { runners, unit, onUnitChange, initial, marks, onRegister, onCancel, onShare } = props;
 
   // De-vig the win market for this race once per runners change. The builder
   // is opened with a fresh snapshot; the parent's existing 45s poll keeps
@@ -441,10 +448,13 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
               const oddsLabel = odds > 0 ? `${odds.toFixed(1)}×` : "—";
               return (
                 <div className="mt-matrix-row" key={u} role="listitem">
-                  <span className="mt-matrix-runner">
-                    <span className="mt-manual-horse-num">{u}</span>
-                    <span className="mt-manual-horse-odds">{oddsLabel}</span>
-                  </span>
+                  <RunnerRow
+                    layout="matrix"
+                    umaban={u}
+                    name={runner?.name ?? null}
+                    odds={odds}
+                    mark={marks?.[u] ?? null}
+                  />
                   {Array.from({ length: k }, (_, posIndex) => {
                     const selected = (formationPositions[posIndex] ?? []).includes(u);
                     const pk = posKeyFor(posIndex);

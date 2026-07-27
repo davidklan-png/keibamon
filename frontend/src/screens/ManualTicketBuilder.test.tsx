@@ -22,7 +22,7 @@ import { setLang } from "../i18n";
 import { winProbs, type Runner } from "../lib/fairvalue";
 import { ManualTicketBuilder } from "./ManualTicketBuilder";
 import type { ManualTicketInitial } from "./ManualTicketBuilder";
-import type { Ticket } from "../lib/types";
+import type { IntuitionState, Ticket } from "../lib/types";
 
 const RUNNERS: Runner[] = [
   { uma: "1", odds: 2.4, name: "A" },
@@ -41,6 +41,7 @@ void p;
 
 interface MountOpts {
   initial?: ManualTicketInitial;
+  marks?: Record<string, IntuitionState>;
 }
 
 function mount(opts: MountOpts = {}): {
@@ -60,6 +61,7 @@ function mount(opts: MountOpts = {}): {
         unit={100}
         onUnitChange={vi.fn()}
         initial={opts.initial}
+        marks={opts.marks}
         onRegister={onRegister}
         onCancel={vi.fn()}
       />,
@@ -276,6 +278,25 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     expect(positions[1]).toEqual(["4"]); // position 2 holds exactly the toggled horse
     expect(positions[0]).toEqual(["2"]);
     expect(positions[2]).toEqual(["5"]);
+  });
+
+  it("matrix mark glyph is READ-ONLY (clicking it writes nothing)", () => {
+    // Phase 3b: the builder shows marks as a memory aid, never as a write path.
+    // The glyph is a non-interactive <span>; the builder receives no mark-write
+    // callback, so a click cannot reach the impression store. Mark-setting stays
+    // on RaceScreen (RunnerMark / ADR-0016 inline-mark).
+    const { container } = mount({ marks: { "3": "anchor" } });
+    clickType(container, "Trifecta");
+    const glyphs = Array.from(container.querySelectorAll(".runner-mark-glyph"));
+    expect(glyphs.length).toBeGreaterThan(0);
+    // Horse 3's glyph shows the anchor mark (◎); the rest show "—".
+    expect(glyphs.some((g) => g.textContent === "◎")).toBe(true);
+    // Every glyph is a non-interactive <span> — NOT a button / no tap target.
+    for (const g of glyphs) expect(g.tagName).toBe("SPAN");
+    // Clicking a glyph is a no-op: no handler, no write, glyph unchanged.
+    const anchorGlyph = glyphs.find((g) => g.textContent === "◎")!;
+    act(() => anchorGlyph.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(anchorGlyph.textContent).toBe("◎");
   });
 
   it("reopens a saved formation with its position payload intact", () => {    const initial: ManualTicketInitial = {
