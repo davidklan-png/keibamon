@@ -2576,7 +2576,7 @@ select:focus {
   padding: 3px 4px;
 }
 .mt-matrix-runner-name {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 700;
   color: var(--ink);
   white-space: nowrap;
@@ -2611,7 +2611,7 @@ select:focus {
 .mt-matrix-cell {
   flex: 1 1 0;
   min-width: 0;
-  min-height: 40px;
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -2628,6 +2628,61 @@ select:focus {
   border-color: var(--turf);
   background: var(--turf);
   color: #fff;
+}
+
+/* ---- Phase 3c: sticky column headers + sticky cost bar ----
+ * The scroll parent is the body/window — .app has no overflow — so sticky
+ * pins against the viewport (verified: no inner scroll container). */
+
+/* Headers stick below the viewport top while the matrix scrolls, so 1着/2着/3着
+ * survive an 18-runner scroll. Opaque bg so rows don't bleed through. Nothing
+ * sticky sits above the builder (the app header scrolls away), so top:0. */
+.mt-matrix-head {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 5;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Sticky cost bar: pins to the viewport bottom, clearing the fixed .bottom-
+ * tabbar (ADR-0012), so points + cost + if-it-hits stay visible WHILE picking.
+ * Placed AFTER the matrix in flow → it never overlays a row (every row is
+ * above it), and it is sticky not fixed so it RESERVES its flow space — it
+ * never covers the checkboxes it reports on (the netkeiba-badge mistake). */
+.mt-sticky-cost {
+  position: sticky;
+  bottom: calc(60px + env(safe-area-inset-bottom));
+  z-index: 6;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  background: var(--tint-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+}
+.mt-sticky-cost .mt-sticky-fig {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.mt-sticky-cost .mt-sticky-label {
+  font-size: 9px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mt-sticky-cost strong {
+  font: 800 14px/1 ui-monospace, monospace;
+  color: var(--ink);
+}
+.mt-sticky-cost .mt-sticky-fig.cost strong {
+  color: var(--gold-deep);
 }
 .mt-manual-cell {
   min-height: 58px;

@@ -844,6 +844,53 @@ test.describe("manual builder (current design)", () => {
       await page.waitForTimeout(200);
       await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-18.${lang}.png`);
     });
+
+    test(`manual builder formation 18-runner mid-scroll (${lang})`, async ({ page }) => {
+      // Phase 3c — the proof of sticky behaviour. A top-of-list capture cannot
+      // see it: scroll the middle runner row to the viewport centre so the
+      // sticky column headers are stuck at the top and the sticky cost bar is
+      // pinned at the bottom (above the tab bar). expect(page) captures the
+      // 390x844 viewport, so the stuck state is what's pinned.
+      await page.unroute("**/api/live");
+      await page.route("**/api/live", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT),
+        }),
+      );
+      await openBuilder(page, lang);
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
+        .click();
+      await expect(page.locator(".mt-matrix-colhead").nth(2)).toBeVisible();
+      // Pick a few horses per position so a ticket builds — the sticky cost bar
+      // is {ticket && isFormationMode}; empty picks → no ticket → no bar.
+      const picks: Array<[number, string]> = [
+        [0, "1"], [0, "2"], [0, "3"],
+        [1, "4"], [1, "5"],
+        [2, "6"],
+      ];
+      for (const [pos, uma] of picks) {
+        await page.locator(`.mt-matrix-cell[data-mt-pos="${pos}"][data-mt-uma="${uma}"]`).click();
+      }
+      await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      // Scroll the middle matrix row to the viewport centre → the sticky column
+      // headers stick at the top and the sticky cost bar pins at the bottom.
+      await page.evaluate(() => {
+        const rows = document.querySelectorAll(".mt-matrix-row");
+        const mid = rows[Math.floor(rows.length / 2)];
+        mid?.scrollIntoView({ block: "center" });
+      });
+      await page.waitForTimeout(300);
+      // Durable assertions (#14 pattern): headers + cost bar stay visible
+      // (sticky) mid-scroll — a baseline alone can't prove sticky behaviour.
+      await expect(page.locator(".mt-matrix-head")).toBeVisible();
+      await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
+      await expect(page).toHaveScreenshot(`manual-builder-formation-18-midscroll.${lang}.png`);
+    });
   }
 });
 

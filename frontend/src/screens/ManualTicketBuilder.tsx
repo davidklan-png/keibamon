@@ -504,6 +504,29 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
         )}
       </div>
 
+      {/* Phase 3c — sticky cost bar (FORMATION mode only): points + cost +
+          if-it-hits, pinned above the bottom tab bar while picking the (tall)
+          matrix. Box mode is a compact grid with the preview already visible
+          below it, so it doesn't need the bar — keeping box-8 unchanged.
+          Placed AFTER the matrix in flow so it never overlays a row; sticky
+          (not fixed) so it reserves its space. */}
+      {ticket && isFormationMode && (
+        <div className="mt-sticky-cost" data-mt-sticky-cost>
+          <span className="mt-sticky-fig">
+            <span className="mt-sticky-label">{t("setFamily.points")}</span>
+            <strong>{ticket.lines.length}</strong>
+          </span>
+          <span className="mt-sticky-fig cost">
+            <span className="mt-sticky-label">{t("mine.cost")}</span>
+            <strong>{yen(ticket.cost)}</strong>
+          </span>
+          <span className="mt-sticky-fig">
+            <span className="mt-sticky-label">{t("mine.ifHits")}</span>
+            <strong>{yen(ticket.avgPayout)}</strong>
+          </span>
+        </div>
+      )}
+
       {/* Unit picker */}
       <div className="mt-manual-section">
         <div className="mt-unit-label">{t("mine.unit")}</div>
