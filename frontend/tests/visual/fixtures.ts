@@ -307,6 +307,30 @@ export const STRUCTURED_TICKETS: CommittedTicket[] = [
   }),
 ];
 
+// ---------------------------------------------------------------------------
+// Full-field coverage (full-field-coverage.md) — a LARGE structured ticket
+// body. The 8-runner STRUCTURED_TICKETS box trifecta is a 4-horse box (24
+// combos). This is an 8-horse box → 8 tiles + P(8,3)=336 combos, stressing
+// TicketLines' box tile set + the "N combos × unit = cost" points line at a
+// selection size + combo count the existing baselines never reach. Separate
+// array (not appended to STRUCTURED_TICKETS) so the ticket-detail describe's
+// existing cardIndex 0/1/2 captures are untouched.
+// ---------------------------------------------------------------------------
+const BOX_SET_LARGE = ["1", "2", "3", "4", "5", "6", "7", "8"]; // P(8,3) = 336
+export const STRUCTURED_TICKETS_LARGE: CommittedTicket[] = [
+  structuredTicket({
+    id: "kb-box-lg",
+    serial: "KB-BOXLG",
+    type: "trifecta",
+    lines: permute(BOX_SET_LARGE, 3),
+    structure: "box",
+    payload: { set: BOX_SET_LARGE },
+    core: BOX_SET_LARGE,
+    mood: "spicier",
+    payoutBase: 18600,
+  }),
+];
+
 /**
  * Item 4 + Item 5 — a deterministic Friends feed for the social-feed visual
  * baseline. Two win shares so the capture pins BOTH reactions surfaces:
