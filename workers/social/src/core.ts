@@ -48,7 +48,8 @@ export interface TicketRow {
    * Stage 4 (0010) derived flat columns — payload stays authoritative; these
    * mirror it so feeds/analytics can filter/sort without parsing JSON. NULL
    * where the payload didn't carry the field (or pre-0010 rows not backfilled).
-   * Not yet SELECTed by the read paths — write-only until feeds migrate.
+   * Read paths still primarily parse the JSON payload; a few are read directly
+   * (e.g. shares reads the flat `cost`), so don't assume these are write-only.
    */
   ticket_type?: string | null;
   line_count?: number | null;

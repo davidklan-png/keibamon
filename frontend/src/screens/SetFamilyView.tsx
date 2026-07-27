@@ -14,7 +14,8 @@
 // 枠連 (bracket quinella) is aggregation-only over the quinella kernel (no new
 // BetType). Its row is DISPLAY-ONLY — it has no Ticket representation, so it
 // can't drive a FillGuide. Omitted entirely when any selected runner lacks a
-// numeric gate (the live path doesn't carry gate yet).
+// numeric gate (null before the barrier draw is published Thu/Fri — the live
+// path DOES carry gate once entries finalise, via the shutuba scrape).
 //
 // Guardrail-clean: descriptive copy only, never betting advice.
 // ============================================================================
