@@ -103,6 +103,15 @@
   --font-body: "M PLUS Rounded 1c", ui-sans-serif, -apple-system, "Segoe UI",
     Roboto, "Noto Sans JP", sans-serif;
   --font-mono: "Space Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Fixed .bottom-tabbar rendered height, MEASURED at 390x844 / DPR 1 with the
+     device safe-area excluded: 1px top border + 6px top padding + 44px button
+     min-height + 6px bottom padding = 57px (verified via getBoundingClientRect
+     on the live tab bar — the two old hardcoded guesses were 72px and 60px).
+     Every element that must clear the bar (ADR-0012) derives from this, so the
+     clearance rule is declared once rather than re-derived per element. Call
+     sites add an explicit +Npx breathing room on top of it. */
+  --bottom-bar-h: 57px;
 }
 
 /* ADR-0007 keyframes (My Tickets surface). */
@@ -171,9 +180,10 @@ a {
 .app {
   max-width: 720px;
   margin: 0 auto;
-  /* Bottom padding clears the fixed .bottom-tabbar (its height + the
-     safe-area inset) so page content is never hidden behind the bar. */
-  padding: 14px 14px calc(72px + env(safe-area-inset-bottom));
+  /* Bottom padding clears the fixed .bottom-tabbar: --bottom-bar-h + 15px
+     breathing room + the safe-area inset, so page content is never hidden
+     behind the bar (ADR-0012). */
+  padding: 14px 14px calc(var(--bottom-bar-h) + 15px + env(safe-area-inset-bottom));
 }
 
 /* ---------- Header ---------- */
@@ -2134,10 +2144,10 @@ select:focus {
   position: fixed;
   left: 50%;
   transform: translateX(-50%);
-  /* Session 1 UX refactor: lift above the persistent .bottom-tabbar
-     (tab bar is fixed bottom with z-index 50; a FAB at bottom:22px was
-     covered by it and its pointer events were stolen — see ADR-0012). */
-  bottom: calc(72px + env(safe-area-inset-bottom));
+  /* Lift above the persistent .bottom-tabbar: --bottom-bar-h + 15px breathing
+     room + safe area (tab bar is fixed bottom z-index 50; a FAB at bottom:22px
+     was covered by it and its pointer events were stolen — see ADR-0012). */
+  bottom: calc(var(--bottom-bar-h) + 15px + env(safe-area-inset-bottom));
   display: inline-flex;
   align-items: center;
   gap: 9px;
@@ -2541,24 +2551,160 @@ select:focus {
   grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
   gap: 6px;
 }
-.mt-manual-formation {
-  display: grid;
-  gap: 12px;
-}
-.mt-manual-position {
+/* ---- Formation matrix (Phase 3a): the field ONCE as rows, one selection
+ * column per finishing position. Replaces the k stacked full-field grids
+ * (54 cells + three scrolls of the same field on an 18-horse trifecta).
+ * Sticky column headers hook on .mt-matrix-head (Phase 3c). ---- */
+.mt-manual-matrix {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   border: 1px solid var(--line);
   border-radius: 8px;
-  padding: 10px;
+  padding: 6px;
   background: #fff;
 }
-.mt-manual-position-head {
+.mt-matrix-head,
+.mt-matrix-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+/* Fixed-width runner column so the header labels and every row's cells line
+ * up; the position columns share the remaining width equally. 148px fits a
+ * realistic JA name on its own line at 11px (the 18-runner fixture's 5-8 char
+ * names land intact) and leaves ~65px per selection cell at k=3 (>44px tap). */
+.mt-matrix-corner,
+.mt-matrix-runner {
+  flex: 0 0 148px;
+  min-width: 0;
+}
+.mt-matrix-runner {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 3px 4px;
+}
+.mt-matrix-runner-name {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.mt-matrix-runner-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  margin-bottom: 8px;
-  color: var(--muted);
-  font-size: 11px;
+  gap: 5px;
+}
+/* Read-only 印 glyph (Phase 3b). Display-only — no tap target. */
+.runner-mark-glyph {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 800;
+  color: var(--gold-deep);
+  min-width: 14px;
+  text-align: center;
+}
+.mt-matrix-colhead {
+  flex: 1 1 0;
+  min-width: 0;
+  text-align: center;
+  font-size: 10px;
   font-weight: 900;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.mt-matrix-cell {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  font-family: var(--font-mono);
+  cursor: pointer;
+  padding: 0;
+}
+.mt-matrix-cell.on {
+  border-color: var(--turf);
+  background: var(--turf);
+  color: #fff;
+}
+
+/* ---- Phase 3c: sticky column headers + sticky cost bar ----
+ * The scroll parent is the body/window — .app has no overflow — so sticky
+ * pins against the viewport (verified: no inner scroll container). */
+
+/* Headers stick below the viewport top while the matrix scrolls, so 1着/2着/3着
+ * survive an 18-runner scroll. Opaque bg so rows don't bleed through. Nothing
+ * sticky sits above the builder (the app header scrolls away), so top:0. */
+.mt-matrix-head {
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 5;
+  border-bottom: 1px solid var(--line);
+}
+
+/* Sticky cost bar: pins to the viewport bottom, clearing the fixed .bottom-
+ * tabbar (ADR-0012: --bottom-bar-h + 15px + safe area), so points + cost +
+ * if-it-hits stay visible WHILE picking. Placed AFTER the matrix in flow → it
+ * never overlays a row (every row is above it), and it is sticky not fixed so
+ * it RESERVES its flow space — it never covers the checkboxes it reports on
+ * (the netkeiba-badge mistake). +15px (not the bare minimum) matches the
+ * breathing room .app and .mt-fab use, so one clearance value governs all
+ * three — and gives tolerance: --bottom-bar-h was measured at default type
+ * size, and the tab bar is 1px border + 6px + 44px button + 6px, most of which
+ * GROWS if the user raises text size. At +3px the cost bar slid under the tab
+ * bar almost immediately — and because the tab bar paints above it (z-index 50
+ * vs 6), that overlap was SILENT. +15px keeps it clear of the bar through that
+ * growth. */
+.mt-sticky-cost {
+  position: sticky;
+  bottom: calc(var(--bottom-bar-h) + 15px + env(safe-area-inset-bottom));
+  z-index: 6;
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  margin-top: 8px;
+  background: var(--tint-2);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+}
+.mt-sticky-cost .mt-sticky-fig {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.mt-sticky-cost .mt-sticky-label {
+  /* 11px: these sit on the element telling the user what they are about to
+     spend. 9px was the smallest text in the app (smaller than .foot-version's
+     10px and .tl-col-label's 11px) — the wrong place to economise on
+     legibility. The 3 figures + gaps fit the 390px row with room to spare. */
+  font-size: 11px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.mt-sticky-cost strong {
+  font: 800 14px/1 ui-monospace, monospace;
+  color: var(--ink);
+}
+.mt-sticky-cost .mt-sticky-fig.cost strong {
+  color: var(--gold-deep);
 }
 .mt-manual-cell {
   min-height: 58px;
@@ -4330,71 +4476,6 @@ select:focus {
   border-radius: 6px;
 }
 
-/* Ordered position columns with directional arrows. Replaces the flat number
- * grid for formation/wheel tickets. */
-.fillguide-ordered {
-  display: flex;
-  align-items: stretch;
-  gap: 6px;
-  margin-bottom: 12px;
-  flex-wrap: wrap;
-}
-
-.fillguide-pos-col {
-  flex: 1 1 0;
-  min-width: 70px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: var(--panel);
-  padding: 6px;
-}
-
-.fillguide-pos-label {
-  font-size: 10px;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  margin-bottom: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.fillguide-pos-tag {
-  background: var(--turf-deep);
-  color: #fff;
-  font: 800 9px/1 ui-monospace, monospace;
-  padding: 2px 4px;
-  border-radius: 4px;
-}
-
-.fillguide-pos-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 3px;
-}
-
-.fillguide-pos-chip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 22px;
-  padding: 0 4px;
-  border: 1px solid var(--turf-deep);
-  border-radius: 5px;
-  background: var(--tint);
-  font: 800 12px/1 ui-monospace, monospace;
-  color: var(--ink);
-}
-
-.fillguide-arrow {
-  display: flex;
-  align-items: center;
-  font: 800 16px/1 ui-monospace, monospace;
-  color: var(--gold);
-}
-
 /* Share foot: not-advice micro-line (satisfies the exportTicketCard gate) +
  * share button. Mirrors the MyTickets detail-card foot convention. */
 .fillguide-foot {
@@ -4769,7 +4850,7 @@ select:focus {
 
 /* ---- misc social chrome ---- */
 .mt-bell-bar { display: flex; justify-content: flex-end; padding: 6px 12px 0; }
-.kbm-toast { position: fixed; left: 50%; bottom: calc(90px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; padding: 11px 18px; border-radius: 999px; background: #1a1a1a; color: #fff; font-weight: 700; font-size: 13px; }
+.kbm-toast { position: fixed; left: 50%; bottom: calc(var(--bottom-bar-h) + 33px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 70; padding: 11px 18px; border-radius: 999px; background: #1a1a1a; color: #fff; font-weight: 700; font-size: 13px; }
 
 /* MyTickets modals (ReportModal + DeleteTicketModal). These classes were
    referenced but unstyled — added with the delete-confirm work. */

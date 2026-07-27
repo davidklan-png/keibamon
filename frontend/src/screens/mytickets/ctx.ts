@@ -13,6 +13,7 @@ import type { useI18n } from "../../i18n";
 import type { LiveRace } from "../../api";
 import type { Runner } from "../../lib/fairvalue";
 import type { CommittedTicket, MoodKey, Ticket } from "../../lib/types";
+import type { ImpressionMap } from "../../lib/impressions";
 import type { FriendsAvatar, PublicProfile } from "../../auth/socialClient";
 import type { mtPickFeature, MtView } from "../../lib/mytickets-view";
 
@@ -40,6 +41,12 @@ export interface MtCtx {
   races: LiveRace[];
   featRunners: Runner[];
   options: { mood: MoodKey; ticket: Ticket }[];
+  /**
+   * The impression store — READ-ONLY in the manual builder, where it drives
+   * the read-only mark glyph in the matrix row (Phase 3b). The builder never
+   * writes; mark-setting stays on RaceScreen (RunnerMark / ADR-0016).
+   */
+  impressions: ImpressionMap;
 
   // ticket state
   tickets: CommittedTicket[];

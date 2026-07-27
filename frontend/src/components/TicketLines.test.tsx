@@ -25,7 +25,7 @@ import {
   buildWheelTicket,
 } from "../lib/recommender";
 import type { Ticket } from "../lib/types";
-import { TicketLines, deriveBoxSet } from "./TicketLines";
+import { TicketLines } from "./TicketLines";
 
 const RUNNERS: Runner[] = [
   { uma: "1", odds: 2.4, name: "A" },
@@ -101,6 +101,38 @@ describe("TicketLines", () => {
     );
     expect(html).toContain("BOX");
     expect(html).not.toContain("tl-points");
+  });
+
+  // ---- badge={false} (FillGuide mounts TicketLines badge-suppressed) ------
+  it("badge={false}: suppresses the structure-badge head (body still renders)", () => {
+    const ticket = buildBoxTicket("quinella", ["1", "2", "3"], p, allUmas, 100, "tl");
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} badge={false} />,
+    );
+    expect(html).not.toContain("tl-head");
+    expect(html).not.toContain("tl-badge-box");
+    // The body still renders (the set as tiles).
+    expect(html).toContain("tl-tile");
+  });
+
+  it("badge={false}: also suppresses the wheel's multi-axis head tag", () => {
+    const ticket = buildWheelTicket(
+      "trifecta",
+      ["1", "2"],
+      ["3", "4"],
+      1,
+      p,
+      allUmas,
+      100,
+      "tl",
+    );
+    const html = renderToStaticMarkup(
+      <TicketLines ticket={ticket!} unitStake={100} badge={false} />,
+    );
+    expect(html).not.toContain("tl-head");
+    expect(html).not.toContain("tl-multi");
+    // Axis + partners columns still render.
+    expect(html).toContain("tl-col");
   });
 
   it("box: points=\"count\" renders the combo total with no unit/cost", () => {
@@ -349,65 +381,7 @@ describe("TicketLines", () => {
     expect(html).toContain("tl-chip");
   });
 
-  // ---- deriveBoxSet direct ---------------------------------------------
-  it("deriveBoxSet: full ordered box → set; partial → null; single → null", () => {
-    expect(
-      deriveBoxSet(
-        flatTicket("trifecta", [
-          ["1", "2", "3"],
-          ["1", "3", "2"],
-          ["2", "1", "3"],
-          ["2", "3", "1"],
-          ["3", "1", "2"],
-          ["3", "2", "1"],
-        ]),
-      ),
-    ).toEqual(["1", "2", "3"]);
-    expect(
-      deriveBoxSet(
-        flatTicket("trifecta", [
-          ["1", "2", "3"],
-          ["2", "1", "3"],
-        ]),
-      ),
-    ).toBeNull();
-    // A single combination (2-horse quinella = C(2,2)=1) is not a multi-way box.
-    expect(deriveBoxSet(flatTicket("quinella", [["1", "2"]]))).toBeNull();
-  });
-
-  it("deriveBoxSet: bracket full cross-box → set; with ゾロ目 → set; partial → null", () => {
-    // 3 brackets {3,7,8}: C(3,2)=3 cross pairs → the bracket set.
-    expect(
-      deriveBoxSet(
-        flatTicket("bracket_quinella", [
-          ["3", "7"],
-          ["3", "8"],
-          ["7", "8"],
-        ]),
-      ),
-    ).toEqual(["3", "7", "8"]);
-    // Same full cross-box PLUS a legal 3-3 ゾロ目 line — still the bracket set
-    // (same-bracket pairs are permitted, not required).
-    expect(
-      deriveBoxSet(
-        flatTicket("bracket_quinella", [
-          ["3", "7"],
-          ["3", "8"],
-          ["7", "8"],
-          ["3", "3"],
-        ]),
-      ),
-    ).toEqual(["3", "7", "8"]);
-    // Only 2 of 3 cross pairs → null (false-positive guard).
-    expect(
-      deriveBoxSet(
-        flatTicket("bracket_quinella", [
-          ["3", "7"],
-          ["3", "8"],
-        ]),
-      ),
-    ).toBeNull();
-  });
+  // ---- deriveBoxSet direct cases live in lib/ticketStructure.test.ts ----
 
   // ---- Old share snapshot (no structure) -------------------------------
   it("legacy snapshot: a bare ticket with no structure renders via the chip path", () => {

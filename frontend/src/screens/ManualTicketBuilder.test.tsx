@@ -22,7 +22,7 @@ import { setLang } from "../i18n";
 import { winProbs, type Runner } from "../lib/fairvalue";
 import { ManualTicketBuilder } from "./ManualTicketBuilder";
 import type { ManualTicketInitial } from "./ManualTicketBuilder";
-import type { Ticket } from "../lib/types";
+import type { IntuitionState, Ticket } from "../lib/types";
 
 const RUNNERS: Runner[] = [
   { uma: "1", odds: 2.4, name: "A" },
@@ -41,6 +41,7 @@ void p;
 
 interface MountOpts {
   initial?: ManualTicketInitial;
+  marks?: Record<string, IntuitionState>;
 }
 
 function mount(opts: MountOpts = {}): {
@@ -60,6 +61,7 @@ function mount(opts: MountOpts = {}): {
         unit={100}
         onUnitChange={vi.fn()}
         initial={opts.initial}
+        marks={opts.marks}
         onRegister={onRegister}
         onCancel={vi.fn()}
       />,
@@ -90,10 +92,11 @@ function clickType(container: HTMLElement, label: string): void {
 }
 
 function clickPositionCell(container: HTMLElement, positionIndex: number, uma: string): void {
-  const positions = container.querySelectorAll(".mt-manual-position");
-  expect(positions.length).toBeGreaterThan(positionIndex);
-  const cell = Array.from(positions[positionIndex].querySelectorAll(".mt-manual-cell")).find(
-    (b) => b.querySelector(".mt-manual-horse-num")?.textContent === uma,
+  // Phase 3a matrix: each selection cell is a .mt-matrix-cell carrying its
+  // position index + uma as data attributes (the field is now rows × columns,
+  // not k stacked grids).
+  const cell = container.querySelector(
+    `.mt-matrix-cell[data-mt-pos="${positionIndex}"][data-mt-uma="${uma}"]`,
   );
   expect(cell, `position ${positionIndex + 1} uma cell ${uma} should exist`).toBeTruthy();
   act(() => {
@@ -226,7 +229,7 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     const { container, onRegister } = mount();
 
     clickType(container, "Trifecta");
-    expect(container.querySelectorAll(".mt-manual-position")).toHaveLength(3);
+    expect(container.querySelectorAll(".mt-matrix-colhead")).toHaveLength(3);
 
     clickPositionCell(container, 0, "6");
     clickPositionCell(container, 1, "3");
@@ -256,6 +259,46 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     expect(ticket.cost).toBe(600);
   });
 
+  it("matrix contract: toggling a horse into position 2 records it in structurePayload.positions[1]", () => {
+    // Phase 3a contract — selection behaviour is logic, not pixels: toggling a
+    // horse in the 2nd position column lands in positions[1] of the built
+    // ticket, and ONLY there. Register needs every position non-empty, so fill
+    // 1st + 3rd minimally; the assertion is about position 2.
+    const { container, onRegister } = mount();
+    clickType(container, "Trifecta");
+    clickPositionCell(container, 1, "4"); // ← the position-2 toggle under test
+    clickPositionCell(container, 0, "2");
+    clickPositionCell(container, 2, "5");
+    clickCta(container);
+
+    expect(onRegister).toHaveBeenCalledTimes(1);
+    const { ticket } = onRegister.mock.calls[0][0] as { ticket: Ticket };
+    expect(ticket.structure).toBe("formation");
+    const positions = (ticket.structurePayload as { positions: string[][] }).positions;
+    expect(positions[1]).toEqual(["4"]); // position 2 holds exactly the toggled horse
+    expect(positions[0]).toEqual(["2"]);
+    expect(positions[2]).toEqual(["5"]);
+  });
+
+  it("matrix mark glyph is READ-ONLY (clicking it writes nothing)", () => {
+    // Phase 3b: the builder shows marks as a memory aid, never as a write path.
+    // The glyph is a non-interactive <span>; the builder receives no mark-write
+    // callback, so a click cannot reach the impression store. Mark-setting stays
+    // on RaceScreen (RunnerMark / ADR-0016 inline-mark).
+    const { container } = mount({ marks: { "3": "anchor" } });
+    clickType(container, "Trifecta");
+    const glyphs = Array.from(container.querySelectorAll(".runner-mark-glyph"));
+    expect(glyphs.length).toBeGreaterThan(0);
+    // Horse 3's glyph shows the anchor mark (◎); the rest show "—".
+    expect(glyphs.some((g) => g.textContent === "◎")).toBe(true);
+    // Every glyph is a non-interactive <span> — NOT a button / no tap target.
+    for (const g of glyphs) expect(g.tagName).toBe("SPAN");
+    // Clicking a glyph is a no-op: no handler, no write, glyph unchanged.
+    const anchorGlyph = glyphs.find((g) => g.textContent === "◎")!;
+    act(() => anchorGlyph.dispatchEvent(new MouseEvent("click", { bubbles: true })));
+    expect(anchorGlyph.textContent).toBe("◎");
+  });
+
   it("reopens a saved formation with its position payload intact", () => {    const initial: ManualTicketInitial = {
       id: "kb-formation",
       type: "trifecta",
@@ -275,7 +318,7 @@ describe("ManualTicketBuilder — locked/box edit mode", () => {
     };
     const { container, onRegister } = mount({ initial });
 
-    expect(container.querySelectorAll(".mt-manual-position")).toHaveLength(3);
+    expect(container.querySelectorAll(".mt-matrix-colhead")).toHaveLength(3);
     clickCta(container);
 
     expect(onRegister).toHaveBeenCalledTimes(1);

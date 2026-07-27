@@ -12,10 +12,10 @@ import { impressionsByRace } from "../lib/impressions";
 import { normalizeName } from "../lib/normalizeName";
 import type { LiveSnapshot, LiveRace } from "../api";
 import { raceHasLiveOdds } from "../lib/mytickets-view";
-import { fmt } from "../lib/format";
 import { FormPanel } from "./FormPanel";
 import { TicketStudio } from "./TicketStudio";
 import { RunnerMark } from "./RunnerMark";
+import { RunnerRow } from "../components/RunnerRow";
 
 // ---------------------------------------------------------------------------
 // Grade ladder — one source for both the badge render and the popularScore
@@ -424,14 +424,13 @@ export function RaceScreen(props: RaceScreenProps) {
                       onClick={() => setOpenUma(isOpen ? null : r.uma)}
                       aria-pressed={isOpen}
                     >
-                      <span className="uma">{r.uma}</span>
-                      <span>
-                        <span className="nm">{r.name || `#${r.uma}`}</span>
-                        <span className="odds-line">
-                          <span className="odds-value">{fmt(r.odds, 1)}</span>
-                          {pending && <span className="pc">{t("race.estOdds")}</span>}
-                        </span>
-                      </span>
+                      <RunnerRow
+                        layout="race"
+                        umaban={r.uma}
+                        name={r.name ?? null}
+                        odds={r.odds}
+                        oddsPending={pending}
+                      />
                     </button>
                     <RunnerMark
                       raceId={raceId}
@@ -470,6 +469,7 @@ export function RaceScreen(props: RaceScreenProps) {
       {markedSet.length >= 2 && hasMarket && (
         <button
           className="btn gold"
+          data-testid="studio-cta"
           style={{ width: "100%", marginTop: 8 }}
           onClick={() => setBoxOpen(true)}
         >

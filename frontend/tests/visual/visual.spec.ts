@@ -13,7 +13,7 @@
 // Language:         set via `keibamon.lang` localStorage before each visit.
 // ============================================================================
 import { test, expect } from "@playwright/test";
-import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS } from "./fixtures";
+import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS, LAYOUT_FIELD_18_SNAPSHOT } from "./fixtures";
 
 const LANGS = ["en", "ja"] as const;
 
@@ -632,6 +632,347 @@ test.describe("ticket-detail structured modes", () => {
       await expect(page).toHaveScreenshot(`ticket-detail-wheel.${lang}.png`);
     });
   }
+});
+
+// ============================================================================
+// Ticket-studio (ADR-0011 structural surface) — SetFamilyView + FormationView
+// + WheelView + FillGuide. This whole surface had ZERO visual coverage until
+// this block: it is only reachable via the "Box these N horses" CTA, which no
+// test opened (grep for TicketStudio|fillguide|SetFamily|FormationView|WheelView
+// in this file returned 0). Captures the studio LIST layer + FillGuide in box
+// / formation / wheel. The formation/wheel FillGuide bodies are the shared
+// <TicketLines> after ticket-structure-unify Phase 2.
+//
+// 枠連 (bracket) FillGuide is NOT captured here: SetFamilyView's bracket row is
+// display-only (no Ticket representation) and the live path carries no `gate`,
+// so no studio path produces a bracket_quinella FillGuide. That render is
+// pinned only by the FillGuide unit test (bracketBoxTicket → 1-8 waku grid).
+//
+// Driven by 3 seeded impressions on the fixture G1 (1 anchor + 2 includes) →
+// markedSet=[1,3,6], anchor=1 → the CTA + all three list layers (Wheel needs
+// the anchor). Each FillGuide mode opens the studio fresh and taps its row, so
+// there's no fragile back-button navigation between captures. EN + JA.
+// ============================================================================
+test.describe("ticket-studio structural surface", () => {
+  // horse_key = normalizeName(name): NFKC + drop ALL whitespace (no lowercase).
+  // "Croix du Nord"→"CroixduNord", "Pegasus Seiya"→"PegasusSeiya",
+  // "Ho O Biscay"→"HoOBiscay".
+  const STUDIO_IMPRESSIONS: Record<string, Record<string, unknown>> = {
+    "jra-20260621-05-11|CroixduNord": {
+      mark: "anchor",
+      umaban: 1,
+      odds_when_marked: 2.4,
+      odds_snapshot_at: null,
+      formed_at: 100,
+    },
+    "jra-20260621-05-11|PegasusSeiya": {
+      mark: "like",
+      umaban: 3,
+      odds_when_marked: 7.2,
+      odds_snapshot_at: null,
+      formed_at: 200,
+    },
+    "jra-20260621-05-11|HoOBiscay": {
+      mark: "priceHorse",
+      umaban: 6,
+      odds_when_marked: 5.1,
+      odds_snapshot_at: null,
+      formed_at: 300,
+    },
+  };
+
+  test.beforeEach(async ({ page }) => {
+    await installApiMocks(page);
+  });
+
+  async function openStudio(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+  ): Promise<void> {
+    await page.addInitScript(([l, seed]) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+        window.localStorage.setItem("kbm.impressions.v1", JSON.stringify(seed));
+      } catch {
+        /* ignore */
+      }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, [lang, STUDIO_IMPRESSIONS] as const);
+    await page.goto("/");
+    await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
+    // The CTA appears once ≥2 include-marks resolve AND a market exists. Let the
+    // initial loadLive settle so the button is enabled.
+    await page.waitForTimeout(600);
+    await expect(page.getByTestId("studio-cta")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("studio-cta").click();
+    await expect(page.locator(".kbm-modal")).toBeVisible();
+    await expect(page.locator(".setfamily-view")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  for (const lang of LANGS) {
+    test(`studio list layer (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      // All three list layers render — Wheel is gated on the seeded anchor.
+      await expect(page.locator(".setfamily-view")).toBeVisible();
+      await expect(page.locator(".formation-view")).toBeVisible();
+      await expect(page.locator(".wheel-view")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".kbm-modal-card")).toHaveScreenshot(`studio-list.${lang}.png`);
+    });
+
+    test(`studio FillGuide box (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      await page.locator(".setfamily-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Box = the field grid (highlighted cells), NOT the TicketLines columns.
+      await expect(page.locator(".fillguide-cell.on").first()).toBeVisible();
+      // Compliance element: present AND visible — an assertion, not just a
+      // baseline. A baseline can be regenerated around a regression; this can't
+      // (the exportTicketCard gate asserts on exactly this element, and its
+      // failure is silent — doShare swallows MissingNotAdvice).
+      await expect(page.locator(".fillguide [data-not-advice]")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-box.${lang}.png`);
+    });
+
+    test(`studio FillGuide formation (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      await page.locator(".formation-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Formation body = the shared TicketLines columns (post-Phase-2).
+      await expect(page.locator(".tl-cols")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-formation.${lang}.png`);
+    });
+
+    test(`studio FillGuide wheel (${lang})`, async ({ page }) => {
+      await openStudio(page, lang);
+      await page.locator(".wheel-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      // Wheel body = TicketLines axis + partners, axis tagged on its slot.
+      await expect(page.locator(".tl-axis-tag")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-wheel.${lang}.png`);
+    });
+  }
+});
+
+// ============================================================================
+// Manual builder (current design) — the open ManualTicketBuilder had ZERO
+// visual coverage (mytickets-new-manual-entry only scrolls the CTA into view;
+// it never opens the builder). This block opens it and captures TODAY's design
+// at two field sizes: the 8-runner fixture (box + formation) and a synthetic
+// 18-runner field (formation). The 18-runner formation capture is the one that
+// shows the three-stacked-grids problem ticket-structure-unify Phase 3a exists
+// to fix — it is the BEFORE image for 3a's handback.
+//
+// The 18-runner field is opt-in (an /api/live override with LAYOUT_FIELD_18);
+// the default 8-runner snapshot is unchanged so no other baseline moves.
+// ============================================================================
+test.describe("manual builder (current design)", () => {
+  test.beforeEach(async ({ page }) => {
+    await installApiMocks(page);
+  });
+
+  async function openBuilder(
+    page: import("@playwright/test").Page,
+    lang: "en" | "ja",
+  ): Promise<void> {
+    await page.addInitScript((l) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+      } catch {
+        /* ignore */
+      }
+      const FROZEN = Date.parse("2026-06-21T13:00:00+09:00");
+      Date.now = () => FROZEN;
+    }, lang);
+    await page.goto("/");
+    await page.getByTestId("tab-mine").click();
+    await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(400);
+    await page.locator(".mt-fab").click();
+    await expect(page.locator(".mt-new")).toBeVisible();
+    await page.locator(".mt-manual-entry").click();
+    await expect(page.locator(".mt-manual")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  for (const lang of LANGS) {
+    test(`manual builder box 8-runner (${lang})`, async ({ page }) => {
+      await openBuilder(page, lang);
+      // Default is quinella / box mode (the compact number grid).
+      await expect(page.locator(".mt-manual-grid")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-box-8.${lang}.png`);
+    });
+
+    test(`manual builder formation 8-runner (${lang})`, async ({ page }) => {
+      await openBuilder(page, lang);
+      // Switch to an ordered bet type → formation mode (stacked per-position grids).
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
+        .click();
+      await expect(page.locator(".mt-manual-matrix")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-8.${lang}.png`);
+    });
+
+    test(`manual builder formation 18-runner (${lang})`, async ({ page }) => {
+      // Override /api/live with the synthetic 18-runner field (opt-in; default
+      // snapshot unchanged). unroute the beforeEach route first so the override
+      // is in place before goto.
+      await page.unroute("**/api/live");
+      await page.route("**/api/live", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT),
+        }),
+      );
+      await openBuilder(page, lang);
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
+        .click();
+      // Trifecta formation matrix = 3 position columns (was 3 stacked grids).
+      await expect(page.locator(".mt-matrix-colhead").nth(2)).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await page.waitForTimeout(200);
+      await expect(page.locator(".mt-manual")).toHaveScreenshot(`manual-builder-formation-18.${lang}.png`);
+    });
+
+    test(`manual builder formation 18-runner mid-scroll (${lang})`, async ({ page }) => {
+      // Phase 3c — the proof of sticky behaviour. A top-of-list capture cannot
+      // see it: scroll the middle runner row to the viewport centre so the
+      // sticky column headers are stuck at the top and the sticky cost bar is
+      // pinned at the bottom (above the tab bar). expect(page) captures the
+      // 390x844 viewport, so the stuck state is what's pinned.
+      await page.unroute("**/api/live");
+      await page.route("**/api/live", (route) =>
+        route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT),
+        }),
+      );
+      await openBuilder(page, lang);
+      await page
+        .locator(".mt-manual-type")
+        .filter({ hasText: lang === "en" ? "Trifecta" : "3連単" })
+        .click();
+      await expect(page.locator(".mt-matrix-colhead").nth(2)).toBeVisible();
+      // Pick a few horses per position so a ticket builds — the sticky cost bar
+      // is {ticket && isFormationMode}; empty picks → no ticket → no bar.
+      const picks: Array<[number, string]> = [
+        [0, "1"], [0, "2"], [0, "3"],
+        [1, "4"], [1, "5"],
+        [2, "6"],
+      ];
+      for (const [pos, uma] of picks) {
+        await page.locator(`.mt-matrix-cell[data-mt-pos="${pos}"][data-mt-uma="${uma}"]`).click();
+      }
+      await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      // Scroll the middle matrix row to the viewport centre → the sticky column
+      // headers stick at the top and the sticky cost bar pins at the bottom.
+      await page.evaluate(() => {
+        const rows = document.querySelectorAll(".mt-matrix-row");
+        const mid = rows[Math.floor(rows.length / 2)];
+        mid?.scrollIntoView({ block: "center" });
+      });
+      await page.waitForTimeout(300);
+      // Durable assertions (#14 pattern): headers + cost bar stay visible
+      // (sticky) mid-scroll — a baseline alone can't prove sticky behaviour.
+      await expect(page.locator(".mt-matrix-head")).toBeVisible();
+      await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
+      await expect(page).toHaveScreenshot(`manual-builder-formation-18-midscroll.${lang}.png`);
+    });
+  }
+
+  // Phase 3 close-out — two bounding-box invariants a baseline cannot see. The
+  // sticky cost bar must never (a) overlap the matrix row it reports on, and
+  // (b) slide under the fixed bottom tab bar. (b) is the one that degrades under
+  // type scaling: --bottom-bar-h was measured at DEFAULT type size, and the tab
+  // bar's height grows with text size, so the cost bar's clearance has to absorb
+  // that growth — which is why it is +15px, not the bare minimum. The tab bar
+  // also paints ABOVE the cost bar (z-index 50 vs 6), so an overlap is SILENT;
+  // this check is the only thing that would go red. Language-independent — EN.
+  test("manual builder cost bar clears last row + tab bar", async ({ page }) => {
+    await page.unroute("**/api/live");
+    await page.route("**/api/live", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT),
+      }),
+    );
+    await openBuilder(page, "en");
+    await page
+      .locator(".mt-manual-type")
+      .filter({ hasText: "Trifecta" })
+      .click();
+    await expect(page.locator(".mt-matrix-colhead").nth(2)).toBeVisible();
+    // Pick horses per position so a ticket builds — the sticky bar is
+    // {ticket && isFormationMode}; empty picks → no ticket → no bar.
+    const picks: Array<[number, string]> = [
+      [0, "1"], [0, "2"], [0, "3"],
+      [1, "4"], [1, "5"],
+      [2, "6"],
+    ];
+    for (const [pos, uma] of picks) {
+      await page.locator(`.mt-matrix-cell[data-mt-pos="${pos}"][data-mt-uma="${uma}"]`).click();
+    }
+    await expect(page.locator("[data-mt-sticky-cost]")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+
+    // (a) At the END of the list, the last row sits above the cost bar in flow
+    //     (the netkeiba-badge mistake was a FIXED bar floating over the rows —
+    //     sticky + flow order makes that impossible; this pins the invariant).
+    await page.evaluate(() => window.scrollTo(0, Number.MAX_SAFE_INTEGER));
+    await page.waitForTimeout(300);
+    const atEnd = await page.evaluate(() => {
+      const rows = document.querySelectorAll(".mt-matrix-row");
+      const last = rows[rows.length - 1] as HTMLElement | undefined;
+      const cost = document.querySelector("[data-mt-sticky-cost]") as HTMLElement | null;
+      if (!last || !cost) return null;
+      return {
+        lastBottom: Math.round(last.getBoundingClientRect().bottom),
+        costTop: Math.round(cost.getBoundingClientRect().top),
+      };
+    });
+    expect(atEnd, "last row + sticky cost bar present").not.toBeNull();
+    expect(
+      atEnd!.lastBottom,
+      "last runner row bottom must sit at/above the sticky cost bar top at list end",
+    ).toBeLessThanOrEqual(atEnd!.costTop);
+
+    // (b) With the cost bar PINNED — scroll the last row to the viewport bottom,
+    //     which keeps the cost bar stuck just above the tab bar — it must clear
+    //     the tab bar's top edge. This is the type-scaling-sensitive invariant.
+    await page.evaluate(() => {
+      const rows = document.querySelectorAll(".mt-matrix-row");
+      rows[rows.length - 1]?.scrollIntoView({ block: "end" });
+    });
+    await page.waitForTimeout(300);
+    const pinned = await page.evaluate(() => {
+      const cost = document.querySelector("[data-mt-sticky-cost]") as HTMLElement | null;
+      const tab = document.querySelector(".bottom-tabbar") as HTMLElement | null;
+      if (!cost || !tab) return null;
+      return {
+        costBottom: Math.round(cost.getBoundingClientRect().bottom),
+        tabTop: Math.round(tab.getBoundingClientRect().top),
+      };
+    });
+    expect(pinned, "sticky cost bar + bottom tab bar present").not.toBeNull();
+    expect(
+      pinned!.costBottom,
+      "sticky cost bar must clear the bottom tab bar (the type-scaling invariant)",
+    ).toBeLessThanOrEqual(pinned!.tabTop);
+  });
 });
 
 // Guard against the regression that bit this branch: hiding .foot-version in

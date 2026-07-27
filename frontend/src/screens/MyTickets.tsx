@@ -94,6 +94,8 @@ interface MyTicketsProps {
   openTicketId: string | null;
   /** Item 4 — callback once `openTicketId` has been consumed (opened or dropped). */
   onTicketOpened: () => void;
+  /** READ-ONLY in the manual builder (drives the matrix mark glyph, Phase 3b). */
+  impressions: ImpressionMap;
 }
 
 // ADR-0007 Phase 1 / Session 2 — branches on auth: signed-out renders the
@@ -142,7 +144,7 @@ export function MyTicketsHome({ snap, impressions, openTicketId, onTicketOpened 
 
   return ageVerified ? (
     <main className="app">
-      <MyTickets snap={snap} userId={userId} getToken={getToken} openTicketId={openTicketId} onTicketOpened={onTicketOpened} />
+      <MyTickets snap={snap} userId={userId} getToken={getToken} openTicketId={openTicketId} onTicketOpened={onTicketOpened} impressions={impressions} />
       <Footer />
     </main>
   ) : (
@@ -150,7 +152,7 @@ export function MyTicketsHome({ snap, impressions, openTicketId, onTicketOpened 
   );
 }
 
-function MyTickets({ snap, userId, getToken, openTicketId, onTicketOpened }: MyTicketsProps) {
+function MyTickets({ snap, userId, getToken, openTicketId, onTicketOpened, impressions }: MyTicketsProps) {
   const { t, tFmt, lang } = useI18n();
   const ja = lang === "ja";
 
@@ -977,6 +979,7 @@ function MyTickets({ snap, userId, getToken, openTicketId, onTicketOpened }: MyT
     races: (snap?.races || []).filter((race) => (race.runners || []).length > 0),
     featRunners,
     options,
+    impressions,
     tickets,
     detailTk,
     selIdx,

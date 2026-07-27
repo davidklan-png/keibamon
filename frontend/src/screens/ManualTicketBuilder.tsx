@@ -36,8 +36,9 @@ import {
   priceLines,
   runnersByBracket,
 } from "../lib/manualBuilder";
-import type { FormationPayload, Ticket } from "../lib/types";
+import type { FormationPayload, IntuitionState, Ticket } from "../lib/types";
 import { TicketLines } from "../components/TicketLines";
+import { RunnerRow } from "../components/RunnerRow";
 
 export interface ManualTicketInitial {
   id?: string;
@@ -56,6 +57,12 @@ export interface ManualTicketBuilderProps {
   onUnitChange: (n: number) => void;
   /** When present, opens the builder pre-filled (edit-in-place). */
   initial?: ManualTicketInitial;
+  /**
+   * READ-ONLY intuition marks keyed by uma (Phase 3b) — drives the read-only
+   * 印 glyph in the matrix row. The builder never writes; this is a memory aid
+   * showing marks set elsewhere (RaceScreen). Mark-setting stays there.
+   */
+  marks?: Record<string, IntuitionState>;
   /** Built-ticket callback. Parent decides POST vs PATCH path. */
   onRegister: (built: { ticket: Ticket; id?: string }) => void;
   /** Friend Interactions Phase 3 — Share (opens FriendPicker). Optional. */
@@ -73,6 +80,11 @@ const BIG_LINES = 50;
 
 function isOrderedType(type: BetType): boolean {
   return type === "exacta" || type === "trifecta";
+}
+
+/** i18n key for the (i+1)th finishing-position label (1着 / 2着 / 3着). */
+function posKeyFor(posIndex: number): string {
+  return posIndex === 0 ? "fillGuide.pos1" : posIndex === 1 ? "fillGuide.pos2" : "fillGuide.pos3";
 }
 
 function emptyPositions(type: BetType): string[][] {
@@ -95,7 +107,7 @@ function initialFormationPositions(initial?: ManualTicketInitial): string[][] | 
 
 export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
   const { t, tFmt } = useI18n();
-  const { runners, unit, onUnitChange, initial, onRegister, onCancel, onShare } = props;
+  const { runners, unit, onUnitChange, initial, marks, onRegister, onCancel, onShare } = props;
 
   // De-vig the win market for this race once per runners change. The builder
   // is opened with a fresh snapshot; the parent's existing 45s poll keeps
@@ -415,26 +427,52 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           )}
         </div>
         {isFormationMode ? (
-          <div className="mt-manual-formation">
-            {Array.from({ length: k }, (_, posIndex) => {
-              const selected = new Set(formationPositions[posIndex] ?? []);
-              const posKey =
-                posIndex === 0
-                  ? "fillGuide.pos1"
-                  : posIndex === 1
-                    ? "fillGuide.pos2"
-                    : "fillGuide.pos3";
+          // Phase 3a — runners × positions matrix: the field appears ONCE as
+          // rows, one selection column per finishing position (k = 2 exacta,
+          // 3 trifecta). Replaces k stacked full-field grids (54 cells + three
+          // scrolls of the same field on an 18-horse trifecta). Box mode stays
+          // the compact number grid below — different selection, different
+          // layout. Sticky column headers hook on .mt-matrix-head (Phase 3c).
+          <div className="mt-manual-matrix" role="list">
+            <div className="mt-matrix-head" role="presentation">
+              <span className="mt-matrix-corner" />
+              {Array.from({ length: k }, (_, posIndex) => (
+                <span key={posIndex} className="mt-matrix-colhead">
+                  {t(posKeyFor(posIndex))}
+                </span>
+              ))}
+            </div>
+            {umaCells.map((u) => {
+              const runner = runnerByUma.get(u);
+              const odds = runner?.odds ?? 0;
+              const oddsLabel = odds > 0 ? `${odds.toFixed(1)}×` : "—";
               return (
-                <div className="mt-manual-position" key={posIndex}>
-                  <div className="mt-manual-position-head">
-                    <span>{t(posKey)}</span>
-                    <span>{selected.size}</span>
-                  </div>
-                  <div className="mt-manual-grid" role="list">
-                    {umaCells.map((u) =>
-                      horseCell(u, selected.has(u), () => toggleFormationUma(posIndex, u), `${t(posKey)} `),
-                    )}
-                  </div>
+                <div className="mt-matrix-row" key={u} role="listitem">
+                  <RunnerRow
+                    layout="matrix"
+                    umaban={u}
+                    name={runner?.name ?? null}
+                    odds={odds}
+                    mark={marks?.[u] ?? null}
+                  />
+                  {Array.from({ length: k }, (_, posIndex) => {
+                    const selected = (formationPositions[posIndex] ?? []).includes(u);
+                    const pk = posKeyFor(posIndex);
+                    return (
+                      <button
+                        key={posIndex}
+                        type="button"
+                        className={`mt-matrix-cell${selected ? " on" : ""}`}
+                        data-mt-pos={posIndex}
+                        data-mt-uma={u}
+                        onClick={() => toggleFormationUma(posIndex, u)}
+                        aria-pressed={selected}
+                        aria-label={`${t(pk)} ${u} · ${t("manual.currentOdds")} ${oddsLabel}${selected ? " (selected)" : ""}`}
+                      >
+                        {selected ? "✓" : ""}
+                      </button>
+                    );
+                  })}
                 </div>
               );
             })}
@@ -465,6 +503,29 @@ export function ManualTicketBuilder(props: ManualTicketBuilderProps) {
           </div>
         )}
       </div>
+
+      {/* Phase 3c — sticky cost bar (FORMATION mode only): points + cost +
+          if-it-hits, pinned above the bottom tab bar while picking the (tall)
+          matrix. Box mode is a compact grid with the preview already visible
+          below it, so it doesn't need the bar — keeping box-8 unchanged.
+          Placed AFTER the matrix in flow so it never overlays a row; sticky
+          (not fixed) so it reserves its space. */}
+      {ticket && isFormationMode && (
+        <div className="mt-sticky-cost" data-mt-sticky-cost>
+          <span className="mt-sticky-fig">
+            <span className="mt-sticky-label">{t("setFamily.points")}</span>
+            <strong>{ticket.lines.length}</strong>
+          </span>
+          <span className="mt-sticky-fig cost">
+            <span className="mt-sticky-label">{t("mine.cost")}</span>
+            <strong>{yen(ticket.cost)}</strong>
+          </span>
+          <span className="mt-sticky-fig">
+            <span className="mt-sticky-label">{t("mine.ifHits")}</span>
+            <strong>{yen(ticket.avgPayout)}</strong>
+          </span>
+        </div>
+      )}
 
       {/* Unit picker */}
       <div className="mt-manual-section">

@@ -43,6 +43,7 @@ function mount(): { container: HTMLElement; root: Root; commitManual: ReturnType
     tFmt: (key: string, values: Record<string, number>) => `${values.count} ${key}`,
     setView: vi.fn(),
     manualEditId: null,
+    impressions: {},
     tickets: [],
     feature: raceA,
     races: [raceA, raceB],
