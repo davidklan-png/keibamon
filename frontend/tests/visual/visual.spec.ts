@@ -13,7 +13,14 @@
 // Language:         set via `keibamon.lang` localStorage before each visit.
 // ============================================================================
 import { test, expect } from "@playwright/test";
-import { installApiMocks, FIXTURE_WEEKEND_PUBLISHED, STRUCTURED_TICKETS, LAYOUT_FIELD_18_SNAPSHOT } from "./fixtures";
+import {
+  installApiMocks,
+  FIXTURE_WEEKEND_PUBLISHED,
+  STRUCTURED_TICKETS,
+  STRUCTURED_TICKETS_LARGE,
+  LAYOUT_FIELD_18_SNAPSHOT,
+} from "./fixtures";
+import { normalizeName } from "../../src/lib/normalizeName";
 
 const LANGS = ["en", "ja"] as const;
 
@@ -1056,6 +1063,182 @@ test.describe("manual builder (current design)", () => {
       "sticky cost bar must clear the bottom tab bar (the type-scaling invariant)",
     ).toBeLessThanOrEqual(pinned!.tabTop);
   });
+});
+
+// ============================================================================
+// Full-field coverage (full-field-coverage.md) — the builder was the only
+// surface validated at production field size; everything else captured an
+// 8-runner race on a phone-first app whose real fields run 16-18. These ADD
+// 18-runner / large-selection variants (LAYOUT_FIELD_18) — the 8-runner
+// baselines are untouched. Two field sizes, both pinned.
+//
+// Surfaces judged per-runner vs per-selection by READING the component:
+//  - legacy race runner rows → per-runner. CAPTURE (headline).
+//  - legacy race bottom + tab bar → per-runner scroll. CAPTURE (the bottom-bar
+//    clearance rule had never met a full racecard).
+//  - FillGuide box grid → gridSize = max(maxUmaban, core.length); an 18-runner
+//    field renders an 18-cell grid that NO test had rendered. CAPTURE.
+//  - studio list at large selection → SetFamilyView has a FIXED row count
+//    (one per bet type + bracket); FormationView is fixed rows too, but the
+//    joined-set TEXT (set.join(" ")) scales with selection. CAPTURE to pin the
+//    long pos-set text + the modal height at a 6-horse selection.
+//  - large structured ticket body → an 8-horse box trifecta (P(8,3)=336) pins
+//    TicketLines' 8-tile set + the 336-combo pay panel. CAPTURE.
+//  - research-mode / roundup → SKIPPED. RoundupPanel renders upcoming-RACE rows
+//    (runner count is a number) in the empty state and delegates to RoundupView
+//    (generated prose) when published; no per-runner visual list (confirmed in
+//    RoundupPanel.tsx). An 18-runner baseline would differ only in a number.
+//
+// Catalogue (see docs/full-field-coverage-catalogue.md for the eyeballed
+// detail; DOM-measured, not image-AI): the race screen's runner list has no
+// scroll-padding-bottom for the fixed tab bar (scrollIntoView of the last row
+// places it under the bar; at max scroll it rests clear — a polish gap, not a
+// hard collision); a 9-char JA name ellipsis-truncates ~4px in the 104px row
+// name cell (8-char names fit); the studio modal scrolls gracefully at a
+// 6-horse selection (overflow:auto, no clip); the 18-cell grid + 8-tile box
+// render clean.
+// ============================================================================
+test.describe("full-field coverage (18-runner additions)", () => {
+  const FIELD18 = LAYOUT_FIELD_18_SNAPSHOT.races[0];
+
+  /** Build one impression-store entry keyed exactly as the app does
+   *  (`race_id|normalizeName(name)`), so a typo in a synthetic JA name can't
+   *  make a mark fail to resolve. NFKC+strip-whitespace is identity on these
+   *  katakana names, but deriving it removes the risk entirely. */
+  function mark18(umaban: number, mark: string, formedAt: number): Record<string, Record<string, unknown>> {
+    const r = FIELD18.runners.find((x) => x.umaban === umaban);
+    if (!r) throw new Error(`LAYOUT_FIELD_18 runner umaban=${umaban} not found`);
+    const key = `${FIELD18.race_id}|${normalizeName(r.name ?? "")}`;
+    return { [key]: { mark, umaban, odds_when_marked: r.win_odds ?? 0, odds_snapshot_at: null, formed_at: formedAt } };
+  }
+  const mergeImp = (...os: Record<string, Record<string, unknown>>[]): Record<string, Record<string, unknown>> =>
+    Object.assign({}, ...os);
+
+  // anchor 1 + like 3 — pins the is-anchor tint + a mark chip at 18-runner.
+  const IMPRESSIONS_RACE_18 = mergeImp(mark18(1, "anchor", 100), mark18(3, "like", 200));
+  // anchor 1 + like 3 + priceHorse 6 — the 3-mark studio pattern on the 18 field.
+  const IMPRESSIONS_STUDIO_FILL_18 = mergeImp(mark18(1, "anchor", 100), mark18(3, "like", 200), mark18(6, "priceHorse", 300));
+  // anchor 1 + 5 likes (3,6,8,10,12) — a 6-horse selection stresses the
+  // formation pos-set text ("1 3 6 8 10 12") + the modal height.
+  const IMPRESSIONS_STUDIO_LARGE = mergeImp(
+    mark18(1, "anchor", 100), mark18(3, "like", 200), mark18(6, "like", 300),
+    mark18(8, "like", 400), mark18(10, "like", 500), mark18(12, "like", 600),
+  );
+
+  /** installApiMocks (default 8-runner + social) then override /api/live with
+   *  the 18-runner field + seed impressions, all before goto. */
+  async function setup18(page: import("@playwright/test").Page, lang: "en" | "ja", impressions: Record<string, Record<string, unknown>>): Promise<void> {
+    await installApiMocks(page);
+    await page.unroute("**/api/live");
+    await page.route("**/api/live", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(LAYOUT_FIELD_18_SNAPSHOT) }),
+    );
+    await page.addInitScript(([l, seed]) => {
+      try {
+        window.localStorage.setItem("keibamon.lang", l);
+        window.localStorage.setItem("kbm.impressions.v1", JSON.stringify(seed));
+      } catch { /* ignore */ }
+      Date.now = () => Date.parse("2026-06-21T13:00:00+09:00");
+    }, [lang, impressions] as const);
+  }
+
+  async function landRace18(page: import("@playwright/test").Page, lang: "en" | "ja", impressions: Record<string, Record<string, unknown>>): Promise<void> {
+    await setup18(page, lang, impressions);
+    await page.goto("/");
+    await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(600);
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  async function openStudio18(page: import("@playwright/test").Page, lang: "en" | "ja", impressions: Record<string, Record<string, unknown>>): Promise<void> {
+    await setup18(page, lang, impressions);
+    await page.goto("/");
+    await expect(page.locator(".stepper")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(600);
+    await expect(page.getByTestId("studio-cta")).toBeVisible({ timeout: 10_000 });
+    await page.getByTestId("studio-cta").click();
+    await expect(page.locator(".kbm-modal")).toBeVisible();
+    await expect(page.locator(".setfamily-view")).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+  }
+
+  async function openDetailLarge(page: import("@playwright/test").Page, lang: "en" | "ja", cardIndex: number, badgeSelector: string): Promise<void> {
+    await installApiMocks(page, STRUCTURED_TICKETS_LARGE);
+    await page.addInitScript((l) => {
+      try { window.localStorage.setItem("keibamon.lang", l); } catch { /* ignore */ }
+      Date.now = () => Date.parse("2026-06-21T13:00:00+09:00");
+    }, lang);
+    await page.goto("/");
+    await page.getByTestId("tab-mine").click();
+    await expect(page.locator(".mt-feed")).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(600);
+    await page.evaluate(() => document.fonts.ready);
+    await page.locator(".mt-card").nth(cardIndex).click();
+    await expect(page.locator(".mt-detail")).toBeVisible();
+    await expect(page.locator(badgeSelector)).toBeVisible();
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(400);
+  }
+
+  for (const lang of LANGS) {
+    test(`legacy race runner rows 18-runner (${lang})`, async ({ page }) => {
+      await landRace18(page, lang, IMPRESSIONS_RACE_18);
+      await page.locator(".runners").scrollIntoViewIfNeeded();
+      await page.waitForTimeout(200);
+      // Durable: an 18-runner field renders 18 rows + all eight waku colours
+      // (the first capture where brackets 1-8 appear together) + the anchor tint.
+      await expect(page.locator(".runner-row")).toHaveCount(18);
+      await expect(page.locator(".runner-row.is-anchor")).toBeVisible();
+      await expect(page.locator(".bracket-stripe.bracket-8").first()).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator(".runners")).toHaveScreenshot(`legacy-race-runners-18.${lang}.png`);
+    });
+
+    test(`legacy race 18-runner bottom + tab bar (${lang})`, async ({ page }) => {
+      await landRace18(page, lang, IMPRESSIONS_RACE_18);
+      const rowCount = await page.locator(".runner-row").count();
+      // Scroll the last row into view, then capture the page (last rows + the
+      // fixed bottom tab bar). Pins the bottom-of-racecard clearance state.
+      await page.locator(".runner-row").nth(rowCount - 1).scrollIntoViewIfNeeded();
+      await page.waitForTimeout(300);
+      await expect(page.locator(".bottom-tabbar")).toBeVisible();
+      await expect(page.locator(".runner-row").nth(rowCount - 1)).toBeVisible();
+      await page.evaluate(() => document.fonts.ready);
+      await expect(page).toHaveScreenshot(`legacy-race-18-bottom.${lang}.png`);
+    });
+
+    test(`studio FillGuide box 18-cell grid (${lang})`, async ({ page }) => {
+      await openStudio18(page, lang, IMPRESSIONS_STUDIO_FILL_18);
+      await page.locator(".setfamily-row").first().click();
+      await expect(page.locator(".fillguide")).toBeVisible();
+      await expect(page.locator(".fillguide-cell.on").first()).toBeVisible();
+      await expect(page.locator(".fillguide [data-not-advice]")).toBeVisible();
+      await page.waitForTimeout(200);
+      // Durable: an 18-runner field renders an 18-cell box grid (maxUmaban=18).
+      await expect(page.locator(".fillguide-grid .fillguide-cell")).toHaveCount(18);
+      await page.evaluate(() => document.fonts.ready);
+      await expect(page.locator(".fillguide")).toHaveScreenshot(`studio-fill-box-18.${lang}.png`);
+    });
+
+    test(`studio list large selection (${lang})`, async ({ page }) => {
+      await openStudio18(page, lang, IMPRESSIONS_STUDIO_LARGE);
+      await expect(page.locator(".setfamily-view")).toBeVisible();
+      await expect(page.locator(".formation-view")).toBeVisible();
+      await expect(page.locator(".wheel-view")).toBeVisible();
+      await page.waitForTimeout(200);
+      await expect(page.locator(".kbm-modal-card")).toHaveScreenshot(`studio-list-large.${lang}.png`);
+    });
+
+    test(`ticket-detail large box trifecta (${lang})`, async ({ page }) => {
+      await openDetailLarge(page, lang, 0, ".tl-badge-box");
+      // Durable: the large box is an 8-tile set whose pay panel carries the
+      // 336-combo count (P(8,3)). The detail card's TicketLines points line is
+      // OFF by design — the count lives in the pay panel, which is in view.
+      await expect(page.locator(".tl-tile")).toHaveCount(8);
+      await expect(page.locator(".mt-detail")).toContainText("336");
+      await expect(page.locator(".mt-detail")).toHaveScreenshot(`ticket-detail-box-large.${lang}.png`);
+    });
+  }
 });
 
 // Guard against the regression that bit this branch: hiding .foot-version in
