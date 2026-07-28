@@ -1073,6 +1073,19 @@ select:focus {
   gap: 4px;
   /* The wrapper itself isn't interactive — clicks on it bubble from the
      button (opens drill) or the badge (toggles the mark strip). */
+  /* scroll-margin-bottom: when a runner row is scrolled into view (e.g. the
+     last row of a full racecard), leave room for the fixed .bottom-tabbar so
+     the row parks ABOVE it, not under it. Scoped to the TARGET (runner row),
+     not the scroll container: a global scroll-padding-bottom on html was the
+     first instinct (and would fix every list), but it insets the scrollport
+     for ALL scrollIntoView block values — measured to shift a block:center
+     target by 36px, which would move the manual-builder-formation-18-midscroll
+     baseline (a document-scrolling matrix, per the Phase 3c comment) against
+     the "race-screen captures only" acceptance. scroll-margin on the row fixes
+     exactly the surface with the finding. Same --bottom-bar-h + 15px breathing
+     + safe-area family as .app's padding / the FAB / the sticky cost bar.
+     (catalogue-fixes commit 1; surfaced by legacy-race-18-bottom.) */
+  scroll-margin-bottom: calc(var(--bottom-bar-h) + 15px + env(safe-area-inset-bottom));
 }
 
 .runner-row.has-mark .runner.runner-tappable {
