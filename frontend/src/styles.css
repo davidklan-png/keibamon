@@ -1018,7 +1018,16 @@ select:focus {
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 10px;
-  padding: 8px;
+  /* padding 8px 5px (was 8px): tighten the LEFT/RIGHT padding to give the name
+     column the ~6px a 9-character katakana name needs. JRA caps horse names at
+     9 katakana, so the truncated case (アオバコンチェルト) is the longest
+     LEGAL name — it always clipped at the old 104px .nm budget. Vertical
+     padding is unchanged so row height (and the .runners list height) is
+     unchanged; only the horizontal budget moves. Name stays 12px (no
+     disagreement with the builder matrix's 12px). Verified by DOM: the 9-char
+     name's scrollWidth no longer exceeds .nm clientWidth. (catalogue-fixes
+     commit 2.) */
+  padding: 8px 5px;
   background: var(--tint-2);
 }
 
@@ -1073,6 +1082,19 @@ select:focus {
   gap: 4px;
   /* The wrapper itself isn't interactive — clicks on it bubble from the
      button (opens drill) or the badge (toggles the mark strip). */
+  /* scroll-margin-bottom: when a runner row is scrolled into view (e.g. the
+     last row of a full racecard), leave room for the fixed .bottom-tabbar so
+     the row parks ABOVE it, not under it. Scoped to the TARGET (runner row),
+     not the scroll container: a global scroll-padding-bottom on html was the
+     first instinct (and would fix every list), but it insets the scrollport
+     for ALL scrollIntoView block values — measured to shift a block:center
+     target by 36px, which would move the manual-builder-formation-18-midscroll
+     baseline (a document-scrolling matrix, per the Phase 3c comment) against
+     the "race-screen captures only" acceptance. scroll-margin on the row fixes
+     exactly the surface with the finding. Same --bottom-bar-h + 15px breathing
+     + safe-area family as .app's padding / the FAB / the sticky cost bar.
+     (catalogue-fixes commit 1; surfaced by legacy-race-18-bottom.) */
+  scroll-margin-bottom: calc(var(--bottom-bar-h) + 15px + env(safe-area-inset-bottom));
 }
 
 .runner-row.has-mark .runner.runner-tappable {

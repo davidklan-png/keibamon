@@ -1197,12 +1197,35 @@ test.describe("full-field coverage (18-runner additions)", () => {
     test(`legacy race 18-runner bottom + tab bar (${lang})`, async ({ page }) => {
       await landRace18(page, lang, IMPRESSIONS_RACE_18);
       const rowCount = await page.locator(".runner-row").count();
-      // Scroll the last row into view, then capture the page (last rows + the
-      // fixed bottom tab bar). Pins the bottom-of-racecard clearance state.
-      await page.locator(".runner-row").nth(rowCount - 1).scrollIntoViewIfNeeded();
-      await page.waitForTimeout(300);
+      const lastRow = page.locator(".runner-row").nth(rowCount - 1);
+      // scrollIntoView({block:"end"}) parks the last row at the scrollport
+      // bottom; html scroll-padding-bottom (catalogue-fixes commit 1) insets
+      // that to ABOVE the fixed tab bar. The browser smooth-scrolls (html),
+      // so wait for scrollY to settle before measuring/capturing.
+      await lastRow.evaluate((el) => el.scrollIntoView({ block: "end" }));
+      for (let i = 0; i < 20; i++) {
+        const a = await page.evaluate(() => window.scrollY);
+        await page.waitForTimeout(60);
+        const b = await page.evaluate(() => window.scrollY);
+        if (a === b) break;
+      }
       await expect(page.locator(".bottom-tabbar")).toBeVisible();
-      await expect(page.locator(".runner-row").nth(rowCount - 1)).toBeVisible();
+      // The invariant (same shape as the Phase 3c cost-bar clearance): the last
+      // runner row's bottom must clear the fixed tab bar's top. Fails without
+      // scroll-padding-bottom — a baseline alone can't see this.
+      const clearance = await page.evaluate(() => {
+        const rows = document.querySelectorAll(".runner-row");
+        const last = rows[rows.length - 1];
+        const tab = document.querySelector(".bottom-tabbar");
+        return {
+          lastBottom: Math.round(last!.getBoundingClientRect().bottom),
+          tabTop: Math.round(tab!.getBoundingClientRect().top),
+        };
+      });
+      expect(
+        clearance.lastBottom,
+        `last runner bottom (${clearance.lastBottom}) must clear tab bar top (${clearance.tabTop})`,
+      ).toBeLessThanOrEqual(clearance.tabTop);
       await page.evaluate(() => document.fonts.ready);
       await expect(page).toHaveScreenshot(`legacy-race-18-bottom.${lang}.png`);
     });
