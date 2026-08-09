@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     container: mcr.microsoft.com/playwright:v1.61.0-jammy
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       # The image ships Node + the Chromium build for @playwright/test 1.61.0 +
       # system fonts (incl. CJK), so no setup-node / playwright-install is
@@ -85,7 +85,7 @@ jobs:
       # without re-running locally.
       - name: Upload diff artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: visual-diff
           path: |
@@ -105,7 +105,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.ref }}
           token: ${{ secrets.GITHUB_TOKEN }}
