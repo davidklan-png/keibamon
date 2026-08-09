@@ -4,9 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Keibamon 競馬モン — your JRA race-day companion</title>
-<meta name="description" content="Keibamon: your JRA race-day companion — research the card, structure honest tickets, and share the ride with friends. Weekend graded-stakes research that refreshes through post time, horse & jockey form at a glance, honest ticket structuring, and friends & sharing — in English and 日本語. Built on a research spine rigorous enough to prove the market is efficient, so it never sells you a winning system.">
+<meta name="description" content="Keibamon brings JRA race information, horse form, ticket building, and sharing with friends into one simple bilingual app.">
 <meta property="og:title" content="Keibamon 競馬モン — your JRA race-day companion">
-<meta property="og:description" content="Research the card, structure honest tickets, and share the ride with friends. Weekend graded-stakes research, horse & jockey form, honest tickets, and a friends & sharing layer — built in public on a market-tested research spine. Never a tip sheet.">
+<meta property="og:description" content="Check JRA races, review the runners, build a ticket, and share it with friends — in English and Japanese.">
 <meta property="og:type" content="website">
 <meta property="og:image" content="https://keibamon.com/keibamon.png">
 <style>
@@ -25,7 +25,7 @@
   h1{font-size:clamp(40px,9vw,76px); line-height:.98; margin:.35em 0 .1em; letter-spacing:-.02em}
   h1 .ja{color:var(--gold); font-weight:700}
   .lede{font-size:clamp(17px,2.6vw,21px); color:var(--muted); max-width:62ch; margin:.4em 0 0}
-  .lede .ja{color:var(--ink)}
+  .lede .ja{display:block; color:var(--ink); margin-top:.45em}
   .badges{display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:22px}
   .status{display:inline-flex; align-items:center; gap:.5em; padding:.4em .8em;
     border:1px solid var(--line); border-radius:999px; background:var(--panel); font:600 12px/1 ui-monospace,monospace; letter-spacing:.08em; color:var(--muted)}
@@ -41,16 +41,9 @@
   .card .k .new{color:var(--turf); margin-left:.5em}
   .card h3{margin:.6em 0 .3em; font-size:18px}
   .card p{margin:0; color:var(--muted); font-size:14.5px}
+  .card .ja-copy{margin-top:12px; padding-top:12px; border-top:1px solid var(--line); color:var(--ink)}
   .card .privacy{margin-top:10px; padding:.5em .7em; border-radius:10px; font:600 12px/1.4 ui-monospace,monospace;
     color:var(--turf); background:rgba(57,192,122,.08); border:1px solid rgba(57,192,122,.28)}
-  .card .stat{font:700 22px/1 ui-monospace,monospace; color:var(--ink); margin:.5em 0 .15em}
-  .score{display:flex; flex-direction:column; gap:10px}
-  .scorerow{display:flex; align-items:center; justify-content:space-between; gap:14px;
-    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 16px}
-  .scorerow .name{font-weight:600; font-size:15px}
-  .scorerow .name span{display:block; color:var(--muted); font-size:13px; font-weight:400; margin-top:2px}
-  .tag{font:600 10.5px/1 ui-monospace,monospace; letter-spacing:.1em; padding:.5em .7em; border-radius:999px; white-space:nowrap; text-transform:uppercase}
-  .tag--null{color:var(--gold); background:rgba(224,179,65,.1); border:1px solid rgba(224,179,65,.32)}
   .links{display:flex; flex-wrap:wrap; gap:12px; margin-top:22px}
   .btn{display:inline-flex; align-items:center; gap:.55em; text-decoration:none; font-weight:600;
     padding:.7em 1.1em; border-radius:12px; border:1px solid var(--line); color:var(--ink); background:var(--panel); transition:transform .15s,border-color .15s}
@@ -72,9 +65,9 @@
          ============================================================ -->
     <p class="eyebrow">build in public · 個人開発</p>
     <h1>Keibamon <span class="ja">競馬モン</span></h1>
-    <p class="lede">Your JRA race-day companion — research the card, structure honest tickets, and share the ride with friends. <span class="ja">競馬当日のパートナー。カードを研究し、正直な馬券を組み立て、友だちとシェアできます。</span></p>
+    <p class="lede">Everything you need for a JRA race day, in one place. Check the runners, choose your horses, build a ticket, and share it with friends. <span class="ja" lang="ja">JRAのレース当日に使う機能を、ひとつにまとめました。出走馬を確認し、気になる馬を選び、馬券を作って友だちと共有できます。</span></p>
     <div class="badges">
-      <span class="status"><span class="dot"></span>RESEARCH PREVIEW · LIVE ON RACE DAY</span>
+      <span class="status"><span class="dot"></span>PREVIEW · UPDATED ON RACE DAY</span>
       <a class="status ver" href="/updates.html">v<span data-version-stamp>0.3.0</span> · what's new →</a>
     </div>
 
@@ -90,72 +83,61 @@
     <div class="grid">
       <div class="card">
         <div class="k">WEEKEND ROUNDUP</div>
-        <h3>Graded-stakes research, live</h3>
-        <p>Every G1–G3 on the card — race shape, contenders, pace, gate &amp; going — and it refreshes itself every few minutes through post time, with an "as of" stamp so you always know how current the odds are.</p>
+        <h3>Weekend graded races</h3>
+        <p>See the weekend's G1–G3 races, including the main runners, likely pace, draw, track condition, and current odds. The page shows when the information was last updated.</p>
+        <p class="ja-copy" lang="ja">週末のG1〜G3をまとめて確認できます。主な出走馬、展開、枠順、馬場状態、オッズを表示し、最終更新時刻もわかります。</p>
       </div>
       <div class="card">
         <div class="k">RUNNERS &amp; YOUR READ</div>
-        <h3>Know the horses</h3>
-        <p>Tap any horse for career form, recent finishes with surface &amp; distance, and running style — then mark your own read (anchor, like, price, avoid) and watch it against how the market moves.</p>
+        <h3>Review the runners</h3>
+        <p>Tap a horse to see recent results, distance, surface, and running style. Add your own mark so you can compare the horses later.</p>
+        <p class="ja-copy" lang="ja">馬をタップすると、最近の成績、距離、芝・ダート、脚質を確認できます。気になる馬に印を付けて、あとで比べられます。</p>
       </div>
       <div class="card">
-        <div class="k">HONEST TICKETS</div>
-        <h3>Structure, then transcribe</h3>
-        <p>Turn your reads into box / wheel / formation tickets across 馬連・ワイド・3連複・馬単・3連単, drawn like real track tickets. A mark-card fill guide copies straight onto the JRA card, and the cost &amp; fair-payout math is honest — WIDE pays on multiple lines, and we count every one.</p>
+        <div class="k">BUILD TICKETS</div>
+        <h3>Make the ticket you want</h3>
+        <p>Build box, wheel, or formation tickets for 馬連, ワイド, 3連複, 馬単, and 3連単. See the number of combinations and total cost, then copy the selections to a JRA mark card.</p>
+        <p class="ja-copy" lang="ja">馬連、ワイド、3連複、馬単、3連単のボックス・流し・フォーメーションを作れます。買い目の点数と合計金額を確認し、JRAのマークカードに書き写せます。</p>
       </div>
       <div class="card">
         <div class="k">FRIENDS &amp; SHARING<span class="new">NEW</span></div>
-        <h3>Share the race day</h3>
-        <p>Add friends by handle or invite link, share a ticket with everyone or just a few friends, and comment on each other's tickets. When a friend's ticket wins, it surfaces on its own with a congratulations, and a bell keeps track of what's new.</p>
+        <h3>Share with friends</h3>
+        <p>Add friends by username or invite link. Share a ticket with all your friends or only the people you choose, and comment on each other's tickets.</p>
+        <p class="ja-copy" lang="ja">ユーザー名や招待リンクで友だちを追加できます。馬券は全員にも、選んだ友だちだけにも共有でき、おたがいの馬券にコメントできます。</p>
         <div class="privacy">Nothing is visible to friends until you share it. · シェアするまで友だちには見えません。</div>
       </div>
       <div class="card">
         <div class="k">GLOSSARY</div>
-        <h3>The card, decoded</h3>
-        <p>A bilingual EN / 日本語 reference for the terms, bet types and track language — so the betting card stops being a wall of kanji and starts making sense.</p>
+        <h3>Racing terms explained</h3>
+        <p>Look up bet types and common racing terms in English and Japanese.</p>
+        <p class="ja-copy" lang="ja">馬券の種類や競馬でよく使う言葉を、日本語と英語で確認できます。</p>
       </div>
       <div class="card">
         <div class="k">YOUR TICKETS</div>
-        <h3>Saved, settled, tracked</h3>
-        <p>Your tickets live in one place — saved ahead of the race, edited or deleted until the off, then settled at the official payout with your wins tracked across the weekend.</p>
+        <h3>Keep tickets in one place</h3>
+        <p>Save tickets before the race, edit or delete them before post time, and check the result and official payout afterward.</p>
+        <p class="ja-copy" lang="ja">レース前に馬券を保存し、締切までは編集や削除ができます。レース後は結果と公式払戻金を確認できます。</p>
       </div>
     </div>
 
     <!-- ============================================================
-         3. THE TECHNOLOGY — second act. Plain language first,
-         detail second. Everything technical consolidates here.
+         3. WHAT TO EXPECT — clear limits and data freshness.
          ============================================================ -->
-    <h2>// The technology <span class="ja">· なぜ信頼できるか</span></h2>
-    <p class="lede-sec">The companion is built on a research lab that held itself to one bar — beat the market on races it had never seen. That rigor is why the live numbers hold up, and it's also why you'll never see a tip in this app.</p>
+    <h2>// What to expect <span class="ja">· このアプリについて</span></h2>
+    <p class="lede-sec">Keibamon helps you check race information and organize your own choices. It does not predict winners.</p>
     <div class="grid">
       <div class="card">
-        <div class="k">THE DATA SPINE</div>
-        <h3>One lake, curated to the edge</h3>
-        <p>A medallion data lake (bronze→silver→gold) of JRA records and intraday odds lives on one machine and is the source of truth; only curated results push to the Cloudflare edge. Official JV-Link data feeds it, a backup capture guards it, and if the edge ever goes stale, a staleness guard freezes the numbers honestly instead of faking fresh.</p>
+        <div class="k">CURRENT INFORMATION</div>
+        <h3>Know when the data was updated</h3>
+        <p>Race information comes from JRA data. Keibamon shows the latest update time. If the data is old, the app says so instead of presenting it as current.</p>
+        <p class="ja-copy" lang="ja">JRAのデータをもとにレース情報を表示し、最終更新時刻もお知らせします。情報が古い場合は、そのことが画面に表示されます。</p>
       </div>
       <div class="card">
-        <div class="k">POINT-IN-TIME HONESTY</div>
-        <div class="stat">PIT</div>
-        <h3>What you knew, when you knew it</h3>
-        <p>A decision at time <em>t</em> sees only what was knowable at <em>t</em> — leakage-guarded, walk-forward, and settled at the official payout. The same rule underwrites the live numbers you see on race day.</p>
+        <div class="k">NO WINNER PREDICTIONS</div>
+        <h3>Your choices stay yours</h3>
+        <p>Keibamon does not name a winner or promise a profit. Tests on past races found no method that reliably beat the public odds, so the app focuses on information and ticket building.</p>
+        <p class="ja-copy" lang="ja">Keibamonは勝ち馬を予想したり、利益を約束したりしません。過去のレースを検証しても、公開オッズを安定して上回る方法は確認できませんでした。そのため、情報の確認と馬券作りに集中しています。</p>
       </div>
-      <div class="card">
-        <div class="k">WHY THERE ARE NO TIPS</div>
-        <div class="stat">6 / 6</div>
-        <h3>The market is efficient</h3>
-        <p>Before any of this was a companion, it was a research lab. Six promising edges were each held to one bar — beat the market's fair odds on races it had never seen, after the track's takeout. All six failed it. The JRA pari-mutuel prices public information efficiently, so this app surfaces data and structures <em>your</em> read. It never names a winner. Never a tip sheet.</p>
-      </div>
-    </div>
-
-    <h2>// The market-test scoreboard <span class="ja">· 検証結果</span></h2>
-    <p class="lede-sec">The evidence behind "no tips" — each edge tested, each honestly priced in.</p>
-    <div class="score">
-      <div class="scorerow"><div class="name">Data-mining (DM / TM)<span>JRA-VAN's own time &amp; score models</span></div><span class="tag tag--null">priced in</span></div>
-      <div class="scorerow"><div class="name">Going / track-condition handling<span>per-horse wet-vs-firm aptitude</span></div><span class="tag tag--null">priced in</span></div>
-      <div class="scorerow"><div class="name">Training times (坂路 · woodchip)<span>final-furlong gallop splits</span></div><span class="tag tag--null">priced in</span></div>
-      <div class="scorerow"><div class="name">Odds curve / closing-line<span>announcement→post movement</span></div><span class="tag tag--null">priced in</span></div>
-      <div class="scorerow"><div class="name">Exotic pools (Harville / Henery)<span>cross-pool win-implied projection</span></div><span class="tag tag--null">priced in</span></div>
-      <div class="scorerow"><div class="name">Multivariate model (Benter two-stage)<span>real signal alone — blend weight a=0 once the market is in</span></div><span class="tag tag--null">priced in</span></div>
     </div>
 
     <!-- ============================================================
@@ -165,18 +147,21 @@
     <div class="grid">
       <div class="card">
         <div class="k">LIVE NOW</div>
-        <h3>Race-day ready, with friends</h3>
-        <p>The whole companion is live for JRA weekends — Roundup, form, honest tickets, glossary, and friends &amp; sharing — in English and 日本語, on your phone at the track.</p>
+        <h3>Ready for JRA weekends</h3>
+        <p>Race information, horse form, ticket building, the glossary, and sharing with friends are available in English and Japanese.</p>
+        <p class="ja-copy" lang="ja">レース情報、馬の成績、馬券作り、用語集、友だちとの共有を、日本語と英語で利用できます。</p>
       </div>
       <div class="card">
         <div class="k">NEXT</div>
-        <h3>Closing the rough edges</h3>
-        <p>Phone push notifications, invite-by-QR-code, and sharing straight from the research view — the known rough edges we want smooth before calling this 1.0.</p>
+        <h3>Making sharing easier</h3>
+        <p>Next: phone notifications, QR-code invitations, and sharing directly from the race research screen.</p>
+        <p class="ja-copy" lang="ja">次は、スマートフォンへの通知、QRコードでの招待、レース情報画面からの共有に取り組みます。</p>
       </div>
       <div class="card">
         <div class="k">TOWARD 1.0</div>
-        <h3>One untouched weekend</h3>
-        <p>1.0 isn't a date — it's a trust mark: one full JRA weekend where research → ticket → share → result → win runs for real users with no intervention. We earn it, then keep going.</p>
+        <h3>What 1.0 means</h3>
+        <p>Keibamon will reach 1.0 after the full flow—from checking a race to seeing the result—runs through a complete JRA weekend without manual fixes.</p>
+        <p class="ja-copy" lang="ja">レースの確認から結果表示まで、すべての機能がJRA開催の週末を通して手作業の修正なしで動いたら、1.0とします。</p>
       </div>
     </div>
 
@@ -195,11 +180,11 @@
       <a class="btn" href="https://kinokoholic.com" target="_blank" rel="noreferrer">き kinokoholic.com — portfolio</a>
     </div>
 
-    <p class="note">Recreational research only. Not betting advice, not a winning method, not a profit guarantee. Pool takeout applies to every ticket. Keibamon is one of the build-in-public projects under <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>.</p>
+    <p class="note">Keibamon is for recreation and race research. It does not provide betting advice or guarantee winnings. Set a budget and bet responsibly. <span lang="ja">競馬を楽しみ、情報を整理するためのサービスです。的中や利益を保証するものではありません。無理のない予算でお楽しみください。</span> Keibamon is a build-in-public project from <a href="https://kinokoholic.com" target="_blank" rel="noreferrer">kinokoholic.com</a>.</p>
 
     <footer>
       <span>© 2026 David Klan · built in public</span>
-      <span>JRA · 競馬コンパニオン · honest by design</span>
+      <span>JRA race-day app · JRA開催日に使うアプリ</span>
     </footer>
   </main>
 </body>
