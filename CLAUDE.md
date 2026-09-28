@@ -2,8 +2,8 @@
 
 Keibamon is a JRA horse-racing research + betting-research platform: a medallion
 data lake (bronze→silver→gold→marts) with strict point-in-time correctness, fed
-by JV-Link (official) and a netkeiba scrape (backup), surfaced to a phone
-dashboard via Cloudflare D1.
+by a netkeiba scrape (sole feed — JV-Link retired 2026-07-13 when the DataLab
+subscription lapsed), surfaced to a phone dashboard via Cloudflare D1.
 
 ## FIRST: know which device you are on
 
@@ -58,6 +58,13 @@ work — don't guess.
 
 ## Working rules
 
+- **JV-Link ingest is retired** (subscription expired 2026-07-13, not renewed).
+  netkeiba is the sole feed: bronze+silver refresh weekly via launchd
+  `com.keibamon.lake-weekly` (Mondays 09:30 JST, trailing 7 days,
+  `tools/weekly_lake_update.sh`, log `~/.keibamon/lake_weekly.log`). Historical
+  `jravan_*` tables are read-only legacy; netkeiba-sourced rows carry
+  `source_name='netkeiba'`. Realtime odds curves are netkeiba-unobtainable —
+  no source since retirement.
 - Point-in-time correctness is non-negotiable: a decision at time `t` uses only
   data with `available_at <= t`. Honor `adapters/jravan.DATA_TRAPS` (esp.
   `horse_id='0000000000'` is non-unique — join on `(race_id, horse_number)`).

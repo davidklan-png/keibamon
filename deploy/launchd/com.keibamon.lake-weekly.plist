@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Keibamon weekly lake refresh. JV-Link is retired; netkeiba is the sole feed.
+  Fires Mondays 09:30 JST and scrapes the trailing 7 days into bronze+silver
+  (idempotent; non-race days no-op). Run after the Sunday settle, before the
+  weekly `make lake-backup` (which stays manual — it needs the USB mounted).
+
+  Install:
+    cp deploy/launchd/com.keibamon.lake-weekly.plist ~/Library/LaunchAgents/
+    chmod +x tools/weekly_lake_update.sh
+    launchctl load -w ~/Library/LaunchAgents/com.keibamon.lake-weekly.plist
+  Remove:
+    launchctl unload -w ~/Library/LaunchAgents/com.keibamon.lake-weekly.plist
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.keibamon.lake-weekly</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/dklan/projects/personal/Keibamon/tools/weekly_lake_update.sh</string>
+  </array>
+
+  <key>StartCalendarInterval</key>
+  <dict>
+    <key>Weekday</key>
+    <integer>1</integer>
+    <key>Hour</key>
+    <integer>9</integer>
+    <key>Minute</key>
+    <integer>30</integer>
+  </dict>
+
+  <key>RunAtLoad</key>
+  <false/>
+
+  <key>ProcessType</key>
+  <string>Background</string>
+
+  <key>StandardOutPath</key>
+  <string>/Users/dklan/.keibamon/lake_weekly.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/dklan/.keibamon/lake_weekly.log</string>
+</dict>
+</plist>
